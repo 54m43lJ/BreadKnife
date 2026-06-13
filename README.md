@@ -7,10 +7,14 @@ A fully customizable desktop shell built with Rust, GTK4, and Astal — no compr
 ### Arch Linux
 
 ```bash
-sudo pacman -S rust libastal
+sudo pacman -S rustup
 ```
 
-Other distributions: build and install [Astal](https://github.com/aylur/astal) from source.
+Install `libastal-meta` from **AUR**
+
+### Other distributions
+
+Build and install [Astal](https://github.com/aylur/astal) from source.
 
 ## Credits
 
