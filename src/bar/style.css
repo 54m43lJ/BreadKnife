@@ -58,3 +58,13 @@ window {
     font-size: var(--font-size);
     padding: var(--widget-padding);
 }
+
+.tray-icon {
+    padding: 2px 4px;
+}
+
+.clock-label {
+    color: var(--fg-primary);
+    font-size: var(--font-size);
+    padding: var(--widget-padding);
+}

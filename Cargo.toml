@@ -3,8 +3,12 @@ name = "breadknife"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "bread"
+path = "src/main.rs"
+
 [dependencies]
-astal4 = "0.1.0"
+astal-tray = "0.1.0"
 clap = { version = "4", features = ["derive"] }
 gtk = { package = "gtk4", version = "0.10", features = ["v4_20"] }
 gtk4-layer-shell = "0.7"
