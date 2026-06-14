@@ -52,3 +52,9 @@ window {
     color: var(--accent-subtle);
     background-color: var(--accent);
 }
+
+.title-label {
+    color: var(--fg-primary);
+    font-size: var(--font-size);
+    padding: var(--widget-padding);
+}

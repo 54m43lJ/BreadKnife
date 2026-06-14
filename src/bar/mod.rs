@@ -1,3 +1,4 @@
+mod title;
 mod workspace;
 
 use std::cell::RefCell;
@@ -14,13 +15,15 @@ use crate::hyprland::EventBus;
 const BAR_HEIGHT: i32 = 30;
 
 pub struct BarApp {
-    instances: Rc<RefCell<HashMap<String, workspace::WorkspaceWidget>>>,
+    workspaces: Rc<RefCell<HashMap<String, workspace::WorkspaceWidget>>>,
+    titles: Rc<RefCell<HashMap<String, title::TitleWidget>>>,
 }
 
 impl BarApp {
     pub fn new() -> Self {
         BarApp {
-            instances: Rc::new(RefCell::new(HashMap::new())),
+            workspaces: Rc::new(RefCell::new(HashMap::new())),
+            titles: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 }
@@ -72,23 +75,31 @@ impl AppModule for BarApp {
 
         // ── workspace widget ─────────────────────────────────────
         let ws = workspace::WorkspaceWidget::new(monitor, event_bus);
-        self.instances.borrow_mut().insert(connector.clone(), ws);
+        let tw = title::TitleWidget::new(event_bus);
+
+        self.workspaces.borrow_mut().insert(connector.clone(), ws);
+        self.titles.borrow_mut().insert(connector.clone(), tw);
 
         // clean up when window destroyed
         {
-            let instances = self.instances.clone();
+            let workspaces = self.workspaces.clone();
+            let titles = self.titles.clone();
             let conn = connector.clone();
             window.connect_destroy(move |_| {
-                instances.borrow_mut().remove(&conn);
+                workspaces.borrow_mut().remove(&conn);
+                titles.borrow_mut().remove(&conn);
             });
         }
 
-        // reference ws from map
-        let instances = self.instances.borrow();
-        let ws = &instances[&connector];
+        // reference from maps
+        let workspaces = self.workspaces.borrow();
+        let titles = self.titles.borrow();
+        let ws = &workspaces[&connector];
+        let tw = &titles[&connector];
 
         let layout = gtk::CenterBox::new();
-        layout.set_center_widget(Some(&ws.container));
+        layout.set_start_widget(Some(&ws.container));
+        layout.set_center_widget(Some(&tw.container));
         window.set_child(Some(&layout));
 
         // ── geometry tracking ────────────────────────────────────

@@ -67,6 +67,12 @@ pub fn get_active_workspace() -> Option<ActiveWorkspace> {
     serde_json::from_str(&resp).ok()
 }
 
+pub fn get_active_window_title() -> Option<String> {
+    let resp = hyprctl(&["-j", "activewindow"]);
+    let json: serde_json::Value = serde_json::from_str(&resp).ok()?;
+    json.get("title")?.as_str().map(|s| s.to_string())
+}
+
 pub fn dispatch_workspace(name: &str) {
     let cmd = format!("hl.dsp.focus({{ workspace = \"{}\" }})", name);
     hyprctl(&["dispatch", &cmd]);
