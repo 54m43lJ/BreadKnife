@@ -3,6 +3,10 @@ name = "breadknife"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "bread"
+path = "src/main.rs"
+
 [dependencies]
 astal-tray = "0.1.0"
 clap = { version = "4", features = ["derive"] }
