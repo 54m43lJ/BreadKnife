@@ -1,38 +1,69 @@
+mod app;
+mod bar;
+mod daemon;
+
+use std::io::Write;
+use std::os::unix::net::UnixStream;
+
+use clap::Parser;
 use gtk::prelude::*;
-use gtk::{gdk, Application, ApplicationWindow, CssProvider};
+
+use daemon::Daemon;
 
 const APP_ID: &str = "com.breadknife.shell";
 
+#[derive(Parser)]
+struct Args {
+    /// Unix socket path for runtime control
+    #[arg(short, long, default_value = "/tmp/breadknife.sock")]
+    socket: String,
+
+    /// Apps to load at startup (repeatable); omit for defaults
+    #[arg(short, long)]
+    app: Vec<String>,
+
+    /// Command to send to a running daemon (e.g. "start bar", "list", "exit")
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    cmd: Vec<String>,
+}
+
 fn main() {
-    let app = Application::builder().application_id(APP_ID).build();
+    let args = Args::parse();
 
-    app.connect_activate(|app| {
-        let display = gdk::Display::default().unwrap();
-        let monitor = display.monitors().item(0).unwrap().downcast::<gdk::Monitor>().unwrap();
-        let geom = monitor.geometry();
-
-        let window = ApplicationWindow::builder()
-            .application(app)
-            .default_width(geom.width())
-            .default_height(30)
-            .decorated(false)
-            .resizable(false)
-            .build();
-
-        let css = CssProvider::new();
-        css.load_from_string("window { background-color: rgba(0, 0, 0, 0.85); }");
-        gtk::style_context_add_provider_for_display(
-            &display,
-            &css,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-
-        window.connect_destroy(|_| {
-            std::process::exit(0);
+    // ── client mode: forward command to daemon ───────────────────
+    if !args.cmd.is_empty() {
+        let msg = args.cmd.join(" ");
+        let mut stream = UnixStream::connect(&args.socket).unwrap_or_else(|e| {
+            eprintln!("[breadknife] cannot connect to daemon at {}: {}", args.socket, e);
+            std::process::exit(1);
         });
+        stream.write_all(msg.as_bytes()).unwrap();
+        stream.write_all(b"\n").unwrap();
+        eprintln!("[breadknife] sent: {}", msg);
+        return;
+    }
 
-        window.present();
+    // ── daemon mode ──────────────────────────────────────────────
+    let app_ids: Vec<String> = if args.app.is_empty() {
+        vec!["bar".into()]
+    } else {
+        args.app
+    };
+    let socket_path = args.socket;
+
+    let app = gtk::Application::builder()
+        .application_id(APP_ID)
+        .flags(gtk::gio::ApplicationFlags::empty())
+        .build();
+
+    app.connect_activate(move |app| {
+        let hold = app.hold();
+        let daemon = Daemon::new(app, app::registry(), &socket_path, hold);
+        for id in &app_ids {
+            daemon.load_app(id);
+        }
+        eprintln!("[breadknife] daemon ready, loaded: {:?}", app_ids);
     });
 
-    app.run();
+    app.run_with_args(&[] as &[&str]);
 }
