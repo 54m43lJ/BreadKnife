@@ -1,145 +1,69 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+mod app;
+mod bar;
+mod daemon;
 
-use gtk::glib::signal::SignalHandlerId;
+use std::io::Write;
+use std::os::unix::net::UnixStream;
+
+use clap::Parser;
 use gtk::prelude::*;
-use gtk::{gdk, Application, ApplicationWindow, CssProvider};
-use gtk4_layer_shell::{Edge, Layer, LayerShell};
+
+use daemon::Daemon;
 
 const APP_ID: &str = "com.breadknife.shell";
-const BAR_HEIGHT: i32 = 30;
 
-struct Bar {
-    window: ApplicationWindow,
-    _geometry_handler: SignalHandlerId,
-}
+#[derive(Parser)]
+struct Args {
+    /// Unix socket path for runtime control
+    #[arg(short, long, default_value = "/tmp/breadknife.sock")]
+    socket: String,
 
-fn create_bar(app: &Application, monitor: &gdk::Monitor) -> Bar {
-    let geom = monitor.geometry();
+    /// Apps to load at startup (repeatable); omit for defaults
+    #[arg(short, long)]
+    app: Vec<String>,
 
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .default_width(geom.width())
-        .default_height(BAR_HEIGHT)
-        .decorated(false)
-        .resizable(false)
-        .build();
-
-    window.init_layer_shell();
-    window.set_layer(Layer::Top);
-    window.set_anchor(Edge::Left, true);
-    window.set_anchor(Edge::Right, true);
-    window.set_anchor(Edge::Top, true);
-    window.set_monitor(Some(monitor));
-    window.auto_exclusive_zone_enable();
-
-    eprintln!(
-        "[breadknife] + bar for monitor: {:?}  {}x{}",
-        monitor.connector(),
-        geom.width(),
-        geom.height()
-    );
-
-    let window_clone = window.clone();
-    let geometry_handler = monitor.connect_geometry_notify(move |m| {
-        let g = m.geometry();
-        window_clone.set_default_size(g.width(), BAR_HEIGHT);
-        eprintln!(
-            "[breadknife] geometry changed for {:?}: {}x{}",
-            m.connector(),
-            g.width(),
-            g.height()
-        );
-    });
-
-    Bar {
-        window,
-        _geometry_handler: geometry_handler,
-    }
+    /// Command to send to a running daemon (e.g. "start bar", "list", "exit")
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    cmd: Vec<String>,
 }
 
 fn main() {
-    let app = Application::builder().application_id(APP_ID).build();
+    let args = Args::parse();
 
-    app.connect_activate(|app| {
-        let display = gdk::Display::default().unwrap();
-
-        let css = CssProvider::new();
-        css.load_from_string("window { background-color: black; }");
-        gtk::style_context_add_provider_for_display(
-            &display,
-            &css,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-
-        let bars: Rc<RefCell<HashMap<gdk::Monitor, Bar>>> =
-            Rc::new(RefCell::new(HashMap::new()));
-
-        let monitors = display.monitors();
-
-        // initial population
-        for i in 0..monitors.n_items() {
-            let monitor = monitors
-                .item(i)
-                .unwrap()
-                .downcast::<gdk::Monitor>()
-                .unwrap();
-            let bar = create_bar(app, &monitor);
-            bar.window.present();
-            bars.borrow_mut().insert(monitor, bar);
-        }
-
-        eprintln!(
-            "[breadknife] startup: {} monitors, {} bars",
-            monitors.n_items(),
-            bars.borrow().len()
-        );
-
-        // hotplug
-        let bars_hp = bars.clone();
-        let app_hp = app.clone();
-        monitors.connect_items_changed(move |list, _position, _removed, _added| {
-            let mut bars = bars_hp.borrow_mut();
-
-            let current: Vec<gdk::Monitor> = (0..list.n_items())
-                .filter_map(|i| list.item(i).and_then(|o| o.downcast::<gdk::Monitor>().ok()))
-                .collect();
-
-            // remove bars for monitors that disappeared
-            let mut removed = Vec::new();
-            for (monitor, _bar) in bars.iter() {
-                if !current.contains(monitor) {
-                    removed.push(monitor.clone());
-                }
-            }
-            for monitor in &removed {
-                if let Some(bar) = bars.remove(monitor) {
-                    eprintln!(
-                        "[breadknife] - bar for monitor: {:?}",
-                        monitor.connector()
-                    );
-                    monitor.disconnect(bar._geometry_handler);
-                    bar.window.close();
-                }
-            }
-
-            // add bars for new monitors
-            for monitor in &current {
-                if !bars.contains_key(monitor) {
-                    let bar = create_bar(&app_hp, monitor);
-                    bar.window.present();
-                    bars.insert(monitor.clone(), bar);
-                }
-            }
-
-            eprintln!(
-                "[breadknife] monitors: {} total, {} bars",
-                current.len(),
-                bars.len()
-            );
+    // ── client mode: forward command to daemon ───────────────────
+    if !args.cmd.is_empty() {
+        let msg = args.cmd.join(" ");
+        let mut stream = UnixStream::connect(&args.socket).unwrap_or_else(|e| {
+            eprintln!("[breadknife] cannot connect to daemon at {}: {}", args.socket, e);
+            std::process::exit(1);
         });
+        stream.write_all(msg.as_bytes()).unwrap();
+        stream.write_all(b"\n").unwrap();
+        eprintln!("[breadknife] sent: {}", msg);
+        return;
+    }
+
+    // ── daemon mode ──────────────────────────────────────────────
+    let app_ids: Vec<String> = if args.app.is_empty() {
+        vec!["bar".into()]
+    } else {
+        args.app
+    };
+    let socket_path = args.socket;
+
+    let app = gtk::Application::builder()
+        .application_id(APP_ID)
+        .flags(gtk::gio::ApplicationFlags::empty())
+        .build();
+
+    app.connect_activate(move |app| {
+        let hold = app.hold();
+        let daemon = Daemon::new(app, app::registry(), &socket_path, hold);
+        for id in &app_ids {
+            daemon.load_app(id);
+        }
+        eprintln!("[breadknife] daemon ready, loaded: {:?}", app_ids);
     });
 
-    app.run();
+    app.run_with_args(&[] as &[&str]);
 }
