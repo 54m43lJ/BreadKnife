@@ -1,3 +1,4 @@
+mod control_center;
 mod title;
 mod workspace;
 
@@ -17,6 +18,7 @@ const BAR_HEIGHT: i32 = 30;
 pub struct BarApp {
     workspaces: Rc<RefCell<HashMap<String, workspace::WorkspaceWidget>>>,
     titles: Rc<RefCell<HashMap<String, title::TitleWidget>>>,
+    control_centers: Rc<RefCell<HashMap<String, control_center::ControlCenter>>>,
 }
 
 impl BarApp {
@@ -24,6 +26,7 @@ impl BarApp {
         BarApp {
             workspaces: Rc::new(RefCell::new(HashMap::new())),
             titles: Rc::new(RefCell::new(HashMap::new())),
+            control_centers: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 }
@@ -73,33 +76,40 @@ impl AppModule for BarApp {
             geom.height()
         );
 
-        // ── workspace widget ─────────────────────────────────────
+        // ── widgets ─────────────────────────────────────────────
         let ws = workspace::WorkspaceWidget::new(monitor, event_bus);
         let tw = title::TitleWidget::new(event_bus);
+        let cc = control_center::ControlCenter::new();
 
         self.workspaces.borrow_mut().insert(connector.clone(), ws);
         self.titles.borrow_mut().insert(connector.clone(), tw);
+        self.control_centers.borrow_mut().insert(connector.clone(), cc);
 
         // clean up when window destroyed
         {
             let workspaces = self.workspaces.clone();
             let titles = self.titles.clone();
+            let control_centers = self.control_centers.clone();
             let conn = connector.clone();
             window.connect_destroy(move |_| {
                 workspaces.borrow_mut().remove(&conn);
                 titles.borrow_mut().remove(&conn);
+                control_centers.borrow_mut().remove(&conn);
             });
         }
 
         // reference from maps
         let workspaces = self.workspaces.borrow();
         let titles = self.titles.borrow();
+        let control_centers = self.control_centers.borrow();
         let ws = &workspaces[&connector];
         let tw = &titles[&connector];
+        let cc = &control_centers[&connector];
 
         let layout = gtk::CenterBox::new();
         layout.set_start_widget(Some(&ws.container));
         layout.set_center_widget(Some(&tw.container));
+        layout.set_end_widget(Some(&cc.container));
         window.set_child(Some(&layout));
 
         // ── geometry tracking ────────────────────────────────────
