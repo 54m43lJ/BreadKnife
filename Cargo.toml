@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-gtk = { package = "gtk4", version = "0.11.3", features = ["v4_22"] }
-gtk4-layer-shell = "0.8.0"
+astal4 = "0.1.0"
+gtk = { package = "gtk4", version = "0.10", features = ["v4_20"] }
+gtk4-layer-shell = "0.7"
