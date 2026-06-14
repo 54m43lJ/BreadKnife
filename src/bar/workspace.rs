@@ -35,6 +35,19 @@ impl WorkspaceWidget {
             }
         }
 
+        // scroll on container
+        {
+            let scroll = gtk::EventControllerScroll::new(
+                gtk::EventControllerScrollFlags::VERTICAL,
+            );
+            scroll.connect_scroll(move |_ctrl, _dx, dy| {
+                let dir = if dy > 0.0 { "m+1" } else { "m-1" };
+                hyprland::dispatch_workspace(dir);
+                gtk::glib::Propagation::Proceed
+            });
+            container.add_controller(scroll);
+        }
+
         let mut subs = Vec::new();
 
         // workspacev2: ID,NAME
@@ -120,19 +133,6 @@ fn build_labels(
             });
             label.add_controller(click);
 
-            // scroll
-            {
-                let label_weak = label.clone();
-                let scroll = gtk::EventControllerScroll::new(
-                    gtk::EventControllerScrollFlags::VERTICAL,
-                );
-                scroll.connect_scroll(move |_ctrl, _dx, dy| {
-                    cycle_workspace(&label_weak, dy);
-                    gtk::glib::Propagation::Proceed
-                });
-                label.add_controller(scroll);
-            }
-
             (r.workspace_string, label)
         })
         .collect();
@@ -182,39 +182,3 @@ fn update_active(
     }
 }
 
-fn cycle_workspace(label: &gtk::Label, dy: f64) {
-    // walk up to container
-    let container = match label
-        .parent()
-        .and_then(|p| p.downcast::<gtk::Box>().ok())
-    {
-        Some(b) => b,
-        None => return,
-    };
-
-    // collect siblings in display order
-    let mut siblings: Vec<gtk::Label> = Vec::new();
-    let mut child = container.first_child();
-    while let Some(c) = child {
-        child = c.next_sibling();
-        if let Ok(l) = c.downcast::<gtk::Label>() {
-            siblings.push(l);
-        }
-    }
-
-    let n = siblings.len();
-    if n == 0 {
-        return;
-    }
-
-    let cur = siblings.iter().position(|l| l == label).unwrap_or(0);
-    let new = if dy > 0.0 {
-        (cur + 1) % n
-    } else {
-        (cur + n - 1) % n
-    };
-
-    let target = siblings[new].text();
-    eprintln!("[workspace] scroll -> {}", target);
-    hyprland::dispatch_workspace(&target);
-}

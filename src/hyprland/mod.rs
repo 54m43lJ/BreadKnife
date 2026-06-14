@@ -83,7 +83,7 @@ struct EventBusInner {
 
 impl EventBusInner {
     fn dispatch(&self, event: &str, data: &str) {
-        eprintln!("[hyprland] event '{}' data='{}'", event, data);
+        // eprintln!("[hyprland] event '{}' data='{}'", event, data);
         if let Some(subs) = self.subscribers.borrow().get(event) {
             for (_id, cb) in subs {
                 cb(data);
