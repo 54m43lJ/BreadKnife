@@ -1,12 +1,15 @@
 mod app;
 mod bar;
 mod daemon;
+mod hyprland;
 
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 
 use clap::Parser;
 use gtk::prelude::*;
+
+use std::rc::Rc;
 
 use daemon::Daemon;
 
@@ -58,7 +61,8 @@ fn main() {
 
     app.connect_activate(move |app| {
         let hold = app.hold();
-        let daemon = Daemon::new(app, app::registry(), &socket_path, hold);
+        let event_bus = Rc::new(hyprland::EventBus::start());
+        let daemon = Daemon::new(app, app::registry(), &socket_path, hold, event_bus);
         for id in &app_ids {
             daemon.load_app(id);
         }

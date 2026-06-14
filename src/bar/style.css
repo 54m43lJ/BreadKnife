@@ -1,0 +1,60 @@
+:root {
+    /* ── 底板 ── 暖黑系列 ─────────────────────────── */
+    --bg-primary: #1b1816;
+    --bg-secondary: #24211e;
+    --bg-hover: #302c29;
+    --bg-active: #3d3835;
+
+    /* ── 文字 ── 淡金色系列 ────────────────────────── */
+    --fg-primary: #ecd9a8;
+    --fg-secondary: #b8a078;
+    --fg-muted: #6b5d48;
+
+    /* ── 强调色 ── 深沉紫色 ────────────────────────── */
+    --accent: #5c3d7a;
+    --accent-hover: #735294;
+    --accent-subtle: #f5f0e8;
+
+    /* ── 语义色 ────────────────────────────────────── */
+    --success: #4a9c6c;
+    --warning: #c4954e;
+    --danger: #b8453a;
+
+    /* ── 分割线 ────────────────────────────────────── */
+    --border: rgba(236, 217, 168, 0.08);
+    --border-strong: rgba(236, 217, 168, 0.15);
+
+    /* ── 尺寸 ─────────────────────────────────────── */
+    --bar-height: 30px;
+    --widget-padding: 4px 8px;
+    --border-radius: 6px;
+    --font-size: 12px;
+}
+
+window {
+    background-color: var(--bg-primary);
+}
+
+.workspace-label {
+    color: var(--fg-secondary);
+    padding: 2px 6px;
+    border-radius: var(--border-radius);
+    font-size: var(--font-size);
+    min-width: 20px;
+    text-align: center;
+}
+
+.workspace-label:hover {
+    background-color: var(--bg-hover);
+}
+
+.workspace-active {
+    color: var(--accent-subtle);
+    background-color: var(--accent);
+}
+
+.title-label {
+    color: var(--fg-primary);
+    font-size: var(--font-size);
+    padding: var(--widget-padding);
+}
