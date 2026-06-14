@@ -1,5 +1,9 @@
 mod workspace;
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use gtk::prelude::*;
 use gtk::{gdk, Application};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
@@ -9,7 +13,17 @@ use crate::hyprland::EventBus;
 
 const BAR_HEIGHT: i32 = 30;
 
-pub struct BarApp;
+pub struct BarApp {
+    instances: Rc<RefCell<HashMap<String, workspace::WorkspaceWidget>>>,
+}
+
+impl BarApp {
+    pub fn new() -> Self {
+        BarApp {
+            instances: Rc::new(RefCell::new(HashMap::new())),
+        }
+    }
+}
 
 impl AppModule for BarApp {
     fn id(&self) -> &'static str {
@@ -26,6 +40,11 @@ impl AppModule for BarApp {
         monitor: &gdk::Monitor,
         event_bus: &EventBus,
     ) -> PerMonitor {
+        let connector = monitor
+            .connector()
+            .unwrap_or_default()
+            .to_string();
+
         let geom = monitor.geometry();
 
         let window = gtk::ApplicationWindow::builder()
@@ -53,6 +72,20 @@ impl AppModule for BarApp {
 
         // ── workspace widget ─────────────────────────────────────
         let ws = workspace::WorkspaceWidget::new(monitor, event_bus);
+        self.instances.borrow_mut().insert(connector.clone(), ws);
+
+        // clean up when window destroyed
+        {
+            let instances = self.instances.clone();
+            let conn = connector.clone();
+            window.connect_destroy(move |_| {
+                instances.borrow_mut().remove(&conn);
+            });
+        }
+
+        // reference ws from map
+        let instances = self.instances.borrow();
+        let ws = &instances[&connector];
 
         let layout = gtk::CenterBox::new();
         layout.set_center_widget(Some(&ws.container));

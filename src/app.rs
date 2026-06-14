@@ -29,5 +29,5 @@ pub trait AppModule {
 
 /// Hardcoded registry of all known app modules.
 pub fn registry() -> Vec<Box<dyn AppModule>> {
-    vec![Box::new(crate::bar::BarApp)]
+    vec![Box::new(crate::bar::BarApp::new())]
 }

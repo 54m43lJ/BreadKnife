@@ -52,15 +52,14 @@ impl WorkspaceWidget {
         {
             let labels = labels.clone();
             let active = active.clone();
-            let connector = connector.clone();
+            let _connector = connector.clone();
             subs.push(event_bus.subscribe("focusedmonv2", move |data| {
                 let mut parts = data.split(',');
-                let mon = parts.next().unwrap_or("");
+                let _mon = parts.next().unwrap_or("");
                 let id = parts.next().unwrap_or("");
-                println!("[workspace] monitor focus changed to {}", mon);
-                // if mon == connector {
-                update_active(&labels, &active, id);
-                // }
+                if _mon == _connector {
+                    update_active(&labels, &active, id);
+                }
             }));
         }
 
