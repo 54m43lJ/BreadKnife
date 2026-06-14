@@ -9,6 +9,7 @@ use gtk::prelude::*;
 use gtk::{gdk, glib, Application};
 
 use crate::app::{AppModule, PerMonitor};
+use crate::hyprland::EventBus;
 
 struct Inner {
     /// monitor → app_id → PerMonitor
@@ -22,6 +23,7 @@ pub struct Daemon {
     application: Application,
     modules: Rc<HashMap<String, Box<dyn AppModule>>>,
     inner: Rc<Inner>,
+    event_bus: Rc<EventBus>,
 }
 
 impl Daemon {
@@ -30,6 +32,7 @@ impl Daemon {
         modules: Vec<Box<dyn AppModule>>,
         socket_path: &str,
         hold: gtk::gio::ApplicationHoldGuard,
+        event_bus: Rc<EventBus>,
     ) -> Self {
         // Load CSS from all modules
         let display = gdk::Display::default().unwrap();
@@ -56,6 +59,7 @@ impl Daemon {
                 loaded: RefCell::new(Vec::new()),
                 hold: RefCell::new(Some(hold)),
             }),
+            event_bus,
         };
 
         daemon.setup_hotplug();
@@ -90,7 +94,7 @@ impl Daemon {
                 .unwrap()
                 .downcast::<gdk::Monitor>()
                 .unwrap();
-            let pm = module.create(&self.application, &monitor);
+            let pm = module.create(&self.application, &monitor, &self.event_bus);
             pm.window.present();
 
             instances.entry(monitor).or_default().insert(id.to_string(), pm);
@@ -172,7 +176,7 @@ impl Daemon {
                         if let Some(module) = daemon.modules.get(app_id) {
                             per_app.insert(
                                 app_id.clone(),
-                                module.create(&daemon.application, monitor),
+                                module.create(&daemon.application, monitor, &daemon.event_bus),
                             );
                         }
                     }

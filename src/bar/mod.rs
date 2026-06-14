@@ -1,8 +1,11 @@
+mod workspace;
+
 use gtk::prelude::*;
 use gtk::{gdk, Application};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 
 use crate::app::{AppModule, PerMonitor};
+use crate::hyprland::EventBus;
 
 const BAR_HEIGHT: i32 = 30;
 
@@ -14,10 +17,15 @@ impl AppModule for BarApp {
     }
 
     fn css(&self) -> Option<&str> {
-        Some("window { background-color: black; }")
+        Some(include_str!("style.css"))
     }
 
-    fn create(&self, app: &Application, monitor: &gdk::Monitor) -> PerMonitor {
+    fn create(
+        &self,
+        app: &Application,
+        monitor: &gdk::Monitor,
+        event_bus: &EventBus,
+    ) -> PerMonitor {
         let geom = monitor.geometry();
 
         let window = gtk::ApplicationWindow::builder()
@@ -43,6 +51,14 @@ impl AppModule for BarApp {
             geom.height()
         );
 
+        // ── workspace widget ─────────────────────────────────────
+        let ws = workspace::WorkspaceWidget::new(monitor, event_bus);
+
+        let layout = gtk::CenterBox::new();
+        layout.set_center_widget(Some(&ws.container));
+        window.set_child(Some(&layout));
+
+        // ── geometry tracking ────────────────────────────────────
         let window_clone = window.clone();
         let geometry_handler = monitor.connect_geometry_notify(move |m| {
             let g = m.geometry();
