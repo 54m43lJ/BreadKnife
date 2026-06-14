@@ -7,7 +7,7 @@ A fully customizable desktop shell built with Rust, GTK4, and Astal — no compr
 ### Arch Linux
 
 ```bash
-sudo pacman -S rustup gtk4 libadwaita meson desktop-file-utils gcc
+sudo pacman -S rustup gtk4 gtk4-layer-shell libadwaita meson desktop-file-utils gcc
 ```
 
 Install `libastal-meta` from **AUR**.
