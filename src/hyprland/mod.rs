@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 // ── types ───────────────────────────────────────────────────────
 
+#[allow(unused)]
 #[derive(Deserialize, Debug, Clone)]
 pub struct ActiveWorkspace {
     pub id: i64,

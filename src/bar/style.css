@@ -31,6 +31,10 @@
     --font-size: 12px;
 }
 
+* {
+    font-family: 'Noto Sans Mono';
+}
+
 window {
     background-color: var(--bg-primary);
 }
