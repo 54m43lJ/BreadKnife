@@ -32,7 +32,13 @@
 }
 
 * {
-    font-family: 'Noto Sans Mono';
+    font-family: "NotoSansM Nerd Font Mono", "monospace";
+}
+
+.system-icon {
+    color: var(--fg-primary);
+    font-size: 22px;
+    padding: 2px 4px;
 }
 
 window {
