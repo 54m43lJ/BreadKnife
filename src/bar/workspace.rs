@@ -7,6 +7,7 @@ use gtk::gdk;
 
 use crate::hyprland::{self, EventBus, Subscription};
 
+#[allow(unused)]
 pub struct WorkspaceWidget {
     pub container: gtk::Box,
     labels: Rc<RefCell<HashMap<String, gtk::Label>>>,

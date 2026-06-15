@@ -8,6 +8,7 @@ use gtk::prelude::*;
 use astal_tray::prelude::{TrayExt, TrayItemExt};
 use astal_tray::{Tray, TrayItem};
 
+#[allow(unused)]
 pub struct ControlCenter {
     pub container: gtk::Box,
     tray_box: gtk::Box,

@@ -2,6 +2,7 @@ use gtk::prelude::*;
 
 use crate::hyprland::{self, EventBus, Subscription};
 
+#[allow(unused)]
 pub struct TitleWidget {
     pub container: gtk::Box,
     label: gtk::Label,
