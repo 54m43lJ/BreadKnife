@@ -10,6 +10,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  PKG_CONFIG_PATH: "/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig"
   RELEASE_TAG: preview
   RELEASE_NAME: "Preview Build"
   BINARY_NAME: "bread"
@@ -42,14 +43,46 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            meson \
+            ninja-build \
+            valac \
+            gobject-introspection \
+            libgirepository1.0-dev \
             libgtk-4-dev \
-            libgtk4-layer-shell-dev \
             libglib2.0-dev \
             libgdk-pixbuf2.0-dev \
             libpango1.0-dev \
             libcairo2-dev \
-            pkg-config \
-            build-essential
+            libwayland-dev \
+            wayland-protocols \
+            libjson-glib-dev \
+            git
+
+      - name: Build gtk4-layer-shell
+        run: |
+          git clone --depth 1 https://github.com/wmww/gtk4-layer-shell.git
+          cd gtk4-layer-shell
+          meson setup build -Dexamples=false -Ddocs=false -Dtests=false
+          sudo meson install -C build
+          sudo ldconfig
+
+      - name: Build appmenu-glib-translator
+        run: |
+          git clone --depth 1 https://github.com/rilian-la-te/vala-panel-appmenu.git
+          cd vala-panel-appmenu/subprojects/appmenu-glib-translator
+          meson setup build
+          sudo meson install -C build
+          sudo ldconfig
+
+      - name: Build astal-tray
+        run: |
+          git clone --depth 1 https://github.com/aylur/astal.git
+          cd astal/lib/tray
+          meson setup build
+          sudo meson install -C build
+          sudo ldconfig
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
