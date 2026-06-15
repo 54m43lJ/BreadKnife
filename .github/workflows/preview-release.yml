@@ -1,0 +1,102 @@
+name: Rust Alpha Build & Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RELEASE_TAG: preview
+  RELEASE_NAME: "Preview Build"
+  BINARY_NAME: "bread"
+
+jobs:
+  check-merge:
+    runs-on: ubuntu-latest
+    if: |
+      github.event.pull_request.merged == true && 
+      ( github.event.pull_request.user.login == '54m43lJ' ||
+        github.actor == '54m43lJ' )
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - id: check
+        run: echo "should_build=true" >> $GITHUB_OUTPUT
+
+  build:
+    needs: check-merge
+    if: needs.check-merge.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-x86_64-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-x86_64-cargo-
+
+      - name: Build Release
+        run: cargo build --release --bin bread --target x86_64-unknown-linux-gnu --locked
+
+      - name: Package Binary
+        id: package
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d '"' -f2)
+          ARCHIVE_NAME="${BINARY_NAME}-v${VERSION}-x86_64-unknown-linux-gnu"
+          tar czf "${ARCHIVE_NAME}.tar.gz" -C "target/x86_64-unknown-linux-gnu/release" "${BINARY_NAME}"
+          echo "archive=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_OUTPUT
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-amd64
+          path: artifacts
+
+      - name: Create/Update Alpha Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          body: |
+            ## Preview Build (Linux AMD64)
+            
+            **Commit:** ${{ github.sha }}
+            **Merged PR:** #${{ github.event.pull_request.number }}
+            **Triggered by:** ${{ github.event.pull_request.user.login }}
+            
+            ⚠️ 此 release 会被每次 merge 自动覆盖。
+          prerelease: true
+          allowUpdates: true
+          removeArtifacts: true
+          replacesArtifacts: true
+          artifacts: "artifacts/*"
+          token: ${{ secrets.GITHUB_TOKEN }}
