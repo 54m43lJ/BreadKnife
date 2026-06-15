@@ -38,6 +38,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libgtk4-layer-shell-dev \
+            libglib2.0-dev \
+            libgdk-pixbuf2.0-dev \
+            libpango1.0-dev \
+            libcairo2-dev \
+            pkg-config \
+            build-essential
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
