@@ -78,7 +78,7 @@ jobs:
 
       - name: Build astal-tray
         run: |
-          git clone --depth 1 https://github.com/aylur/astal.git
+          git clone https://github.com/aylur/astal.git
           cd astal/lib/tray
           meson setup build
           sudo meson install -C build
