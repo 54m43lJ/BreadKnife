@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event.pull_request.merged == true && 
+      contains(github.event.pull_request.labels.*.name, 'preview-build') && 
       ( github.event.pull_request.user.login == '54m43lJ' ||
         github.actor == '54m43lJ' )
     outputs:
