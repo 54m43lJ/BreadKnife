@@ -50,6 +50,7 @@ jobs:
             meson \
             ninja-build \
             valac \
+            valadoc \
             gobject-introspection \
             libgirepository1.0-dev \
             libgtk-4-dev \
