@@ -1,4 +1,4 @@
-name: Rust Alpha Build & Release
+name: Preview Build & Release
 
 on:
   pull_request:
