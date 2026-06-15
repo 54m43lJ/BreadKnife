@@ -4,6 +4,7 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,6 +20,7 @@ jobs:
   check-merge:
     runs-on: ubuntu-latest
     if: |
+      (github.event_name == 'workflow_dispatch' && github.actor == '54m43lJ') ||
       github.event.pull_request.merged == true && 
       contains(github.event.pull_request.labels.*.name, 'preview-build') && 
       ( github.event.pull_request.user.login == '54m43lJ' ||
