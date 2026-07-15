@@ -7,11 +7,10 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use gtk::glib::{self, SignalHandlerId};
+use gtk::glib;
 use gtk::prelude::*;
 
-use astal_tray::prelude::{TrayExt, TrayItemExt};
-use astal_tray::{Tray, TrayItem};
+use crate::sni;
 
 #[allow(unused)]
 pub struct ControlCenter {
@@ -22,51 +21,72 @@ pub struct ControlCenter {
     volume_icon: gtk::Label,
     battery_icon: gtk::Label,
     clock: gtk::Label,
-    _items: Rc<RefCell<HashMap<String, gtk::Image>>>,
-    _tray: Tray,
-    _handlers: Rc<RefCell<Vec<SignalHandlerId>>>,
+    tray_items: Rc<RefCell<HashMap<String, gtk::Image>>>,
 }
 
 impl ControlCenter {
     pub fn new() -> Self {
-        let tray = Tray::default();
-        let items = Rc::new(RefCell::new(HashMap::new()));
-        let handlers = Rc::new(RefCell::new(Vec::new()));
-
+        let tray_items = Rc::new(RefCell::new(HashMap::new()));
         let tray_box = gtk::Box::new(gtk::Orientation::Horizontal, 2);
 
-        // initial tray items
-        for item in tray.items() {
-            let icon = make_tray_icon(&item, &handlers);
-            tray_box.append(&icon);
-            items
-                .borrow_mut()
-                .insert(item.item_id().to_string(), icon);
-        }
-
-        // item added
+        // ── tray: load existing + subscribe ──────────────────────
         {
-            let tray_box = tray_box.clone();
-            let items = items.clone();
-            let handlers = handlers.clone();
-            let tray_ref = tray.clone();
-            tray.connect_item_added(move |_tray, item_id| {
-                let item = tray_ref.item(item_id);
-                let icon = make_tray_icon(&item, &handlers);
-                tray_box.append(&icon);
-                items.borrow_mut().insert(item_id.to_string(), icon);
-            });
-        }
+            let tb = tray_box.clone();
+            let ti = tray_items.clone();
 
-        // item removed
-        {
-            let tray_box = tray_box.clone();
-            let items = items.clone();
-            tray.connect_item_removed(move |_tray, item_id| {
-                if let Some(icon) = items.borrow_mut().remove(item_id) {
-                    tray_box.remove(&icon);
+            // initial items
+            let ids = sni::item_ids();
+            eprintln!("[cc] initial tray items: {} ({:?})", ids.len(), ids);
+            for id in &ids {
+                if let Some(state) = sni::get_item_state(id) {
+                    eprintln!("[cc] creating tray icon for {id} icon={}", state.icon_name);
+                    let icon = make_tray_icon(id, &state);
+                    tb.append(&icon);
+                    ti.borrow_mut().insert(id.clone(), icon);
                 }
-            });
+            }
+
+            // item added
+            {
+                let tb = tb.clone();
+                let ti = ti.clone();
+                sni::set_item_added_cb(move |id: &str| {
+                    eprintln!("[cc] cb: item added {id}");
+                    let id = id.to_string();
+                    if let Some(state) = sni::get_item_state(&id) {
+                        eprintln!("[cc] cb: creating tray icon for {id}");
+                        let icon = make_tray_icon(&id, &state);
+                        tb.append(&icon);
+                        ti.borrow_mut().insert(id, icon);
+                    }
+                });
+            }
+
+            // item removed
+            {
+                let ti = ti.clone();
+                let tb = tb.clone();
+                sni::set_item_removed_cb(move |id: &str| {
+                    if let Some(icon) = ti.borrow_mut().remove(id) {
+                        tb.remove(&icon);
+                    }
+                });
+            }
+
+            // item updated (icon changes)
+            {
+                let ti = ti.clone();
+                sni::set_item_updated_cb(move |id: &str, _kind: sni::item::UpdateKind| {
+                    let id = id.to_string();
+                    if let Some(state) = sni::get_item_state(&id) {
+                        if let Ok(items) = ti.try_borrow() {
+                            if let Some(icon) = items.get(&id) {
+                                sni::icon::update_tray_image(icon, &state);
+                            }
+                        }
+                    }
+                });
+            }
         }
 
         // ── system icons + clock ──────────────────────────────────
@@ -88,14 +108,14 @@ impl ControlCenter {
         clock.set_halign(gtk::Align::End);
 
         // right_box: horizontal icon + clock row
-        let right_box = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        let right_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         right_box.append(&network_icon);
         right_box.append(&volume_icon);
         right_box.append(&battery_icon);
         right_box.append(&clock);
 
         // outer container
-        let container = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let container = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         container.append(&tray_box);
         container.append(&right_box);
 
@@ -137,13 +157,10 @@ impl ControlCenter {
         }
 
         // volume — event-driven via pactl subscribe
-        // initial state
         {
             let (vol, muted) = query_pactl_volume();
             volume_icon.set_text(volume_icon_text(vol, muted));
         }
-
-        // spawn background listener
         spawn_pactl_listener(volume_icon.clone());
 
         ControlCenter {
@@ -154,66 +171,94 @@ impl ControlCenter {
             volume_icon,
             battery_icon,
             clock,
-            _items: items,
-            _tray: tray,
-            _handlers: handlers,
+            tray_items,
         }
     }
 }
 
 // ── tray icon helpers ────────────────────────────────────────────
 
-fn make_tray_icon(item: &TrayItem, handlers: &Rc<RefCell<Vec<SignalHandlerId>>>) -> gtk::Image {
-    let icon = gtk::Image::from_gicon(&item.gicon());
+fn make_tray_icon(
+    id: &str,
+    state: &sni::item::SniItemState,
+) -> gtk::Image {
+    let icon = sni::icon::make_tray_image(state);
     icon.add_css_class("tray-icon");
-
-    // icon changed
-    {
-        let icon = icon.clone();
-        let item = item.clone();
-        let h = item.connect_gicon_notify(move |item| {
-            icon.set_from_gicon(&item.gicon());
-        });
-        handlers.borrow_mut().push(h);
-    }
 
     // left click
     {
-        let item = item.clone();
+        let id = id.to_string();
         let left = gtk::GestureClick::new();
         left.set_button(1);
         left.connect_pressed(move |_gesture, _n, x, y| {
-            item.activate(x as i32, y as i32);
+            sni::activate_item(&id, x as i32, y as i32);
         });
         icon.add_controller(left);
     }
 
     // right click — menu or secondary activate
     {
-        let item = item.clone();
+        let id_for_menu = id.to_string();
+        let id_for_fallback = id.to_string();
+        let icon_weak = icon.clone();
         let right = gtk::GestureClick::new();
         right.set_button(3);
-        let icon_weak = icon.clone();
         right.connect_pressed(move |_gesture, _n, x, y| {
-            if let Some(menu) = item.menu_model() {
-                item.about_to_show();
-
-                let popover = gtk::PopoverMenu::from_model(Some(&menu));
-                popover.set_parent(&icon_weak);
-
-                if let Some(ag) = item.action_group() {
-                    popover.insert_action_group("dbusmenu", Some(&ag));
+            let icon_weak = icon_weak.clone();
+            let id_fb = id_for_fallback.clone();
+            sni::request_menu(&id_for_menu, move |result| {
+                if let Some(result) = result {
+                    if !result.items.is_empty() {
+                        let menu = build_menu_from_result(&result);
+                        let popover = gtk::PopoverMenu::from_model(Some(&menu));
+                        popover.set_parent(&icon_weak);
+                        popover.popup();
+                        return;
+                    }
                 }
-
-                popover.popup();
-            } else {
-                item.secondary_activate(x as i32, y as i32);
-            }
+                sni::secondary_activate_item(&id_fb, x as i32, y as i32);
+            });
         });
         icon.add_controller(right);
     }
 
     icon
+}
+
+fn build_menu_from_result(result: &sni::menu::MenuResult) -> gtk::gio::Menu {
+    let menu = gtk::gio::Menu::new();
+    for item in &result.items {
+        build_menu_item(&menu, item);
+    }
+    menu
+}
+
+fn build_menu_item(menu: &gtk::gio::Menu, item: &sni::menu::MenuItem) {
+    if item.is_separator {
+        // gtk::gio::Menu doesn't have a direct separator; use empty label item
+        let mi = gtk::gio::MenuItem::new(Some(""), None);
+        menu.append_item(&mi);
+        return;
+    }
+
+    if item.is_submenu {
+        let sub = gtk::gio::Menu::new();
+        for child in &item.children {
+            build_menu_item(&sub, child);
+        }
+        let mi = gtk::gio::MenuItem::new(Some(&item.label), None);
+        mi.set_submenu(Some(&sub));
+        menu.append_item(&mi);
+    } else if !item.action.is_empty() {
+        let mi = gtk::gio::MenuItem::new(
+            Some(&item.label),
+            Some(&format!("app.{}", item.action)),
+        );
+        menu.append_item(&mi);
+    } else if !item.label.is_empty() {
+        let mi = gtk::gio::MenuItem::new(Some(&item.label), None);
+        menu.append_item(&mi);
+    }
 }
 
 // ── clock ────────────────────────────────────────────────────────
@@ -245,18 +290,13 @@ fn poll_network() -> &'static str {
         if parts.len() < 3 {
             continue;
         }
-        let dev = parts[0];
-        let typ = parts[1];
-        let state = parts[2];
-
-        if dev == "lo" {
+        if parts[0] == "lo" {
             continue;
         }
-        if !state.starts_with("connected") {
+        if !parts[2].starts_with("connected") {
             continue;
         }
-
-        match typ {
+        match parts[1] {
             "wifi" => wifi_up = true,
             "ethernet" => eth_up = true,
             _ => {}
@@ -264,11 +304,11 @@ fn poll_network() -> &'static str {
     }
 
     if wifi_up {
-        "\u{f1eb}" // nf-fa-wifi
+        "\u{f1eb}"
     } else if eth_up {
-        "\u{e796}" // nf-dev-ethernet
+        "\u{e796}"
     } else {
-        "\u{f05e}" // nf-fa-ban
+        "\u{f05e}"
     }
 }
 
@@ -281,7 +321,6 @@ fn query_pactl_volume() -> (u32, bool) {
         .ok()
         .and_then(|o| {
             let s = String::from_utf8_lossy(&o.stdout);
-            // extract first "  NN%" → the number before '%'
             s.split('%')
                 .next()
                 .and_then(|before| before.rsplit(' ').next())
@@ -304,20 +343,19 @@ fn query_pactl_volume() -> (u32, bool) {
 
 fn volume_icon_text(vol: u32, muted: bool) -> &'static str {
     if muted {
-        "\u{eee8}" // nf-fa-volume_xmark
+        "\u{eee8}"
     } else if vol > 66 {
-        "\u{f028}" // nf-fa-volume_up
+        "\u{f028}"
     } else if vol > 33 {
-        "\u{f027}" // nf-fa-volume_down
+        "\u{f027}"
     } else {
-        "\u{f026}" // nf-fa-volume_off
+        "\u{f026}"
     }
 }
 
 fn spawn_pactl_listener(volume_icon: gtk::Label) {
     let (tx, rx) = mpsc::channel::<()>();
 
-    // background thread: spawn pactl subscribe, forward events via mpsc
     thread::spawn(move || {
         let mut child = match Command::new("sh")
             .arg("-c")
@@ -338,16 +376,13 @@ fn spawn_pactl_listener(volume_icon: gtk::Label) {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if line.is_ok() {
-                // any sink event → signal main thread to re-query
                 if tx.send(()).is_err() {
-                    break; // receiver dropped
+                    break;
                 }
             }
         }
-        // child died or pipe closed → tx dropped → timeout loop exits via recv error
     });
 
-    // main thread: poll mpsc every 500ms, drain events, re-query volume
     glib::timeout_add_local(Duration::from_millis(500), move || {
         let mut changed = false;
         while rx.try_recv().is_ok() {
@@ -378,21 +413,21 @@ fn poll_battery() -> (Option<u8>, bool) {
 
 fn battery_icon_text(capacity: Option<u8>, charging: bool) -> &'static str {
     match capacity {
-        None => "\u{f1e6}", // nf-fa-plug (desktop, no battery)
+        None => "\u{f1e6}",
         Some(cap) => {
             if charging {
-                return "\u{f0e7}"; // nf-fa-bolt
+                return "\u{f0e7}";
             }
             if cap >= 90 {
-                "\u{f240}" // nf-fa-battery_4
+                "\u{f240}"
             } else if cap >= 60 {
-                "\u{f241}" // nf-fa-battery_3
+                "\u{f241}"
             } else if cap >= 30 {
-                "\u{f242}" // nf-fa-battery_2
+                "\u{f242}"
             } else if cap >= 10 {
-                "\u{f243}" // nf-fa-battery_1
+                "\u{f243}"
             } else {
-                "\u{f244}" // nf-fa-battery_0
+                "\u{f244}"
             }
         }
     }

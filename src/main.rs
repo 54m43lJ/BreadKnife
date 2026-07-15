@@ -2,6 +2,7 @@ mod app;
 mod bar;
 mod daemon;
 mod hyprland;
+mod sni;
 
 use std::io::Write;
 use std::os::unix::net::UnixStream;
@@ -62,6 +63,12 @@ fn main() {
     app.connect_activate(move |app| {
         let hold = app.hold();
         let event_bus = Rc::new(hyprland::EventBus::start());
+
+        // initialize SNI tray host (zbus, background thread)
+        eprintln!("[main] calling sni::init_sni_host");
+        sni::init_sni_host();
+        eprintln!("[main] sni::init_sni_host returned");
+
         let daemon = Daemon::new(app, app::registry(), &socket_path, hold, event_bus);
         for id in &app_ids {
             daemon.load_app(id);
