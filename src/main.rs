@@ -31,6 +31,13 @@ struct Args {
 }
 
 fn main() {
+    // VMware SVGA / vmwgfx 的 dmabuf 导入不可用，合成器会拒绝 GTK GL 渲染器
+    // 分配的 buffer 并触发协议错误导致崩溃；回退到 cairo (shm) 渲染。
+    if std::env::var_os("GSK_RENDERER").is_none() {
+        // SAFETY: 单线程启动阶段，GTK 尚未初始化
+        unsafe { std::env::set_var("GSK_RENDERER", "cairo") };
+    }
+
     let args = Args::parse();
 
     // ── client mode: forward command to daemon ───────────────────
