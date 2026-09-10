@@ -65,6 +65,7 @@ BreadKnife 是一个专为 Hyprland 设计的 Wayland 任务栏。它不是一�
   - 后台实现 `org.freedesktop.Notifications` DBus 接口，缓存并显示通知列表。
 ### 3.3 系统托盘模块
 - **协议**: 实现 StatusNotifierItem (SNI) 协议，直接与 DBus 交互。
+- **底层实现**: 托盘协议栈独立为无头库 `tray`（与主程序零耦合），其能力边界与公开接口以 [tray/docs/SPEC.md](tray/docs/SPEC.md) 为唯一权威规格；本 PRD 仅约束产品行为，接口细节以该文档为准。
 - **功能**:
   - 动态检测应用注册/注销 SNI 服务。
   - 支持图标加载、Tooltip 显示。
