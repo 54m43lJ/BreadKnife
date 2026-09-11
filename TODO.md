@@ -1,0 +1,2 @@
+- 不再用数字代表workspace，用点和椭圆
+- 解决DPMS on之后workspace绑定不成功的问题
