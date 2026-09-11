@@ -71,22 +71,6 @@ jobs:
           sudo meson install -C build
           sudo ldconfig
 
-      - name: Build appmenu-glib-translator
-        run: |
-          git clone --depth 1 https://github.com/rilian-la-te/vala-panel-appmenu.git
-          cd vala-panel-appmenu/subprojects/appmenu-glib-translator
-          meson setup build
-          sudo meson install -C build
-          sudo ldconfig
-
-      - name: Build astal-tray
-        run: |
-          git clone https://github.com/aylur/astal.git
-          cd astal/lib/tray
-          meson setup build
-          sudo meson install -C build
-          sudo ldconfig
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:

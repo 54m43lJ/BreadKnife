@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
-use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::rc::Rc;
 
@@ -239,30 +238,31 @@ impl Daemon {
                 return;
             }
         };
-        listener.set_nonblocking(true).ok();
-
-        let fd = listener.as_raw_fd();
-        let listener = Rc::new(RefCell::new(listener));
         let daemon = self.clone();
+        let (tx, rx) = async_channel::unbounded::<String>();
 
-        glib::unix_fd_add_local(fd, glib::IOCondition::IN, move |_fd, _cond| {
-            loop {
-                match listener.borrow().accept() {
-                    Ok((stream, _addr)) => {
-                        stream.set_nonblocking(true).ok();
+        // main-loop consumer
+        glib::spawn_future_local(async move {
+            while let Ok(line) = rx.recv().await {
+                daemon.handle_command(&line);
+            }
+        });
+
+        // blocking accept + read thread
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => {
                         let mut reader = BufReader::new(stream);
                         let mut line = String::new();
                         loop {
                             match reader.read_line(&mut line) {
                                 Ok(0) => break, // EOF
                                 Ok(_) => {
-                                    daemon.handle_command(line.trim());
+                                    if tx.send_blocking(line.trim().to_string()).is_err() {
+                                        return;
+                                    }
                                     line.clear();
-                                }
-                                Err(ref e)
-                                    if e.kind() == std::io::ErrorKind::WouldBlock =>
-                                {
-                                    break;
                                 }
                                 Err(e) => {
                                     eprintln!("[daemon] socket read error: {}", e);
@@ -271,14 +271,12 @@ impl Daemon {
                             }
                         }
                     }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                     Err(e) => {
                         eprintln!("[daemon] socket accept error: {}", e);
                         break;
                     }
                 }
             }
-            glib::ControlFlow::Continue
         });
 
         eprintln!("[daemon] unix socket listening on {}", path);

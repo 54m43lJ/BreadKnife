@@ -7,11 +7,22 @@ edition = "2024"
 name = "bread"
 path = "src/main.rs"
 
+# GTK API surface selector: pick the highest matching your system GTK.
+#   default  -> GTK 4.14 floor (CI runner compatible)
+#   gtk4_22  -> GTK 4.22 API (local dev / Arch, current system: 4.22.x)
+[features]
+default = ["gtk4_14"]
+gtk4_14 = ["gtk/v4_14"]
+gtk4_22 = ["gtk/v4_22"]
+
 [dependencies]
-astal-tray = "0.1.0"
+async-channel = "2"
 clap = { version = "4", features = ["derive"] }
-gtk = { package = "gtk4", version = "0.10", features = ["v4_12"] }
-gtk4-layer-shell = "0.7"
+gtk = { package = "gtk4", version = "0.11" }
+gtk4-layer-shell = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "io-util", "sync", "net", "macros"] }
+
+# 内置托盘库（独立 crate，见 tray/docs/SPEC.md）
+tray = { path = "tray" }

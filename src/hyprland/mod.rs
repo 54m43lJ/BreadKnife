@@ -1,15 +1,12 @@
 //! Hyprland IPC: sync commands + async event bus.
 //!
 //! Tokio reads socket2 events on a dedicated thread and dispatches them
-//! to the GTK main thread through a self-pipe + glib fd watch (no polling).
+//! to the GTK main thread through an async channel (glib >= 0.22 dropped
+//! the old self-pipe + fd watch approach).
 
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
-use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
-use std::os::unix::net::UnixStream;
+use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
 
@@ -126,30 +123,20 @@ impl EventBus {
             next_id: RefCell::new(0),
         });
 
-        let (wake_rx, wake_tx) = UnixStream::pair().expect("UnixStream::pair");
-        wake_rx.set_nonblocking(true).unwrap();
+        let (tx, rx) = async_channel::unbounded::<(String, String)>();
 
-        let wake_rx = Rc::new(RefCell::new(wake_rx));
-        let fd = wake_rx.borrow().as_raw_fd();
+        // main-loop consumer
+        {
+            let inner_dispatch = inner.clone();
+            gtk::glib::spawn_future_local(async move {
+                while let Ok((event, data)) = rx.recv().await {
+                    inner_dispatch.dispatch(&event, &data);
+                }
+            });
+        }
 
-        let queue: Arc<Mutex<VecDeque<(String, String)>>> =
-            Arc::new(Mutex::new(VecDeque::new()));
-        let queue_tokio = queue.clone();
-
-        let inner_dispatch = inner.clone();
-        let wake_rx_drain = wake_rx.clone();
-        gtk::glib::unix_fd_add_local(fd, gtk::glib::IOCondition::IN, move |_fd, _cond| {
-            let mut buf = [0u8; 64];
-            while wake_rx_drain.borrow_mut().read(&mut buf).is_ok() {}
-            let mut q = queue.lock().unwrap();
-            while let Some((event, data)) = q.pop_front() {
-                inner_dispatch.dispatch(&event, &data);
-            }
-            gtk::glib::ControlFlow::Continue
-        });
-
+        // socket2 reader thread
         std::thread::spawn(move || {
-            let mut wake_tx = wake_tx;
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -170,8 +157,9 @@ impl EventBus {
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     if let Some((event, data)) = parse_event(&line) {
-                        queue_tokio.lock().unwrap().push_back((event, data));
-                        let _ = wake_tx.write(&[1]);
+                        if tx.send_blocking((event, data)).is_err() {
+                            break;
+                        }
                     }
                 }
                 eprintln!("[hyprland] socket2 disconnected");
