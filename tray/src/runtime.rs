@@ -55,6 +55,12 @@ pub(crate) struct State {
     pub items: HashMap<TrayItemId, ItemEntry>,
     pub watcher: WatcherState,
     pub pending: VecDeque<Cmd>,
+    /// Registrations accepted by the fallback watcher whose items have not
+    /// been materialized yet. Kept separate so the
+    /// `RegisteredStatusNotifierItems` property is consistent the moment
+    /// `RegisterStatusNotifierItem` returns (bus clients may enumerate
+    /// immediately afterwards).
+    pub pending_registered: Vec<String>,
     /// (deadline, work) pairs; the ticker only *wakes* us, due entries are
     /// processed here.
     pub timers: Vec<(Instant, TimerKind)>,
@@ -185,6 +191,7 @@ pub(crate) fn start(
             items: HashMap::new(),
             watcher: WatcherState::ExternalDown,
             pending: VecDeque::new(),
+            pending_registered: Vec::new(),
             timers: Vec::new(),
             next_subscriber_id: 0,
             subscribers: Vec::new(),
@@ -272,7 +279,7 @@ fn worker_main(shared: Weak<Shared>, mut iter: zbus::blocking::MessageIterator) 
     shutdown_cleanup(&shared);
 }
 
-fn emit_wake(conn: &Connection) {
+pub(crate) fn emit_wake(conn: &Connection) {
     let _ = conn.emit_signal(None::<&'static str>, WAKE_PATH, WAKE_IFACE, WAKE_MEMBER, &());
 }
 
@@ -423,15 +430,35 @@ fn watcher_proxy(shared: &Shared) -> Result<zbus::blocking::Proxy<'static>, Tray
 // ── item lifecycle ──────────────────────────────────────────────────────
 
 fn enumerate_items(shared: &Shared) {
-    let list: Vec<String> = watcher_proxy(shared)
-        .and_then(|p| {
-            p.call("RegisteredStatusNotifierItems", &())
-                .map_err(TrayError::from)
-        })
+    let list: Vec<String> = enumerate_via_property(shared)
+        .or_else(|_| enumerate_via_method(shared))
         .unwrap_or_default();
     for service in list {
         add_item(shared, service);
     }
+}
+
+/// `RegisteredStatusNotifierItems` is a *property* on the watcher interface
+/// (the spec-correct access path).
+fn enumerate_via_property(shared: &Shared) -> Result<Vec<String>, TrayError> {
+    let props = zbus::blocking::fdo::PropertiesProxy::new(
+        &shared.conn,
+        SNI_WATCHER,
+        SNI_WATCHER_PATH,
+    )?;
+    let value = props.get(
+        SNI_WATCHER_IFACE.try_into()?,
+        "RegisteredStatusNotifierItems".try_into()?,
+    )?;
+    Ok(Vec::<String>::try_from(value)?)
+}
+
+/// Some watcher implementations expose it as a method instead; try that as
+/// a fallback.
+fn enumerate_via_method(shared: &Shared) -> Result<Vec<String>, TrayError> {
+    watcher_proxy(shared)?
+        .call("RegisteredStatusNotifierItems", &())
+        .map_err(TrayError::from)
 }
 
 fn add_item(shared: &Shared, service: String) {
@@ -569,6 +596,40 @@ fn refetch_menu_for(shared: &Shared, id: &TrayItemId) {
         return;
     };
     refetch_menu(shared, id, &bus, &menu_path);
+}
+
+/// Synchronous menu refresh on the caller's thread (used by
+/// `TrayHandle::menu_about_to_show`, where consumers need a fresh snapshot
+/// *before* presenting a menu — lazy dbusmenu providers only populate their
+/// layout in response to AboutToShow).
+pub(crate) fn refresh_menu_sync(shared: &Shared, id: &TrayItemId) -> Option<MenuSnapshot> {
+    let location = {
+        let st = shared.state.lock().unwrap();
+        if shared.stopping.load(Ordering::Acquire) {
+            return None;
+        }
+        st.items
+            .get(id)
+            .and_then(|e| e.menu_path.as_ref().map(|mp| (e.bus.clone(), mp.clone())))
+    };
+    let (bus, menu_path) = location?;
+
+    let mut changed = false;
+    let mut snapshot = None;
+    if let Ok(fresh) = fetch_menu(&shared.conn, &bus, &menu_path, shared.config.menu_max_depth) {
+        let mut st = shared.state.lock().unwrap();
+        if let Some(entry) = st.items.get_mut(id) {
+            if entry.menu.as_ref() != Some(&fresh) {
+                entry.menu = Some(fresh);
+                changed = true;
+            }
+            snapshot = entry.menu.clone();
+        }
+    }
+    if changed {
+        dispatch(shared, TrayEvent::MenuChanged(id.clone()));
+    }
+    snapshot
 }
 
 fn refetch_menu(shared: &Shared, id: &TrayItemId, bus: &str, menu_path: &str) {
@@ -743,7 +804,11 @@ fn process_pending(shared: &Shared) {
         };
         match cmd {
             None => return,
-            Some(Cmd::ItemRegistered(service)) => add_item(shared, service),
+            Some(Cmd::ItemRegistered(service)) => {
+                add_item(shared, service.clone());
+                let mut st = shared.state.lock().unwrap();
+                st.pending_registered.retain(|s| s != &service);
+            }
             Some(Cmd::Interact {
                 id,
                 op,

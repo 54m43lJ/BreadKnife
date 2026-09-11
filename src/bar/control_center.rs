@@ -175,10 +175,17 @@ fn make_tray_icon(handle: &TrayHandle, item: &tray::TrayItem) -> gtk::Image {
         let right = gtk::GestureClick::new();
         right.set_button(3);
         right.connect_pressed(move |_gesture, _n, x, y| {
-            if let Some(snapshot) = handle.menu(&id) {
-                popup_menu(&handle, &id, &snapshot, &icon_weak);
-            } else {
-                let _ = handle.secondary_activate(&id, x as i32, y as i32);
+            // DBusMenu contract: AboutToShow(0) *before* presenting. Lazy
+            // providers populate their layout only in response to this, and
+            // it also sync-refreshes our snapshot.
+            let _ = handle.menu_about_to_show(&id, 0);
+            let snapshot = handle.menu(&id).filter(|m| !m.root.is_empty());
+            match snapshot {
+                Some(s) => popup_menu(&handle, &id, &s, &icon_weak),
+                None => {
+                    // No usable menu: SNI says use the secondary action.
+                    let _ = handle.secondary_activate(&id, x as i32, y as i32);
+                }
             }
         });
         icon.add_controller(right);

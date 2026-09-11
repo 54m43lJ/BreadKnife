@@ -134,8 +134,23 @@ fn cmd_watch() -> Result<(), String> {
     Ok(())
 }
 
+fn wait_item(handle: &tray::TrayHandle, id: &TrayItemId) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if handle.item(id).is_some() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err(format!("item {id} did not appear within 5s"))
+}
+
 fn cmd_menu(handle: &tray::TrayHandle, id: TrayItemId, _rest: &[String]) -> Result<(), String> {
-    wait_for_menu(handle, &id)?;
+    wait_item(handle, &id)?;
+    // Pre-show contract: refresh via AboutToShow before reading the tree.
+    handle
+        .menu_about_to_show(&id, 0)
+        .map_err(|e| e.to_string())?;
     let Some(menu) = handle.menu(&id) else {
         return Err(format!("no menu for {id}"));
     };
@@ -143,19 +158,6 @@ fn cmd_menu(handle: &tray::TrayHandle, id: TrayItemId, _rest: &[String]) -> Resu
     print_items(&menu.root, 1);
     handle.shutdown();
     Ok(())
-}
-
-fn wait_for_menu(handle: &tray::TrayHandle, id: &TrayItemId) -> Result<(), String> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        if std::time::Instant::now() > deadline {
-            return Err(format!("item {id} (or its menu) did not appear in 5s"));
-        }
-        if handle.item(id).is_some() && handle.menu(id).is_some() {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
 }
 
 fn print_items(items: &[MenuItem], depth: usize) {
@@ -190,9 +192,7 @@ fn cmd_activate(
     x: i32,
     y: i32,
 ) -> Result<(), String> {
-    if handle.item(&id).is_none() {
-        return Err(format!("item {id} not found (is it running?)"));
-    }
+    wait_item(handle, &id)?;
     handle.activate(&id, x, y).map_err(|e| e.to_string())?;
     let rx = handle.subscribe();
     let deadline = std::time::Instant::now() + Duration::from_secs(5);

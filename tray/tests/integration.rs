@@ -14,7 +14,7 @@ const WAIT: Duration = Duration::from_secs(5);
 
 #[test]
 fn full_lifecycle() {
-    ensure_session_bus();
+    ensure_session_bus("full_lifecycle");
 
     let config = TrayConfig {
         timeout_ms: 1000,
@@ -72,6 +72,10 @@ fn full_lifecycle() {
         .expect("menu entry present");
     assert_eq!(hello_item.label, "Hello");
 
+    // AboutToShow pre-show contract: sync refresh + readable snapshot.
+    let _need = handle.menu_about_to_show(&demo.id(), 0).unwrap();
+    assert!(handle.menu(&demo.id()).is_some());
+
     // Menu activation reaches the demo item and yields a receipt.
     handle.menu_activate(&demo.id(), hello).unwrap();
     let receipt = wait_for(&rx, WAIT, |ev| match ev {
@@ -125,22 +129,53 @@ fn full_lifecycle() {
     ));
 }
 
-/// Always re-exec under a private `dbus-run-session`: the test depends on a
-/// *bare* session (no external StatusNotifierWatcher) for deterministic
-/// fallback-watcher assertions.
-fn ensure_session_bus() {
+/// A second host connecting later must enumerate items that registered
+/// before it (exercises the property-based `RegisteredStatusNotifierItems`
+/// read against our own watcher).
+#[test]
+fn second_host_enumerates_existing_item() {
+    ensure_session_bus("second_host_enumerates_existing_item");
+
+    let config = TrayConfig {
+        timeout_ms: 1000,
+        debounce_ms: 20,
+        ..Default::default()
+    };
+    let (host_a, _rx) = Tray::connect(config.clone()).expect("host A connect");
+    let demo = spawn_demo_item(DemoItemConfig::default()).expect("spawn demo item");
+
+    // Host B never provides a watcher; the external one (host A) is present.
+    let (host_b, rx_b) = Tray::connect(TrayConfig {
+        fallback: tray::FallbackPolicy::Never,
+        ..config
+    })
+    .expect("host B connect");
+
+    let added = wait_for(&rx_b, WAIT, |ev| match ev {
+        TrayEvent::Added(item) => Some(item.clone()),
+        _ => None,
+    });
+    assert_eq!(added.expect("host B sees the item").id, demo.id());
+    assert_eq!(host_b.items().len(), 1);
+
+    host_b.shutdown();
+    demo.remove().unwrap();
+    host_a.shutdown();
+}
+
+/// Re-exec *this test alone* under a private `dbus-run-session`: the tests
+/// depend on a *bare* session (no external StatusNotifierWatcher) and on
+/// total isolation from each other, so each test gets its own bus.
+fn ensure_session_bus(test: &'static str) {
     if std::env::var_os("TRAY_TEST_UNDER_DBUS").is_some() {
         return;
     }
     let exe = std::env::current_exe().expect("current exe");
-    let filter = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "full_lifecycle".to_string());
     let status = std::process::Command::new("dbus-run-session")
         .arg("--")
         .arg(&exe)
-        .arg(&filter)
         .arg("--exact")
+        .arg(test)
         .arg("--nocapture")
         .env("TRAY_TEST_UNDER_DBUS", "1")
         .env_remove("DBUS_SESSION_BUS_ADDRESS")

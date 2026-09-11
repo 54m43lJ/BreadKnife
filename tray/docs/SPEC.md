@@ -170,6 +170,9 @@ impl TrayHandle {
     /// 触发菜单条目（等价向 dbusmenu 发送 "clicked" 事件）
     pub fn menu_activate(&self, id: &TrayItemId, menu_item_id: i32) -> Result<(), TrayError>;
     /// 通知 Item 某菜单即将展示（AboutToShow），返回是否建议刷新
+    /// 同步语义：调用后立即重拉该 Item 的菜单快照（懒加载型
+    /// DBusMenu 提供方只在收到 AboutToShow 后才填充布局），
+    /// 随后读 menu() 即为最新内容；内容有变则投递 MenuChanged
     pub fn menu_about_to_show(&self, id: &TrayItemId, menu_item_id: i32) -> Result<bool, TrayError>;
 
     /// 订阅事件通道（独立于回调原语，可多订阅者）
@@ -439,3 +442,4 @@ CI 最低门禁：`cargo build`、`cargo test`（含集成测试）在无显示�
 | :--- | :--- | :--- |
 | v0.1 | 2026-09-10 | 初版规格：能力清单、公开接口、事件模型、脚手架与验收定义 |
 | v0.2 | 2026-09-11 | PoC 实现（zbus 5 blocking API）：①§9 线程模型修订为事件线程 + 定时器线程（阻塞迭代器无超时能力）；②`timeout_ms` 语义收窄为发现/让位等待，DBus 调用超时由 zbus 默认承担；③集成测试固定跑在私有 dbus-run-session 中以保证 Fallback 断言确定性 |
+| v0.3 | 2026-09-11 | `menu_about_to_show` 语义增强：AboutToShow 之后同步重拉菜单快照（DBusMenu 懒加载提供方仅在 AboutToShow 后填充布局；修复真实应用右键菜单为空/回退 SecondaryActivate 的问题） |

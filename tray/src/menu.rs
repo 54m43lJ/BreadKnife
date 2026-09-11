@@ -1,7 +1,7 @@
 //! DBusMenu client (`com.canonical.dbusmenu`): read-only menu snapshots.
 
 use zbus::blocking::Connection;
-use zbus::zvariant::{ObjectPath, OwnedValue, Value};
+use zbus::zvariant::{ObjectPath, OwnedValue, Structure, Value};
 
 use crate::{error::TrayError, sni::MENU_IFACE};
 
@@ -64,17 +64,35 @@ pub(crate) fn fetch_menu(
         ObjectPath::try_from(path)?,
         MENU_IFACE,
     )?;
-    let (revision, layout): (u32, OwnedValue) =
-        proxy.call("GetLayout", &(0i32, max_depth as i32, Vec::<String>::new()))?;
-    let value = Value::from(layout);
-    // Layout root is itself a node: (id, props, children).
-    let root = match &value {
+    let msg = proxy.call_method("GetLayout", &(0i32, max_depth as i32, Vec::<String>::new()))?;
+
+    // The spec puts the layout inside a variant (`(uv)`), but real providers
+    // are split: e.g. KeePassXC returns the bare struct `(u(ia{sv}av))`.
+    // Try the spec shape first, then the bare shape; normalize both into a
+    // root node Value tree before parsing.
+    let (revision, root): (u32, Value) = match msg.body().deserialize::<(u32, OwnedValue)>() {
+        Ok((revision, layout)) => (revision, Value::from(layout)),
+        Err(_) => {
+            let (revision, (id, props, items)): (
+                u32,
+                (i32, std::collections::HashMap<String, OwnedValue>, Vec<OwnedValue>),
+            ) = msg.body().deserialize()?;
+            let children: Vec<Value> = items
+                .into_iter()
+                .map(|ov| Value::Value(Box::new(Value::from(ov))))
+                .collect();
+            (revision, Value::Structure(Structure::from((id, props, children))))
+        }
+    };
+
+    // Root node is (id, props, children) — we hand out its children.
+    let items = match &root {
         Value::Structure(fields) if fields.fields().len() == 3 => {
             parse_children(&fields.fields()[2], max_depth as i32)
         }
         _ => Vec::new(),
     };
-    Ok(MenuSnapshot { revision, root })
+    Ok(MenuSnapshot { revision, root: items })
 }
 
 /// Parse the `av` items of a layout node into menu entries.

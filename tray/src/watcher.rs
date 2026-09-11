@@ -28,7 +28,20 @@ impl WatcherIface {
         let Some(shared) = self.shared.upgrade() else {
             return;
         };
-        let _ = runtime::enqueue(&shared, Cmd::ItemRegistered(service.clone()));
+        {
+            // Make the registration visible to `RegisteredStatusNotifierItems`
+            // before this method returns: bus clients may enumerate right
+            // away, while the worker materializes the item asynchronously.
+            let mut st = shared.state.lock().unwrap();
+            if shared.stopping.load(std::sync::atomic::Ordering::Acquire) {
+                return;
+            }
+            if !st.pending_registered.contains(&service) {
+                st.pending_registered.push(service.clone());
+            }
+            st.pending.push_back(Cmd::ItemRegistered(service.clone()));
+        }
+        runtime::emit_wake(&shared.conn);
         let _ = Self::status_notifier_item_registered(&ctxt, &service).await;
     }
 
@@ -56,10 +69,13 @@ impl WatcherIface {
             return Vec::new();
         };
         let st = shared.state.lock().unwrap();
-        st.items
+        let mut items: Vec<String> = st
+            .items
             .values()
             .map(|e| format!("{}{}", e.bus, e.path))
-            .collect()
+            .collect();
+        items.extend(st.pending_registered.iter().cloned());
+        items
     }
 
     #[zbus(signal)]

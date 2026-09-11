@@ -160,8 +160,14 @@ impl TrayHandle {
         )
     }
 
-    /// Notify the item that a menu is about to be shown. Synchronous; the
-    /// boolean says whether the item recommends a refresh.
+    /// Notify the item that a menu is about to be shown (SPEC-correct
+    /// pre-show call for `menu_item_id`, 0 = root).
+    ///
+    /// Synchronous. After the call the library refreshes the menu snapshot
+    /// for this item, because lazy DBusMenu providers only populate their
+    /// layout in response to AboutToShow — read `menu()` right after this
+    /// returns to present up-to-date content. The boolean is the item's
+    /// "layout changed" hint.
     pub fn menu_about_to_show(&self, id: &TrayItemId, menu_item_id: i32) -> Result<bool, TrayError> {
         let (bus, menu_path) = {
             let st = self.shared.state.lock().unwrap();
@@ -180,7 +186,9 @@ impl TrayHandle {
             ObjectPath::try_from(menu_path.as_str())?,
             MENU_IFACE,
         )?;
-        Ok(proxy.call::<_, _, bool>("AboutToShow", &(menu_item_id,))?)
+        let need_update = proxy.call::<_, _, bool>("AboutToShow", &(menu_item_id,))?;
+        runtime::refresh_menu_sync(&self.shared, id);
+        Ok(need_update)
     }
 
     /// Subscribe an additional event channel.

@@ -49,6 +49,12 @@ impl From<zbus::names::Error> for TrayError {
     }
 }
 
+impl From<std::convert::Infallible> for TrayError {
+    fn from(err: std::convert::Infallible) -> Self {
+        match err {}
+    }
+}
+
 impl From<zbus::zvariant::Error> for TrayError {
     fn from(err: zbus::zvariant::Error) -> Self {
         TrayError::Protocol(err.to_string())
