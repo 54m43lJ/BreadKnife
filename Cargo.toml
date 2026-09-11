@@ -26,3 +26,4 @@ tokio = { version = "1", features = ["rt", "io-util", "sync", "net", "macros"] }
 
 # 内置托盘库（独立 crate，见 tray/docs/SPEC.md）
 tray = { path = "tray" }
+

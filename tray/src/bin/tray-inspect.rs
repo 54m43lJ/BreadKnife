@@ -22,6 +22,10 @@ fn main() -> ExitCode {
         Some("list") => cmd_list(),
         Some("watch") => cmd_watch(),
         Some("menu") => with_bus_path(&args[1..], cmd_menu),
+        Some("click") => with_bus_path(&args[1..], |h, id, rest| {
+            let menu_id = rest.first().and_then(|s| s.parse::<i32>().ok()).unwrap_or(-1);
+            cmd_click(h, id, menu_id)
+        }),
         Some("activate") => with_bus_path(&args[1..], |h, id, rest| {
             let (x, y) = match (rest.first(), rest.get(1)) {
                 (Some(x), Some(y)) => (x.parse().unwrap_or(0), y.parse().unwrap_or(0)),
@@ -184,6 +188,29 @@ fn print_items(items: &[MenuItem], depth: usize) {
             }
         }
     }
+}
+
+fn cmd_click(handle: &tray::TrayHandle, id: TrayItemId, menu_id: i32) -> Result<(), String> {
+    wait_item(handle, &id)?;
+    handle
+        .menu_about_to_show(&id, 0)
+        .map_err(|e| e.to_string())?;
+    handle.menu_activate(&id, menu_id).map_err(|e| e.to_string())?;
+    let rx = handle.subscribe();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(TrayEvent::InteractionResult { result, .. }) => {
+                println!("Event(clicked, {menu_id}) receipt: {result:?}");
+                handle.shutdown();
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    handle.shutdown();
+    Err("no receipt within 5s".into())
 }
 
 fn cmd_activate(

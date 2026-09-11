@@ -1,11 +1,13 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 use gtk::glib::{self, ControlFlow, SignalHandlerId};
 use gtk::prelude::*;
-use gtk::{gdk, gio};
+use gtk::gdk;
+use gtk::gio;
 use tray::{IconSource, ItemField, Tray, TrayConfig, TrayEvent, TrayHandle, TrayItemId};
 
 #[allow(unused)]
@@ -167,14 +169,18 @@ fn make_tray_icon(handle: &TrayHandle, item: &tray::TrayItem) -> gtk::Image {
         icon.add_controller(left);
     }
 
-    // right click → ContextMenu (or SecondaryActivate fallback)
+    // right click → ContextMenu (or SecondaryActivate fallback).
+    // Opened on RELEASE: presenting a grab-holding popup mid-press makes
+    // the popover surface win the input race against its own menu items
+    // (item clicks would be swallowed). Release-time opening is the clean
+    // Wayland sequence — the implicit grab of the press is already over.
     {
         let handle = handle.clone();
         let id = item.id.clone();
         let icon_weak = icon.clone();
         let right = gtk::GestureClick::new();
         right.set_button(3);
-        right.connect_pressed(move |_gesture, _n, x, y| {
+        right.connect_released(move |_gesture, _n, x, y| {
             // DBusMenu contract: AboutToShow(0) *before* presenting. Lazy
             // providers populate their layout only in response to this, and
             // it also sync-refreshes our snapshot.
@@ -240,15 +246,39 @@ fn popup_menu(
     handle: &TrayHandle,
     id: &TrayItemId,
     snapshot: &tray::MenuSnapshot,
-    parent: &gtk::Image,
+    parent: &impl IsA<gtk::Widget>,
 ) {
+    let sent = Rc::new(AtomicBool::new(false));
     let actions = gio::SimpleActionGroup::new();
-    let menu = build_menu(handle, id, &snapshot.root, &actions);
+    let menu = build_menu(handle, id, &snapshot.root, &actions, &sent);
 
     let popover = gtk::PopoverMenu::from_model(Some(&menu));
     popover.set_parent(parent);
     popover.insert_action_group("tray", Some(&actions));
     popover.popup();
+
+    // Safety net: the model buttons' internal click → action routing proved
+    // unreliable with popover-local, per-popup action groups (physical
+    // clicks landed but never activated). Wire every button with our own
+    // gesture that routes straight to the library; `sent` dedupes against
+    // the still-active action path so exactly one Event goes out per click.
+    {
+        let handle = handle.clone();
+        let id = id.clone();
+        let root = popover.clone();
+        let sent = sent.clone();
+        let popover_for_walk = popover.clone();
+        glib::idle_add_local(move || {
+            attach_click_handlers(
+                popover_for_walk.upcast_ref(),
+                &handle,
+                &id,
+                &root,
+                &sent,
+            );
+            glib::ControlFlow::Break
+        });
+    }
 
     let popover = popover.clone();
     popover.connect_closed(move |p| {
@@ -256,14 +286,59 @@ fn popup_menu(
     });
 }
 
+/// Recursively attach a release gesture to every `GtkModelButton` of a
+/// PopoverMenu. The menu item id is recovered from the button's action name
+/// (`tray.item-<id>`, set by us when building the model).
+fn attach_click_handlers(
+    widget: &gtk::Widget,
+    handle: &TrayHandle,
+    id: &TrayItemId,
+    root: &gtk::PopoverMenu,
+    sent: &Rc<AtomicBool>,
+) {
+    use gtk::prelude::ActionableExt;
+
+    if widget.type_().name() == "GtkModelButton" {
+        if let Some(actionable) = widget.dynamic_cast_ref::<gtk::Actionable>() {
+            if let Some(menu_id) = actionable
+                .action_name()
+                .as_deref()
+                .and_then(|n| n.strip_prefix("tray.item-"))
+                .and_then(|s| s.parse::<i32>().ok())
+            {
+                let handle = handle.clone();
+                let id = id.clone();
+                let root = root.clone();
+                let sent = sent.clone();
+                let g = gtk::GestureClick::new();
+                g.set_button(1);
+                g.connect_released(move |_g, _n, _x, _y| {
+                    if sent.swap(true, Ordering::SeqCst) {
+                        return; // internal action path won the race
+                    }
+                    root.popdown();
+                    let _ = handle.menu_activate(&id, menu_id);
+                });
+                widget.add_controller(g);
+            }
+        }
+    }
+    let mut c = widget.first_child();
+    while let Some(child) = c {
+        attach_click_handlers(&child, handle, id, root, sent);
+        c = child.next_sibling();
+    }
+}
+
 fn build_menu(
     handle: &TrayHandle,
     id: &TrayItemId,
     entries: &[tray::MenuItem],
     actions: &gio::SimpleActionGroup,
+    sent: &Rc<AtomicBool>,
 ) -> gio::Menu {
     let menu = gio::Menu::new();
-    append_entries(handle, id, entries, &menu, actions);
+    append_entries(handle, id, entries, &menu, actions, sent);
     menu
 }
 
@@ -273,6 +348,7 @@ fn append_entries(
     entries: &[tray::MenuItem],
     menu: &gio::Menu,
     actions: &gio::SimpleActionGroup,
+    sent: &Rc<AtomicBool>,
 ) {
     for entry in entries {
         if !entry.visible {
@@ -284,7 +360,7 @@ fn append_entries(
             }
             tray::MenuItemKind::Submenu => {
                 let sub = gio::Menu::new();
-                append_entries(handle, id, &entry.children, &sub, actions);
+                append_entries(handle, id, &entry.children, &sub, actions, sent);
                 menu.append_submenu(Some(&entry.label), &sub);
             }
             tray::MenuItemKind::Standard => {
@@ -294,34 +370,27 @@ fn append_entries(
 
                 if !entry.enabled {
                     item.set_action_and_target_value(Some(&full), None);
-                    item.set_attribute_value("enabled", Some(&false.to_variant()));
                 }
                 if let Some(icon) = &entry.icon {
                     item.set_icon(&gio::ThemedIcon::new(icon));
                 }
 
                 let action = match entry.toggled {
-                    Some(state) => {
-                        let a = gio::SimpleAction::new_stateful(
-                            &action_name,
-                            None,
-                            &state.to_variant(),
-                        );
-                        a
-                    }
+                    Some(state) => gio::SimpleAction::new_stateful(
+                        &action_name,
+                        None,
+                        &state.to_variant(),
+                    ),
                     None => gio::SimpleAction::new(&action_name, None),
                 };
                 {
                     let handle = handle.clone();
                     let item_id = id.clone();
                     let menu_id = entry.id;
-                    let toggled = entry.toggled;
-                    let action = action.clone();
-                    action.connect_activate(move |a, _param| {
-                        if let Some(cur) = toggled {
-                            // flip local checkmark and inform the item
-                            let next = !a.state().and_then(|s| s.get::<bool>()).unwrap_or(cur);
-                            a.set_state(&next.to_variant());
+                    let sent = sent.clone();
+                    action.connect_activate(move |_a, _param| {
+                        if sent.swap(true, Ordering::SeqCst) {
+                            return; // injected-gesture path won the race
                         }
                         let _ = handle.menu_activate(&item_id, menu_id);
                     });
