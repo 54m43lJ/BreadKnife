@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 
 use gtk::glib::{self, ControlFlow, SignalHandlerId};
 use gtk::prelude::*;
-use gtk::{gdk, gio};
+use gtk::gdk;
 use tray::{IconSource, ItemField, Tray, TrayConfig, TrayEvent, TrayHandle, TrayItemId};
 
 #[allow(unused)]
@@ -234,7 +234,12 @@ fn tooltip_text(title: &str, description: &str) -> String {
     }
 }
 
-// ── context menu (DBusMenu snapshot → gio::Menu) ─────────────────
+// ── context menu (DBusMenu snapshot → hand-built popover) ────────
+//
+// Deliberately NOT gio::Menu + action groups: menu-item clicks resolve
+// through GTK's action muxer, which proved unreliable for dynamically
+// inserted popover-local groups. Plain widgets with direct handlers are
+// deterministic and all we need for DBusMenu data.
 
 fn popup_menu(
     handle: &TrayHandle,
@@ -242,37 +247,32 @@ fn popup_menu(
     snapshot: &tray::MenuSnapshot,
     parent: &gtk::Image,
 ) {
-    let actions = gio::SimpleActionGroup::new();
-    let menu = build_menu(handle, id, &snapshot.root, &actions);
+    let popover = gtk::Popover::new();
+    popover.set_autohide(true);
+    let root = popover.clone();
 
-    let popover = gtk::PopoverMenu::from_model(Some(&menu));
+    let box_ = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    box_.set_margin_top(4);
+    box_.set_margin_bottom(4);
+    box_.set_margin_start(2);
+    box_.set_margin_end(2);
+    append_entries(handle, id, &snapshot.root, &box_, &root);
+    popover.set_child(Some(&box_));
+
     popover.set_parent(parent);
-    popover.insert_action_group("tray", Some(&actions));
     popover.popup();
-
-    let popover = popover.clone();
-    popover.connect_closed(move |p| {
+    let p = popover.clone();
+    popover.connect_closed(move |_| {
         p.unparent();
     });
-}
-
-fn build_menu(
-    handle: &TrayHandle,
-    id: &TrayItemId,
-    entries: &[tray::MenuItem],
-    actions: &gio::SimpleActionGroup,
-) -> gio::Menu {
-    let menu = gio::Menu::new();
-    append_entries(handle, id, entries, &menu, actions);
-    menu
 }
 
 fn append_entries(
     handle: &TrayHandle,
     id: &TrayItemId,
     entries: &[tray::MenuItem],
-    menu: &gio::Menu,
-    actions: &gio::SimpleActionGroup,
+    container: &gtk::Box,
+    root: &gtk::Popover,
 ) {
     for entry in entries {
         if !entry.visible {
@@ -280,57 +280,95 @@ fn append_entries(
         }
         match entry.kind {
             tray::MenuItemKind::Separator => {
-                menu.append_section(None, &gio::Menu::new());
+                let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+                sep.set_margin_top(4);
+                sep.set_margin_bottom(4);
+                container.append(&sep);
             }
             tray::MenuItemKind::Submenu => {
-                let sub = gio::Menu::new();
-                append_entries(handle, id, &entry.children, &sub, actions);
-                menu.append_submenu(Some(&entry.label), &sub);
+                let sub_popover = gtk::Popover::new();
+                sub_popover.set_autohide(true);
+                let sub_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                sub_box.set_margin_top(4);
+                sub_box.set_margin_bottom(4);
+                sub_box.set_margin_start(2);
+                sub_box.set_margin_end(2);
+                append_entries(handle, id, &entry.children, &sub_box, root);
+                sub_popover.set_child(Some(&sub_box));
+
+                let btn = gtk::MenuButton::new();
+                btn.set_always_show_arrow(true);
+                btn.set_has_frame(false);
+                btn.add_css_class("flat");
+                btn.set_direction(gtk::ArrowType::Right);
+                btn.set_child(Some(&row_label(&entry.label)));
+                btn.set_popover(Some(&sub_popover));
+                // The nested popover grabs keyboard/pointer focus; clicking a
+                // row there must also close the root menu afterwards.
+                {
+                    let root = root.clone();
+                    sub_popover.connect_closed(move |_| {
+                        root.popdown();
+                    });
+                }
+                btn.set_sensitive(entry.enabled);
+                container.append(&btn);
             }
             tray::MenuItemKind::Standard => {
-                let action_name = format!("item-{}", entry.id);
-                let full = format!("tray.{action_name}");
-                let item = gio::MenuItem::new(Some(&entry.label), Some(&full));
+                let btn = gtk::Button::new();
+                btn.set_has_frame(false);
+                btn.add_css_class("flat");
+                btn.set_child(Some(&row_content(entry)));
+                btn.set_sensitive(entry.enabled);
 
-                if !entry.enabled {
-                    item.set_action_and_target_value(Some(&full), None);
-                    item.set_attribute_value("enabled", Some(&false.to_variant()));
-                }
-                if let Some(icon) = &entry.icon {
-                    item.set_icon(&gio::ThemedIcon::new(icon));
-                }
-
-                let action = match entry.toggled {
-                    Some(state) => {
-                        let a = gio::SimpleAction::new_stateful(
-                            &action_name,
-                            None,
-                            &state.to_variant(),
-                        );
-                        a
-                    }
-                    None => gio::SimpleAction::new(&action_name, None),
-                };
                 {
                     let handle = handle.clone();
                     let item_id = id.clone();
                     let menu_id = entry.id;
-                    let toggled = entry.toggled;
-                    let action = action.clone();
-                    action.connect_activate(move |a, _param| {
-                        if let Some(cur) = toggled {
-                            // flip local checkmark and inform the item
-                            let next = !a.state().and_then(|s| s.get::<bool>()).unwrap_or(cur);
-                            a.set_state(&next.to_variant());
+                    let root = root.clone();
+                    btn.connect_clicked(move |b| {
+                        // Optimistic checkmark flip; the item will push the
+                        // authoritative state via a later menu update.
+                        if let Some(row) = b.child().and_downcast::<gtk::Box>() {
+                            if let Some(check) = row.first_child().and_downcast::<gtk::CheckButton>()
+                            {
+                                check.set_active(!check.is_active());
+                            }
                         }
+                        root.popdown();
                         let _ = handle.menu_activate(&item_id, menu_id);
                     });
                 }
-                actions.add_action(&action);
-                menu.append_item(&item);
+                container.append(&btn);
             }
         }
     }
+}
+
+fn row_label(label: &str) -> gtk::Widget {
+    let label = gtk::Label::new(Some(label));
+    label.set_halign(gtk::Align::Start);
+    label.set_hexpand(true);
+    label.upcast()
+}
+
+fn row_content(entry: &tray::MenuItem) -> gtk::Widget {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    if let Some(state) = entry.toggled {
+        let check = gtk::CheckButton::new();
+        check.set_active(state);
+        check.set_sensitive(false); // indicator only; state is the item's business
+        row.append(&check);
+    }
+    let label = gtk::Label::new(Some(&entry.label));
+    label.set_halign(gtk::Align::Start);
+    label.set_hexpand(true);
+    row.append(&label);
+    if entry.kind == tray::MenuItemKind::Submenu {
+        let arrow = gtk::Image::from_icon_name("pan-end-symbolic");
+        row.append(&arrow);
+    }
+    row.upcast()
 }
 
 // ── helpers ──────────────────────────────────────────────────────
