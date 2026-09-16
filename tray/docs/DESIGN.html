@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BreadPan / Boulanger 项目结构与边界总览</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --card: #ffffff;
+    --text: #2d2d2d;
+    --muted: #6b6b6b;
+    --accent: #b0722c;      /* 面包色系 */
+    --accent-light: #fdf3e7;
+    --border: #e3e0db;
+    --code-bg: #f4f1ec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  h1 {
+    font-size: 1.8rem;
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: .5rem;
+    margin-bottom: .5rem;
+  }
+  h2 {
+    font-size: 1.3rem;
+    margin-top: 2.8rem;
+    color: var(--accent);
+    border-left: 4px solid var(--accent);
+    padding-left: .6rem;
+  }
+  h3 {
+    font-size: 1.08rem;
+    margin-top: 1.6rem;
+    padding: .25rem .8rem;
+    background: var(--accent-light);
+    border-radius: 4px;
+    display: inline-block;
+  }
+  h4 { font-size: .98rem; margin-top: 1.3rem; }
+  blockquote {
+    margin: 1rem 0;
+    padding: .8rem 1.2rem;
+    background: var(--accent-light);
+    border-left: 4px solid var(--accent);
+    color: var(--muted);
+    font-size: .92rem;
+    border-radius: 0 6px 6px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    background: var(--card);
+    font-size: .93rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: .55rem .8rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  tr:nth-child(even) td { background: #fcfbf9; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    font-size: .88rem;
+    line-height: 1.6;
+  }
+  code {
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+    background: var(--code-bg);
+    padding: .1em .35em;
+    border-radius: 4px;
+    font-size: .9em;
+  }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+  strong { color: #1a1a1a; }
+  .divider {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 2.5rem 0;
+  }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .85rem;
+  }
+  @media print {
+    body { background: #fff; }
+    main { max-width: 100%; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>BreadPan / Boulanger 项目结构与边界总览</h1>
+<blockquote>
+  本文档提取自《BreadPan / Boulanger 文档体系生成任务》中定义<strong>项目结构、项目关系与各项目边界</strong>的部分，作为核心文档及其余文档的骨架。<br>
+  每个组件章节固定两节：<strong>定位</strong>（该项目自身的设计取舍）与<strong>边界</strong>（功能/特性覆盖范围与以业务语言描述的暴露面，不涉及 API 签名）。
+</blockquote>
+
+<h2>1. 项目身份</h2>
+<table>
+  <tr><th>项</th><th>决策</th></tr>
+  <tr><td>项目构成</td><td><code>breadpan</code>（SNI/DBusMenu 托盘客户端库）+ <code>boulanger</code>（SNI Watcher 角色库）+ <code>demo-tray</code>（人工验收工具）</td></tr>
+  <tr><td>命名逻辑</td><td>breadpan = 烤盘（承放、供取用）；boulanger = 法语面包师（照看炉火、收发面团＝登记 Item）</td></tr>
+  <tr><td>发布状态</td><td>暂不发布 crates.io；版本策略照常（SemVer）</td></tr>
+  <tr><td>使用场景</td><td>Wayland 会话；<strong>强绑定 GTK 框架</strong>（整套项目以 GTK 编写，不做跨框架移植）</td></tr>
+  <tr><td>目录形态</td><td>同一 workspace 平行 crate；<code>breadpan ⊥ boulanger</code>，互相零依赖</td></tr>
+</table>
+
+<h2>2. Workspace 目录结构</h2>
+<pre><code>&lt;workspace root&gt;/
+├── README.md            # 一页纸：三 crate 一览 + 依赖图 + 阅读入口
+├── breadpan/README.md   # 主规格文档（核心产出，篇幅最大）
+├── boulanger/README.md  # Watcher 角色规格
+└── demo-tray/README.md  # 人工验收/debug 工具（唯一写两库用法的下游文档）</code></pre>
+
+<h2>3. 依赖与引用方向</h2>
+<pre><code>breadknife (下游，不在本仓库)
+├─ 先启动 boulanger 服务，再 breadpan::connect
+│
+demo-tray ──依赖──&gt; breadpan + boulanger （用法文档仅在此）</code></pre>
+
+<hr class="divider">
+
+<h2>4. breadpan</h2>
+
+<h3>定位</h3>
+<p>
+  无头的 SNI 协议客户端库 + DBusMenu 客户端库，以统一事件流交付托盘世界的全部变化。
+  <strong>独家支持 GTK</strong>，为 GTK 应用提供深度整合（渲染对象直出 + 事件桥接方案）。
+</p>
+<p><strong>自身设计的核心取舍：</strong></p>
+<ul>
+  <li><strong>库不拥有 UI</strong>：无窗口、无布局、无事件循环——渲染逻辑归消费方，但数据形态为 GTK 深度定制；</li>
+  <li><strong>不实现 Watcher 角色</strong>：该职责归属 boulanger，breadpan 仅作为客户端观察其存亡；</li>
+  <li><strong>零菜单缓存</strong>：对菜单不储存任何状态，一致性代价 &gt;&gt; 缓存收益；</li>
+  <li><strong>零下游词汇</strong>：文档与概念体系不包含任何具体消费方（任务栏/panel 等）的概念，从未见过下游项目的人可无障碍使用。GTK 是框架绑定，不算任务栏耦合；</li>
+  <li><strong>依赖取向</strong>：zbus + thiserror + gtk4 + std，无日志门面——库自身状态经事件流汇报，日志是消费方职责。框架绑定落在 gtk4 白名单，是「强绑定 GTK」决策在依赖层的落地。</li>
+</ul>
+
+<h3>边界</h3>
+
+<h4>功能覆盖（做）</h4>
+<table>
+  <tr><th>功能域</th><th>覆盖内容</th></tr>
+  <tr><td>Item 生命周期跟踪</td><td>托盘图标的出现 / 消失 / 属性变更，以事件流与状态快照两种方式交付；Host 登记与 Item 跟踪均为客户端职责，由本库承担</td></tr>
+  <tr><td>图标与提示交付</td><td>图标名称与位图双路交付；overlay / attention / tooltip 图标同类型全覆盖；提供主题命中与位图回退的渲染直出</td></tr>
+  <tr><td>菜单数据交付</td><td>菜单布局与条目属性的现场拉取（含助记符解析与原始值逃生门）；菜单变更信号的转发。菜单渲染本身不在此列（见下）</td></tr>
+  <tr><td>交互转发</td><td>激活、次级激活、滚轮、菜单条目触发、弹出前通知——作为指令转发给对应 Item</td></tr>
+  <tr><td>健康呈现</td><td>心跳探测 Item 存活状态并如实呈现（只标记，不移除）</td></tr>
+  <tr><td>GTK 深度整合</td><td>渲染对象直出（主题命中 → 主题图标；未命中 → 位图纹理）与事件桥接权威方案</td></tr>
+</table>
+
+<h4>暴露面（业务语言）</h4>
+<ul>
+  <li><strong>事件流</strong>：Item 生命周期事件、属性变更、菜单变更、Watcher 存亡变迁、内部过程叙述与终止宣告；</li>
+  <li><strong>状态快照</strong>：订阅时刻的完整 Item 记录与 Watcher 存在性，与事件流原子配对、无重叠无缺口；</li>
+  <li><strong>交互指令</strong>：对 Item 的各类激活/滚动/菜单操作，同步给出成功或失败结论；</li>
+  <li><strong>菜单现场读取</strong>：每次读取即最新全量布局；</li>
+  <li><strong>GTK 渲染入口</strong>：图标 → 可绘制对象的一次性转换（须在 GTK 主线程使用）；</li>
+  <li><strong>测试替身</strong>：内置最小 Watcher 替身与演示 Item，保证 CI 在裸会话下自足（与 boulanger 不构成重复）。</li>
+</ul>
+
+<h4>功能覆盖（不做）</h4>
+<table>
+  <tr><th>不做</th><th>理由</th></tr>
+  <tr><td>拥有任何 UI（窗口/布局/事件循环）</td><td>渲染逻辑归消费方</td></tr>
+  <tr><td>XEmbed/X11 传统托盘</td><td>场景钉死 Wayland</td></tr>
+  <tr><td>菜单渲染/弹出定位</td><td>只交付菜单数据模型与激活通道</td></tr>
+  <tr><td>AttentionMovieName</td><td>实际使用者寥寥，进「已知不实现清单」</td></tr>
+  <tr><td>异步运行时泄漏</td><td>公开面零 async，内部执行模型对使用者不可见</td></tr>
+  <tr><td>菜单缓存</td><td>零缓存零状态，一致性代价 &gt;&gt; 缓存收益</td></tr>
+  <tr><td>移除无响应 Item / 强制退出无响应应用</td><td>移除权专属唯一名消失；SNI 不暴露 pid，协议层无通路——强制退出的正当归属是 WM/系统监视器</td></tr>
+  <tr><td>日志门面</td><td>日志经事件流由消费方自行管理</td></tr>
+</table>
+
+<h2>5. boulanger</h2>
+
+<h3>定位</h3>
+<p>
+  SNI Watcher 角色的纯服务端小库；无 UI。规模预期 300–500 行。
+</p>
+<p><strong>自身设计的核心取舍：</strong></p>
+<ul>
+  <li><strong>纯登记簿角色</strong>：只做「谁在托盘世界」的登记与广播，不接触任何业务数据；</li>
+  <li><strong>Watcher 角色的专属归属</strong>：该角色从 breadpan 移除——那里的 Fallback 实现是生产路径死代码，且引发总线名争抢；角色独立后，多实例仲裁问题随之蒸发；</li>
+  <li><strong>由消费方进程内组装</strong>：作为独立 crate 被引入消费方进程运行；留有后门——加上 main 即可独立常驻进程（Watcher 活得比面板久，可避免面板重启引发的 Item 重注册风暴）；</li>
+  <li><strong>与 breadpan 正交</strong>：显式声明互不依赖；breadpan 自带的测试替身不构成重复；</li>
+  <li><strong>依赖取向</strong>：zbus + thiserror + std（无 gtk4——服务端角色与框架无关）。</li>
+</ul>
+
+<h3>边界</h3>
+
+<h4>功能覆盖（做）</h4>
+<table>
+  <tr><th>功能域</th><th>覆盖内容</th></tr>
+  <tr><td>Watcher 名持有</td><td>在会话总线上持有 Watcher 名字，让托盘世界知道"有 Watcher 在"（允许被替换/让位）</td></tr>
+  <tr><td>登记受理</td><td>受理 Item 登记（图标提供方报到）与 Host 登记（图标展示方报到）</td></tr>
+  <tr><td>登记查询</td><td>应答"Host 是否已登记""当前有哪些 Item"的查询</td></tr>
+  <tr><td>登记广播</td><td>Item 报到/离开时对外广播，供观察方感知托盘世界的变化</td></tr>
+  <tr><td>死亡清理</td><td>持有者消失（进程退出/崩溃）时自动清理其登记簿记</td></tr>
+</table>
+
+<h4>暴露面（业务语言）</h4>
+<ul>
+  <li>向会话总线提供一组<strong>登记与查询服务</strong>：Item/Host 报到、报到状态查询、当前在册清单查询；</li>
+  <li>对外发出 <strong>Item 报到 / Item 离开</strong>两类广播信号；</li>
+  <li>进程内组装时以<strong>服务启动/停止</strong>的形态暴露，不涉及任何回调或数据面。</li>
+</ul>
+
+<h4>功能覆盖（不做）</h4>
+<table>
+  <tr><th>不做</th><th>理由</th></tr>
+  <tr><td>任何 UI</td><td>纯服务端角色，无渲染职责</td></tr>
+  <tr><td>Item 属性跟踪 / 图标 / 菜单等数据面</td><td>SNI 数据通路不经 Watcher，数据面归 breadpan（客户端侧）</td></tr>
+  <tr><td>GTK 绑定</td><td>服务端角色与框架无关，白名单不含 gtk4</td></tr>
+</table>
+
+<h2>6. demo-tray</h2>
+
+<h3>定位</h3>
+<p>
+  外围<strong>人工验收与调试工具</strong>；本仓库内<strong>唯一</strong>展示两库用法的文档载体；不是库文档的一部分。
+</p>
+<p><strong>自身设计的核心取舍：</strong></p>
+<ul>
+  <li><strong>示范真实用法</strong>：以消费方视角组装两库（先启动 boulanger 服务，再连接 breadpan），示范代码即文档；</li>
+  <li><strong>诚实呈现</strong>：示范"客户端如实呈现库所报状态"的规范做法（如无响应 Item 置灰、内部叙述流展示）；</li>
+  <li><strong>不受"零下游词汇"约束</strong>：它是下游，是词汇约束的检验出口。</li>
+</ul>
+
+<h3>边界</h3>
+
+<h4>功能覆盖（做）</h4>
+<table>
+  <tr><th>功能域</th><th>覆盖内容</th></tr>
+  <tr><td>渲染示范</td><td>GTK4 简单窗口内的卡片渲染（经深度整合的渲染直出路径）</td></tr>
+  <tr><td>交互复现</td><td>左键激活（含"整项即菜单"时的菜单行为）、滚轮、右键弹出菜单（弹出前通知 → 现场拉取 → 弹出 → 条目触发）、popup 打开期间菜单变更重取</td></tr>
+  <tr><td>事件观察</td><td>底部事件日志展示全部事件类型（含内部过程叙述）</td></tr>
+  <tr><td>状态呈现示范</td><td>无响应 Item 置灰呈现（示范"诚实状态呈现"）</td></tr>
+  <tr><td>内置测试台</td><td>驱动演示 Item 制造全部变化；持有/释放 Watcher 角色制造存亡变迁</td></tr>
+</table>
+
+<h4>暴露面（业务语言）</h4>
+<ul>
+  <li><strong>运行入口</strong>：一条运行命令即可在本地会话中启动；</li>
+  <li><strong>验收场景</strong>：纯 Hyprland（无任何托盘环境）下，从窗口内复现全部事件类型——这是三库协作的人工验收基准。</li>
+</ul>
+
+<h4>功能覆盖（不做）</h4>
+<table>
+  <tr><th>不做</th><th>理由</th></tr>
+  <tr><td>生产级托盘 UI</td><td>外围验收工具，不追求产品化</td></tr>
+  <tr><td>进入库文档体系</td><td>用法文档仅存在于本工具，库文档保持零下游词汇</td></tr>
+</table>
+
+<footer>
+  <strong>附：提取说明</strong>
+  <ul>
+    <li>本文档仅收录<strong>结构 / 关系 / 边界</strong>内容；运行模型、API 签名、事件语义、ADR 等请查阅原文档体系对应部分。</li>
+    <li>各组件章节统一为「定位 / 边界」两节：定位 = 自身设计取舍；边界 = 功能覆盖与业务语言暴露面。跨项目归属决策已分散归入对应组件。</li>
+    <li>各项目的「为什么」均保留原文理由，符合"每条约束可回答为什么"的准则。</li>
+  </ul>
+</footer>
+
+</main>
+</body>
+</html>
