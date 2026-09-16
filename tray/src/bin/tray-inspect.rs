@@ -190,6 +190,7 @@ fn cmd_activate(
     x: i32,
     y: i32,
 ) -> Result<(), String> {
+    settle(handle); // enumeration is async; give it a moment
     if handle.item(&id).is_none() {
         return Err(format!("item {id} not found (is it running?)"));
     }

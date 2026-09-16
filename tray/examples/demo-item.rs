@@ -6,6 +6,10 @@
 //! cargo run --example demo-item --features testing
 //! ```
 //!
+//! If no `org.kde.StatusNotifierWatcher` is on the bus, the item mounts a
+//! demo-grade fallback watcher itself, so it also runs standalone on bare
+//! sessions (killing it then produces watcher down/up transitions).
+//!
 //! Commands (one per line):
 //! ```text
 //!   status <passive|active|needs-attention>

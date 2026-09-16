@@ -1,0 +1,11 @@
+[package]
+name = "demo-tray"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "GTK4 demo host for the tray library: lists all SNI items and exercises every interaction (SPEC §10.5)"
+
+[dependencies]
+tray = { path = "../tray", features = ["testing"] }
+gtk4 = { version = "0.9", features = ["v4_6"] }
+async-channel = "2"

@@ -395,6 +395,34 @@ stdin 指令集:
 
 公开 `tray::testing::spawn_demo_item(config) -> DemoItem`，供二开者在自己的测试中内嵌启动假 Item（10.2 的库形态复用），`Drop` 时自动注销。
 
+另公开 `tray::testing::DemoWatcher`：一个 demo 级 `org.kde.StatusNotifierWatcher` 实现，`take()`/`release()` 控制补位。`spawn_demo_item` 在总线上无 Watcher 时自动挂载它（保证 demo-item 在裸会话独立可用）；`demo-watcher-switch`（10.6）用它制造 `WatcherChanged` 变迁。
+
+### 10.5 `demo-tray`（独立消费方 crate，仓库根目录 `demo-tray/`）
+
+GTK4 简单窗口，陈列当前全部托盘图标，作为 UI 层消费方模板与人工验收工具：
+
+- 卡片渲染 `IconSource`（主题名缺省回退 `image-missing`；Pixmap 转 RGBA 贴图）；
+- 左键卡片 = `activate`；滚轮 = `scroll`；右键 = 以 `menu()` 快照弹出菜单（先 `menu_about_to_show`），点击条目即 `menu_activate`；
+- 底部事件日志实时打印全部 `TrayEvent`（含 `MenuChanged` / `WatcherChanged` / `InteractionResult` 回执）；
+- 内置测试台（复用 10.4）：一键 spawn demo item 并驱动 status/icon/pixmap/menu 增删改/挂卸菜单/注销；一键 take/release watcher 角色。
+
+```bash
+cargo run -p demo-tray    # 仓库根目录执行
+```
+
+**验收**：在纯 Hyprland（无任何托盘环境）下，从窗口内可复现全部事件类型。
+
+### 10.6 `demo-watcher-switch`（examples 目标，`--features testing`）
+
+回车切换自身对 `org.kde.StatusNotifierWatcher` 名字的持有/释放，用于对运行中的 Host（如 `minimal`）制造 `WatcherChanged` 变迁：
+
+```
+cargo run --example demo-watcher-switch --features testing
+# 回车 = 抢占（Host 收到 ExternalUp）→ 回车 = 释放（Host 收到 ExternalDown，2×timeout 后补位为 FallbackActive）
+```
+
+**验收**：`minimal` 在另开终端运行时，每次回车均能观察到对应的 `WatcherChanged` 事件。
+
 ---
 
 ## 11. 测试与验收
@@ -439,3 +467,4 @@ CI 最低门禁：`cargo build`、`cargo test`（含集成测试）在无显示�
 | :--- | :--- | :--- |
 | v0.1 | 2026-09-10 | 初版规格：能力清单、公开接口、事件模型、脚手架与验收定义 |
 | v0.2 | 2026-09-11 | PoC 实现（zbus 5 blocking API）：①§9 线程模型修订为事件线程 + 定时器线程（阻塞迭代器无超时能力）；②`timeout_ms` 语义收窄为发现/让位等待，DBus 调用超时由 zbus 默认承担；③集成测试固定跑在私有 dbus-run-session 中以保证 Fallback 断言确定性 |
+| v0.3 | 2026-09-11 | §10 脚手架扩充：新增 10.5 `demo-tray`（独立 GTK4 消费方 crate）与 10.6 `demo-watcher-switch`；§10.4 `testing` 特性补充 `DemoWatcher`；§7 Fallback Watcher 名字带 `AllowReplacement`（外部 Watcher 出现可无缝接管，Host 经 NameOwnerChanged 让位） |

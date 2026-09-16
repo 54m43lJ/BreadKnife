@@ -361,7 +361,9 @@ fn setup_watcher_and_host(shared: &Arc<Shared>) -> Result<(), TrayError> {
 fn become_watcher(shared: &Arc<Shared>) -> Result<bool, TrayError> {
     let reply = shared.conn.request_name_with_flags(
         SNI_WATCHER,
-        RequestNameFlags::DoNotQueue | RequestNameFlags::ReplaceExisting,
+        // AllowReplacement: an external watcher appearing must be able to
+        // take over; we observe the loss via NameOwnerChanged and yield.
+        RequestNameFlags::DoNotQueue | RequestNameFlags::AllowReplacement,
     )?;
     let owned = matches!(
         reply,
@@ -423,12 +425,37 @@ fn watcher_proxy(shared: &Shared) -> Result<zbus::blocking::Proxy<'static>, Tray
 // ── item lifecycle ──────────────────────────────────────────────────────
 
 fn enumerate_items(shared: &Shared) {
-    let list: Vec<String> = watcher_proxy(shared)
-        .and_then(|p| {
-            p.call("RegisteredStatusNotifierItems", &())
+    // Spec: `RegisteredStatusNotifierItems` is a readable property; some
+    // implementations export it as a method instead — try both.
+    let list = (|| -> Result<Vec<String>, TrayError> {
+        let props = zbus::blocking::fdo::PropertiesProxy::new(
+            &shared.conn,
+            SNI_WATCHER,
+            SNI_WATCHER_PATH,
+        )?;
+        let iface: zbus::names::InterfaceName<'_> = SNI_WATCHER_IFACE.try_into()?;
+        let owned = props.get(iface, "RegisteredStatusNotifierItems")?;
+        let value = Value::from(owned);
+        let Value::Array(arr) = &value else {
+            return Err(TrayError::Protocol(
+                "RegisteredStatusNotifierItems: unexpected type".into(),
+            ));
+        };
+        let mut out = Vec::with_capacity(arr.len());
+        for i in 0..arr.len() {
+            if let Ok(Some(Value::Str(s))) = arr.get::<Value>(i) {
+                out.push(s.to_string());
+            }
+        }
+        Ok(out)
+    })()
+    .or_else(|_| {
+        watcher_proxy(shared).and_then(|p| {
+            p.call::<_, _, Vec<String>>("RegisteredStatusNotifierItems", &())
                 .map_err(TrayError::from)
         })
-        .unwrap_or_default();
+    })
+    .unwrap_or_default();
     for service in list {
         add_item(shared, service);
     }
@@ -841,6 +868,18 @@ fn on_watcher_up(shared: &Shared) {
         st.watcher = WatcherState::ExternalUp;
         drop(st);
         dispatch(shared, TrayEvent::WatcherChanged(WatcherState::ExternalUp));
+    } else {
+        // New watcher didn't accept our host registration (broken or gone
+        // again): report down and line up a respawn attempt.
+        let mut st = shared.state.lock().unwrap();
+        st.watcher = WatcherState::ExternalDown;
+        drop(st);
+        dispatch(shared, TrayEvent::WatcherChanged(WatcherState::ExternalDown));
+        schedule_timer(
+            shared,
+            Instant::now() + Duration::from_millis(2 * shared.config.timeout_ms),
+            TimerKind::WatcherRespawn,
+        );
     }
 }
 

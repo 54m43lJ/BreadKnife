@@ -17,8 +17,17 @@ testing = []
 name = "tray-inspect"
 path = "src/bin/tray-inspect.rs"
 
+[[test]]
+name = "integration"
+required-features = ["testing"]
+
 [[example]]
 name = "demo-item"
+required-features = ["testing"]
 
 [[example]]
 name = "minimal"
+
+[[example]]
+name = "demo-watcher-switch"
+required-features = ["testing"]

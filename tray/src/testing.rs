@@ -9,6 +9,7 @@ use std::sync::{mpsc, Arc, Mutex};
 
 use zbus::{
     blocking::Connection,
+    fdo::RequestNameFlags,
     interface,
     object_server::{ObjectServer, SignalEmitter},
     zvariant::{ObjectPath, OwnedValue, Structure, Value},
@@ -90,6 +91,8 @@ pub struct DemoItem {
     control: zbus::blocking::Proxy<'static>,
     item_path: String,
     state: Shared,
+    /// Watcher we mounted ourselves (kept so the name/objects stay alive).
+    _demo_watcher: Option<DemoWatcher>,
 }
 
 impl DemoItem {
@@ -187,7 +190,9 @@ impl Drop for DemoItem {
 }
 
 /// Spawn a demo item on its own bus connection and register it with the
-/// watcher (retrying briefly while the watcher shows up).
+/// watcher. If no watcher answers within a short grace period, a
+/// demo-grade fallback watcher ([`DemoWatcher`]) is mounted on the same
+/// connection so the item works standalone on bare sessions.
 pub fn spawn_demo_item(config: DemoItemConfig) -> Result<DemoItem, TrayError> {
     let conn = Connection::session().map_err(|e| TrayError::Bus(e.to_string()))?;
     let menu_path = format!("{}/menu", config.item_path.trim_end_matches('/'));
@@ -227,24 +232,45 @@ pub fn spawn_demo_item(config: DemoItemConfig) -> Result<DemoItem, TrayError> {
         .build()?;
     let _ = control.call_noreply("Spawned", &());
 
-    // Register with the watcher; retry while it shows up.
+    // Register with an existing watcher; if none shows up in time, provide
+    // our own demo watcher so the item also works on bare sessions.
     let watcher = zbus::blocking::Proxy::new(&conn, WATCHER, WATCHER_PATH, WATCHER_IFACE)?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+    let mut registered = false;
+    let mut last_err = None;
+    while !registered {
         match watcher.call::<_, _, ()>("RegisterStatusNotifierItem", &(&service,)) {
-            Ok(()) => break,
-            Err(_) if std::time::Instant::now() < deadline => {
+            Ok(()) => registered = true,
+            Err(e) if std::time::Instant::now() < deadline => {
+                last_err = Some(e);
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            Err(e) => return Err(TrayError::from(e)),
+            Err(e) => {
+                last_err = Some(e);
+                break;
+            }
         }
     }
+    let demo_watcher = if registered {
+        None
+    } else {
+        let dw = DemoWatcher::new(conn.clone());
+        dw.take().map_err(|e| {
+            let _ = last_err.take();
+            TrayError::Protocol(format!(
+                "no StatusNotifierWatcher on the bus and could not provide one: {e}"
+            ))
+        })?;
+        dw.register_own_item(&service)?;
+        Some(dw)
+    };
 
     Ok(DemoItem {
         conn,
         control,
         item_path: config.item_path,
         state,
+        _demo_watcher: demo_watcher,
     })
 }
 
@@ -568,4 +594,182 @@ pub fn wait_for<T>(
             Err(_) => return None,
         }
     }
+}
+
+// ── demo fallback watcher ───────────────────────────────────────────────
+
+/// Item list shared between the demo watcher interface and its owner.
+#[derive(Debug, Default, Clone)]
+struct WatcherRegistry(Arc<Mutex<Vec<String>>>);
+
+impl WatcherRegistry {
+    fn add(&self, service: &str) -> bool {
+        let mut items = self.0.lock().unwrap();
+        if items.iter().any(|s| s == service) {
+            false
+        } else {
+            items.push(service.to_string());
+            true
+        }
+    }
+
+    fn remove(&self, service: &str) {
+        self.0.lock().unwrap().retain(|s| s != service);
+    }
+}
+
+/// A demo-grade `org.kde.StatusNotifierWatcher` on its own connection.
+///
+/// Used by [`spawn_demo_item`] (self-sufficiency when no watcher is on the
+/// bus) and by the `demo-watcher-switch` example (manufacturing
+/// `WatcherChanged` transitions for a running tray host).
+pub struct DemoWatcher {
+    conn: Connection,
+    registry: WatcherRegistry,
+}
+
+impl DemoWatcher {
+    /// Build a demo watcher on its own session-bus connection (does not own
+    /// the watcher name until [`DemoWatcher::take`]). Convenience for
+    /// consumer tools that do not depend on zbus directly.
+    pub fn spawn() -> Result<Self, TrayError> {
+        let conn = Connection::session().map_err(|e| TrayError::Bus(e.to_string()))?;
+        Ok(Self::new(conn))
+    }
+
+    /// Build a demo watcher on the given connection (does not own the
+    /// watcher name until [`DemoWatcher::take`]).
+    pub fn new(conn: Connection) -> Self {
+        Self {
+            conn,
+            registry: WatcherRegistry::default(),
+        }
+    }
+
+    /// Our unique bus name.
+    pub fn unique_name(&self) -> String {
+        self.conn
+            .unique_name()
+            .map(|n| n.to_string())
+            .unwrap_or_default()
+    }
+
+    /// Own `org.kde.StatusNotifierWatcher` (replacing whoever holds it).
+    pub fn take(&self) -> Result<(), TrayError> {
+        self.conn.object_server().at(
+            WATCHER_PATH,
+            DemoWatcherIface {
+                registry: self.registry.clone(),
+            },
+        )?;
+        self.conn
+            .request_name_with_flags(
+                WATCHER,
+                RequestNameFlags::DoNotQueue | RequestNameFlags::ReplaceExisting,
+            )
+            .map_err(TrayError::from)?;
+        Ok(())
+    }
+
+    /// Yield the watcher role (interface down, name released).
+    pub fn release(&self) {
+        let _ = self
+            .conn
+            .object_server()
+            .remove::<DemoWatcherIface, _>(WATCHER_PATH);
+        let _ = self.conn.release_name(WATCHER);
+    }
+
+    /// Whether we currently own the watcher name (no side effects).
+    pub fn is_owner(&self) -> bool {
+        let owner = zbus::blocking::fdo::DBusProxy::new(&self.conn)
+            .ok()
+            .and_then(|p| p.get_name_owner(WATCHER.try_into().expect("static name")).ok());
+        match owner {
+            Some(o) => self
+                .conn
+                .unique_name()
+                .map(|n| n.as_str() == o.as_str())
+                .unwrap_or(false),
+            None => false,
+        }
+    }
+
+    /// Register an item with our own watcher (no bus round trip).
+    pub fn register_own_item(&self, service: &str) -> Result<(), TrayError> {
+        if !self.registry.add(service) {
+            return Ok(());
+        }
+        let emitter =
+            SignalEmitter::new(self.conn.inner(), WATCHER_PATH).map_err(TrayError::from)?;
+        zbus::block_on(DemoWatcherIface::status_notifier_item_registered(
+            &emitter, service,
+        ))?;
+        Ok(())
+    }
+}
+
+/// The exported demo watcher object.
+struct DemoWatcherIface {
+    registry: WatcherRegistry,
+}
+
+#[interface(name = "org.kde.StatusNotifierWatcher")]
+impl DemoWatcherIface {
+    async fn register_status_notifier_item(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        service: String,
+    ) {
+        if self.registry.add(&service) {
+            let _ = Self::status_notifier_item_registered(&ctxt, &service).await;
+        }
+    }
+
+    async fn unregister_status_notifier_item(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        service: String,
+    ) {
+        self.registry.remove(&service);
+        let _ = Self::status_notifier_item_unregistered(&ctxt, &service).await;
+    }
+
+    async fn register_status_notifier_host(
+        &self,
+        #[zbus(signal_context)] ctxt: SignalEmitter<'_>,
+        #[allow(unused_variables)] service: String,
+    ) {
+        let _ = Self::status_notifier_host_registered(&ctxt).await;
+    }
+
+    #[zbus(property)]
+    fn is_status_notifier_host_registered(&self) -> bool {
+        true
+    }
+
+    #[zbus(property)]
+    fn protocol_version(&self) -> i32 {
+        0
+    }
+
+    #[zbus(property)]
+    fn registered_status_notifier_items(&self) -> Vec<String> {
+        self.registry.0.lock().unwrap().clone()
+    }
+
+    #[zbus(signal)]
+    pub async fn status_notifier_item_registered(
+        ctxt: &SignalEmitter<'_>,
+        service: &str,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn status_notifier_item_unregistered(
+        ctxt: &SignalEmitter<'_>,
+        service: &str,
+    ) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    pub async fn status_notifier_host_registered(ctxt: &SignalEmitter<'_>) -> zbus::Result<()>;
 }
