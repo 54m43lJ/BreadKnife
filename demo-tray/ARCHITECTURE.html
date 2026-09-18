@@ -12,8 +12,7 @@
 <h1>demo-tray 架构规格</h1>
 <blockquote>
   本文档面向实现者：进程组装、接口契约、时序图、数据模型。
-  使用说明与能力边界见 <a href="README.html">README.html</a>，实现骨架见 <a href="CODE.html">CODE.html</a>，
-  项目群组装约定见 <a href="../ARCHITECTURE.html">根 ARCHITECTURE</a> §接口契约。
+  使用说明与能力边界见 <a href="README.html">README.html</a>，实现骨架见 <a href="CODE.html">CODE.html</a>。
 </blockquote>
 
 <h2>1. 进程组装</h2>
@@ -31,7 +30,7 @@
                DBus session bus
 </code></pre>
 <p class="diagram-note">
-  按项目群约定的装配顺序组装（见根 ARCHITECTURE §接口契约）：先启动 boulanger 服务（登记中心就绪），再连接 breadpan。
+  装配顺序：先启动 boulanger 服务（登记中心就绪），再连接 breadpan（与两库的组装约定一致）。
   测试台复用两库的测试/控制能力：演示 Item 来自 breadpan 的 <code>testing</code> 特性，
   Watcher 角色持有/释放即 boulanger 服务的启停。
 </p>
@@ -152,7 +151,7 @@
 </table>
 
 <footer>
-  修订历史：v0.1 · 2026-09-16 · 自 tray SPEC 脚手架章节重构。v0.2 · 2026-09-18 · 按三层文档模型重组：新增接口契约、数据模型与时序图章节。v0.3 · 2026-09-18 · DESIGN 解散：组装约定改引根 ARCHITECTURE。
+  修订历史：v0.1 · 2026-09-16 · 自 tray SPEC 脚手架章节重构。v0.2 · 2026-09-18 · 按三层文档模型重组：新增接口契约、数据模型与时序图章节。v0.3 · 2026-09-18 · DESIGN 解散：组装约定改引根 ARCHITECTURE。v0.4 · 2026-09-18 · 平级互不引用：移除对根文档的引用，组装约定改为自含表述。
 </footer>
 
 </main>

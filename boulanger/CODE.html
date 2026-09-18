@@ -21,8 +21,7 @@
 ├── lib.rs           # 公开面出口：Service / ServiceHandle / 错误
 ├── registry.rs      # 登记簿记：在册 Item 表 / Host 表（内存）
 ├── service.rs       # 服务生命周期：名持有、导出、停止、让位
-├── iface.rs         # org.kde.StatusNotifierWatcher 协议面实现（方法+信号）
-└── bin.rs           # 独立常驻形态（bin 目标，信号退出）</code></pre>
+└── iface.rs         # org.kde.StatusNotifierWatcher 协议面实现（方法+信号）</code></pre>
 
 <h2>2. 类型与方法签名</h2>
 <pre><code>/// 进程内组装侧唯一公开面：服务启动/停止形态，无回调、无数据面
@@ -103,7 +102,7 @@ impl WatcherIface {
 └── 置已停止（幂等：重复调用直接返回）</code></pre>
 
 <footer>
-  修订历史：v0.0-draft · 2026-09-18 · 初稿：文件树、服务与协议面签名、五条主流程调用栈，待评审定稿。
+  修订历史：v0.0-draft · 2026-09-18 · 初稿：文件树、服务与协议面签名、五条主流程调用栈，待评审定稿。v0.1-draft · 2026-09-18 · 随架构定案删除 bin.rs（独立常驻形态取消）。
 </footer>
 
 </main>

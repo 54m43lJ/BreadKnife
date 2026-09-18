@@ -223,7 +223,7 @@
   <tr><td>总线类</td><td>会话总线连接失败</td><td>入口返回 Err</td></tr>
   <tr><td>超时类</td><td>服务发现 / 调用 / 心跳超时</td><td>Err / 回执</td></tr>
   <tr><td>目标缺失类</td><td>Item 不存在 / 无菜单未就绪</td><td>Err</td></tr>
-  <tr><td>协议类</td><td>属性缺失、类型不符等</td><td>降级为默认字段 / Err / 回执，<strong>库不 panic</strong></td></tr>
+  <tr><td>协议类</td><td>属性缺失、类型不符等</td><td>按路线分配：跟踪面（快照/Added/Changed）字段级降级为默认值，Item 照常在册；<code>menu()</code> 现场读取失败返回 Err；交互指令受理阶段返回 Err、异步阶段以 InteractionResult 失败回执交付。<strong>库不 panic</strong></td></tr>
   <tr><td>停机类</td><td>终止宣告之后的一切调用</td><td>统一返回 Stopped</td></tr>
 </table>
 <p><strong>容错总则</strong>：单个 Item 的死亡不影响其他 Item 的跟踪；总线断开 → 终止宣告 → Stopped，重建由消费方决定。</p>
@@ -274,7 +274,7 @@
 </ul>
 
 <footer>
-  修订历史：v0.1 · 2026-09-16 · 自 tray SPEC 重构。v0.2 · 2026-09-18 · 按三层文档模型重组：新增时序图与数据模型章节；Rust 签名（入口/Handle/事件/数据/错误/GTK/测试替身）移交 CODE.html，本文档保留业务契约。v0.3 · 2026-09-18 · 零项目名约束：文档内不再出现其他项目名，相关表述泛化为「外部 Watcher」「依赖方」等角色词汇。
+  修订历史：v0.1 · 2026-09-16 · 自 tray SPEC 重构。v0.2 · 2026-09-18 · 按三层文档模型重组：新增时序图与数据模型章节；Rust 签名（入口/Handle/事件/数据/错误/GTK/测试替身）移交 CODE.html，本文档保留业务契约。v0.3 · 2026-09-18 · 零项目名约束：文档内不再出现其他项目名，相关表述泛化为「外部 Watcher」「依赖方」等角色词汇。v0.4 · 2026-09-18 · 协议类错误定案：三结局按路线分配（跟踪面字段降级 / menu() 返回 Err / 交互受理 Err + 回执）。
 </footer>
 
 </main>

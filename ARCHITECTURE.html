@@ -11,27 +11,26 @@
 
 <h1>breadknife 架构规格</h1>
 <blockquote>
-  本文档面向实现者：项目群结构、时序图、接口契约、数据模型与转换、模块规格。
+  本文档面向实现者：仓库结构、时序图、接口契约、数据模型与转换、模块规格。
   行为边界以 <a href="README.html">README.html</a> 为权威，实现骨架见 <a href="CODE.html">CODE.html</a>。
 </blockquote>
 
-<h2>1. 项目群结构</h2>
+<h2>1. 仓库结构</h2>
 <h3>1.1 文件结构</h3>
 <pre><code>breadknife/           # 项目群根（应用，二进制 bread）
 ├── breadpan/         # 托盘客户端库
-├── boulanger/        # Watcher 角色库
-└── demo-tray/        # 托盘验收与调试工具</code></pre>
+└── boulanger/        # Watcher 角色库</code></pre>
 <p class="diagram-note">
-  单一仓库，breadknife 为根。各成员的内部文件结构见各自项目的 CODE.html，父级不展开。
+  单一仓库，breadknife 为根，内嵌两库。各成员的内部文件结构见各自项目的 CODE.html，父级不展开。
 </p>
 <h3>1.2 依赖视角</h3>
 <pre><code>
-   +-------------+               +-------------+
-   | breadknife  |               |  demo-tray  |
-   | bin: "bread"|               |  test tool  |
-   +------+------+               +------+------+
-          |                              |
-          +--------------+---------------+
+   +-------------+
+   | breadknife  |
+   | bin: "bread"|
+   +------+------+
+          |
+          +--------------+
                          | depends
                          v
      +-------------------------------------+
@@ -39,7 +38,7 @@
      +-------------------------------------+
 </code></pre>
 <p class="diagram-note">
-  breadpan ⊥ boulanger，两库互相零依赖。依赖关系只在依赖方文档表达（本文档与 demo-tray），
+  breadpan ⊥ boulanger，两库互相零依赖。依赖关系只在依赖方文档表达，
   库文档不点名其他项目。跨库组装约定（先启动 boulanger 服务，再连接 breadpan）见 §4.3。
 </p>
 
@@ -51,7 +50,7 @@
   <tr><td>DBus 通信</td><td><code>zbus</code></td></tr>
   <tr><td>合成器通信</td><td>Hyprland IPC（Unix Socket，只读监听）</td></tr>
   <tr><td>托盘协议栈</td><td>boulanger（Watcher 角色，先启动）+ breadpan（客户端，后连接）</td></tr>
-  <tr><td>调节后端</td><td>音量 <code>pamixer</code>（或 PulseAudio DBus）；亮度 <code>light</code>（或读写 <code>/sys/class/backlight</code>）</td></tr>
+  <tr><td>调节后端</td><td>音量 <code>pamixer</code>；亮度 <code>brightnessctl</code>（内置面板）+ <code>ddcutil</code>（外接显示器，DDC/CI）</td></tr>
 </table>
 <pre><code>
                 +----------------------------------------+
@@ -63,10 +62,10 @@
  control socket |                                        |     -- session bus --> SNI / DBusMenu
  bread.sock   --->  样式系统 (CSS 变量 + RELOAD)          | --> DBus (Notifications / UPower /
                 |                                        |     NetworkManager / MPRIS)
-                +----------------------------------------+ --> pamixer / light
+                +----------------------------------------+ --> pamixer / brightnessctl / ddcutil
 </code></pre>
 <p class="diagram-note">
-  Hyprland IPC 为只读监听，驱动界面更新；DBus 系统服务缺失时对应功能自动隐藏或降级；外部工具是音量与亮度调节的后端。
+  Hyprland IPC 为只读监听，驱动界面更新；服务缺失行为：入口组件（电池/网络）对应服务缺失时自动隐藏，弹出面板内操作项（媒体/音量/亮度）后端缺失时灰置并提示；外部工具是音量与亮度调节的后端。
 </p>
 
 <h2>3. 运行模型</h2>
@@ -88,7 +87,7 @@
   <tr><td><code>monitoradded</code> / <code>monitorremoved</code></td><td>触发 Window 实例的创建与销毁</td></tr>
   <tr><td><code>workspace&gt;&gt;X</code></td><td>触发 Workspace 模块状态切换</td></tr>
   <tr><td><code>activewindow</code></td><td>触发窗口信息模块更新</td></tr>
-  <tr><td><code>configreloaded</code></td><td>可选：触发内部 UI 状态刷新</td></tr>
+  <tr><td><code>configreloaded</code></td><td>触发全量重同步：重扫显示器清单并重建工作区映射表（复用启动扫描路径）</td></tr>
 </table>
 
 <h3>4.2 Unix Socket（控制接口）</h3>
@@ -233,7 +232,7 @@
   <tr><td>左键交互</td><td>转发 breadpan 的 Activate 指令；"整项即菜单"的 Item 转入菜单流程</td></tr>
   <tr><td>右键菜单</td><td>弹出前通知（AboutToShow）→ 经 <code>menu()</code> 现场拉取最新布局 → GTK 渲染弹出 → 条目点击经 <code>menu_activate</code> 下发；弹窗打开期间收到 MenuChanged 时重取刷新（时序见 §5.4）</td></tr>
   <tr><td>Tooltip</td><td>取 breadpan 交付的 ToolTip 数据悬停显示</td></tr>
-  <tr><td>可读性处理（UI 层职责）</td><td>自动给图标加高对比度边框或背景，依据图标深浅智能选择深色/浅色，保证深浅主题下清晰可辨</td></tr>
+  <tr><td>可读性处理（UI 层职责）</td><td>图标统一置于背景底板：经渲染直出取得像素后采样平均亮度（luma），底色与图标深浅反相（深图标浅底、浅图标深底），保证深浅主题下清晰可辨</td></tr>
   <tr><td>健康呈现</td><td>无响应 Item 置灰呈现（只标记，不移除）；移除仅由 breadpan 的 Removed 事件驱动</td></tr>
 </table>
 
@@ -250,8 +249,8 @@
 <table>
   <tr><th>组件</th><th>规格</th></tr>
   <tr><td>媒体控制</td><td>MPRIS DBus 接口，显示播放器信息及控制按钮</td></tr>
-  <tr><td>音量控制</td><td>调用 <code>pamixer</code>，或 PulseAudio DBus 接口</td></tr>
-  <tr><td>亮度控制</td><td>调用 <code>light</code>，或读写 <code>/sys/class/backlight</code></td></tr>
+  <tr><td>音量控制</td><td>调用 <code>pamixer</code>；工具缺失时灰置并提示</td></tr>
+  <tr><td>亮度控制</td><td>内置面板 <code>brightnessctl</code>；外接显示器 <code>ddcutil</code>（DDC/CI）；工具缺失时灰置并提示</td></tr>
   <tr><td>网络 / WiFi</td><td>显示状态；连接交互为 Phase 2 扩展</td></tr>
   <tr><td>蓝牙</td><td>显示状态；配对交互为 Phase 2 扩展</td></tr>
   <tr><td>日历</td><td>GTK Calendar 组件</td></tr>
@@ -316,18 +315,18 @@
 <hr class="divider">
 
 <h2>10. 文档地图</h2>
-<p>项目群事实（成员、文件结构、依赖）以本文档 §1 与根 README 为权威；各成员边界以各自 README 为权威。</p>
+<p>项目群成员以 <a href="README.html">README.html</a>「项目群」为权威；仓库结构与依赖以本文档 §1 为权威；各成员边界以各自 README 为权威。</p>
 <table>
   <tr><th>文档</th><th>内容</th></tr>
   <tr><td><a href="README.html">README.html</a></td><td>项目描述、WHAT &amp; WHY、使用与原型、项目群成员</td></tr>
   <tr><td>ARCHITECTURE（本文档）</td><td>项目群结构、时序图、接口契约、数据模型与转换</td></tr>
   <tr><td><a href="CODE.html">CODE.html</a></td><td>实现骨架：文件树、类型与签名、伪码调用栈</td></tr>
   <tr><td><a href="BUILD.html">BUILD.html</a></td><td>构建依赖、构建与本地运行、发布与版本策略</td></tr>
-  <tr><td><a href="breadpan/ARCHITECTURE.html">breadpan/</a> · <a href="boulanger/ARCHITECTURE.html">boulanger/</a> · <a href="demo-tray/README.html">demo-tray/</a></td><td>成员项目文档</td></tr>
+  <tr><td><a href="breadpan/ARCHITECTURE.html">breadpan/</a> · <a href="boulanger/ARCHITECTURE.html">boulanger/</a></td><td>成员项目文档</td></tr>
 </table>
 
 <footer>
-  修订历史：v0.1 · 2026-09-16 · 自 PRD-1.0 重构为架构层文档。v0.2 · 2026-09-18 · 按三层文档模型重组：新增关键流程时序与数据模型章节，签名移交 CODE.html。v0.3 · 2026-09-18 · DESIGN 解散：新增 §1 项目群结构（文件树 + 依赖视角），DESIGN 权威职责由本档与根 README 分担。
+  修订历史：v0.1 · 2026-09-16 · 自 PRD-1.0 重构为架构层文档。v0.2 · 2026-09-18 · 按三层文档模型重组：新增关键流程时序与数据模型章节，签名移交 CODE.html。v0.3 · 2026-09-18 · DESIGN 解散：新增 §1 项目群结构（文件树 + 依赖视角），DESIGN 权威职责由本档与根 README 分担。v0.4 · 2026-09-18 · 平级互不引用：§1 改为仓库结构，移除 demo-tray；demo-tray 与本应用互不引用。v0.5 · 2026-09-18 · 待决项定案：调节后端（pamixer / brightnessctl+ddcutil）、服务缺失行为（入口隐藏、面板灰置）、configreloaded 全量重同步、托盘图标可读性（luma 反相底板）。
 </footer>
 
 </main>

@@ -22,6 +22,14 @@ rustup default stable</code></pre>
 <h3>其他发行版</h3>
 <p>安装 Rust 工具链与 GTK4、gtk4-layer-shell 开发包即可。</p>
 
+<h2>运行时依赖</h2>
+<table>
+  <tr><th>工具</th><th>用途</th><th>缺失时行为</th></tr>
+  <tr><td><code>pamixer</code></td><td>音量调节后端</td><td>音量滑块灰置并提示</td></tr>
+  <tr><td><code>brightnessctl</code></td><td>内置面板亮度后端</td><td rowspan="2">亮度滑块灰置并提示</td></tr>
+  <tr><td><code>ddcutil</code></td><td>外接显示器亮度后端（DDC/CI）</td></tr>
+</table>
+
 <h2>构建</h2>
 <pre><code>cargo build            # 开发构建
 cargo build --release  # 发布构建 -> target/release/bread
