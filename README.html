@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BreadKnife README</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --card: #ffffff;
+    --text: #2d2d2d;
+    --muted: #6b6b6b;
+    --accent: #b0722c;      /* 面包色系 */
+    --accent-light: #fdf3e7;
+    --border: #e3e0db;
+    --code-bg: #f4f1ec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  h1 {
+    font-size: 1.8rem;
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: .5rem;
+    margin-bottom: .5rem;
+  }
+  h2 {
+    font-size: 1.3rem;
+    margin-top: 2.8rem;
+    color: var(--accent);
+    border-left: 4px solid var(--accent);
+    padding-left: .6rem;
+  }
+  h3 {
+    font-size: 1.08rem;
+    margin-top: 1.6rem;
+    padding: .25rem .8rem;
+    background: var(--accent-light);
+    border-radius: 4px;
+    display: inline-block;
+  }
+  h4 { font-size: .98rem; margin-top: 1.3rem; }
+  blockquote {
+    margin: 1rem 0;
+    padding: .8rem 1.2rem;
+    background: var(--accent-light);
+    border-left: 4px solid var(--accent);
+    color: var(--muted);
+    font-size: .92rem;
+    border-radius: 0 6px 6px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    background: var(--card);
+    font-size: .93rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: .55rem .8rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  tr:nth-child(even) td { background: #fcfbf9; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    font-size: .88rem;
+    line-height: 1.5;
+    white-space: pre;
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  }
+  code {
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+    background: var(--code-bg);
+    padding: .1em .35em;
+    border-radius: 4px;
+    font-size: .9em;
+  }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+  strong { color: #1a1a1a; }
+  .divider {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 2.5rem 0;
+  }
+  .placeholder {
+    color: var(--muted);
+    font-style: italic;
+  }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .85rem;
+  }
+  @media print {
+    body { background: #fff; }
+    main { max-width: 100%; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>BreadKnife</h1>
+<blockquote>
+  专为 Hyprland 设计的 Wayland 任务栏：屏幕顶部一条常驻栏，集工作区、窗口信息、系统托盘与控制中心于一体，开箱即用。<br>
+  二进制名 <code>bread</code>；本仓库同时是项目群根，内嵌 breadpan / boulanger / demo-tray 三个成员项目。
+</blockquote>
+
+<h2>WHAT &amp; WHY</h2>
+
+<h3>要解决的问题</h3>
+<p>
+  在 Hyprland（Wayland）会话中呈现工作区、窗口信息、系统托盘与系统状态，需要自行拼装组件并处理
+  合成器 IPC、DBus 协议、托盘协议栈等细节——缺乏一个开箱即用、体验完整的整体方案。
+  breadknife 不做通用框架，而是以精品应用的形态直接回答这个问题。
+</p>
+
+<h3>成功长什么样</h3>
+<ul>
+  <li><strong>多显示器</strong>：每屏一条任务栏，随显示器插拔自动出现/消失；</li>
+  <li><strong>即点即用</strong>：工作区点击即达；托盘图标左键/右键即刻生效；</li>
+  <li><strong>一目了然</strong>：音量、亮度、媒体、时钟、网络、电池常驻可见，通知集中缓存查看；</li>
+  <li><strong>零配置可用</strong>：默认主题开箱即用；想换外观时改一份 CSS 变量文件，RELOAD 改色即见；</li>
+  <li><strong>边界清晰</strong>：不支持 X11 或其它合成器——精品应用而非通用框架。</li>
+</ul>
+
+<h2>使用与原型</h2>
+
+<h3>界面交互</h3>
+<table>
+  <tr><th>功能域</th><th>行为</th></tr>
+  <tr><td>工作区切换</td><td>每屏显示本屏的工作区条；点击切换；滚轮顺序切换；激活高亮、空置灰色、紧急红色</td></tr>
+  <tr><td>窗口信息</td><td>显示当前活动窗口的应用图标与标题；标题过长自动截断，悬停看全文</td></tr>
+  <tr><td>通知中心</td><td>点击标题区域弹出通知列表；应用发出的桌面通知在此缓存与查看</td></tr>
+  <tr><td>系统托盘</td><td>自动发现应用的托盘图标并显示；支持左键/右键交互；图标自动加高对比度边框或背景（智能选择深浅色）</td></tr>
+  <tr><td>控制中心</td><td>常驻入口：电池（无电池设备自动隐藏）、网络状态、实时时钟；弹出面板：媒体控制、音量/亮度滑块、网络/蓝牙状态、日历</td></tr>
+</table>
+
+<h3>控制指令</h3>
+<p>通过 Unix Socket <code>/run/user/$UID/bread.sock</code> 发送文本指令（一行一条，<code>\n</code> 结尾）：</p>
+<pre><code>EXIT    # 退出守护进程
+TOGGLE  # 切换任务栏显示/隐藏
+RELOAD  # 热重载配置与 CSS 样式（改完即生效，无需重启）</code></pre>
+<p>示例：</p>
+<pre><code>printf 'TOGGLE\n' | socat - /run/user/$UID/bread.sock</code></pre>
+
+<h3>个性化</h3>
+<p>
+  一份 CSS 变量文件定义整套外观（底板色、文字色、强调色、语义色、边框），组件样式全部基于这些变量；
+  修改变量文件后发送 <code>RELOAD</code> 指令即可"改色即见"。变量清单见
+  <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §样式系统。
+</p>
+
+<h3>运行管理</h3>
+<p>进程 ID 位于 <code>/run/user/$UID/bread.pid</code>，供脚本探测运行状态。</p>
+
+<h3>原型 / mock（占位）</h3>
+<p class="placeholder">待原型或 mock 实体出现后填充。</p>
+
+<h2>明确不做</h2>
+<table>
+  <tr><th>不做</th><th>理由</th></tr>
+  <tr><td>通用任务栏框架 / 面向其它合成器</td><td>定位是 Hyprland 专属精品应用，不做 X11、不做跨平台抽象</td></tr>
+  <tr><td>工作区跨显示器移动</td><td>遵循"严格预分配"原则：每屏固定管理连续的工作区 ID，映射关系稳定可预期</td></tr>
+  <tr><td>WiFi 连接交互 / 蓝牙配对</td><td>仅显示状态；连接与配对交互为后续扩展项</td></tr>
+</table>
+
+<hr class="divider">
+
+<h2>项目群</h2>
+<p>
+  项目群结构与依赖视角见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §项目群结构；
+  各成员边界以各自 README 为权威。
+</p>
+<table>
+  <tr><th>成员</th><th>定位</th><th>形态</th></tr>
+  <tr><td><code>breadknife</code>（本目录）</td><td>Hyprland Wayland 任务栏（二进制 <code>bread</code>）；项目群根</td><td>应用，消费者是人</td></tr>
+  <tr><td><code>breadpan</code></td><td>SNI/DBusMenu 托盘客户端库，GTK 深度整合</td><td>库，消费者是开发者</td></tr>
+  <tr><td><code>boulanger</code></td><td>SNI Watcher 角色库，托盘世界的登记中心</td><td>库，消费者是开发者</td></tr>
+  <tr><td><code>demo-tray</code></td><td>托盘功能的人工验收与调试工具；两库实际用法的唯一示范载体</td><td>应用，消费者是开发者</td></tr>
+</table>
+<p>
+  命名逻辑：breadknife = 面包刀（切面包的最终应用）；breadpan = 烤盘（承放、供取用）；
+  boulanger = 法语面包师（照看炉火、收发面团＝登记 Item）。
+</p>
+<p>
+  下游组装约定：先启动 boulanger 服务（登记中心就绪），再连接 breadpan（客户端发现/跟踪）。
+  breadpan ⊥ boulanger，两库互相零依赖。
+</p>
+
+<h2>文档地图</h2>
+<table>
+  <tr><th>文档</th><th>内容</th></tr>
+  <tr><td>README（本文档）</td><td>项目描述、WHAT &amp; WHY、使用与原型、项目群成员</td></tr>
+  <tr><td><a href="ARCHITECTURE.html">ARCHITECTURE.html</a></td><td>项目群结构、时序图、接口契约、数据模型与转换</td></tr>
+  <tr><td><a href="CODE.html">CODE.html</a></td><td>实现骨架：文件树、类型与签名、伪码调用栈</td></tr>
+  <tr><td><a href="BUILD.html">BUILD.html</a></td><td>构建依赖、构建与本地运行</td></tr>
+</table>
+
+<h2>Credits</h2>
+<ul>
+  <li><a href="https://github.com/gtk-rs/gtk4-rs">gtk4-rs</a> — Rust bindings for GTK4</li>
+  <li><a href="https://github.com/wmww/gtk4-layer-shell">gtk4-layer-shell</a> — Wayland layer surface for GTK4</li>
+  <li><a href="https://github.com/dbus2/zbus">zbus</a> — pure Rust DBus implementation</li>
+</ul>
+
+<footer>
+  License: MIT
+</footer>
+
+</main>
+</body>
+</html>

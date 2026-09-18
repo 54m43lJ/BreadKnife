@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadknife 架构规格</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --card: #ffffff;
+    --text: #2d2d2d;
+    --muted: #6b6b6b;
+    --accent: #b0722c;      /* 面包色系 */
+    --accent-light: #fdf3e7;
+    --border: #e3e0db;
+    --code-bg: #f4f1ec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  h1 {
+    font-size: 1.8rem;
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: .5rem;
+    margin-bottom: .5rem;
+  }
+  h2 {
+    font-size: 1.3rem;
+    margin-top: 2.8rem;
+    color: var(--accent);
+    border-left: 4px solid var(--accent);
+    padding-left: .6rem;
+  }
+  h3 {
+    font-size: 1.08rem;
+    margin-top: 1.6rem;
+    padding: .25rem .8rem;
+    background: var(--accent-light);
+    border-radius: 4px;
+    display: inline-block;
+  }
+  h4 { font-size: .98rem; margin-top: 1.3rem; }
+  blockquote {
+    margin: 1rem 0;
+    padding: .8rem 1.2rem;
+    background: var(--accent-light);
+    border-left: 4px solid var(--accent);
+    color: var(--muted);
+    font-size: .92rem;
+    border-radius: 0 6px 6px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    background: var(--card);
+    font-size: .93rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: .55rem .8rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  tr:nth-child(even) td { background: #fcfbf9; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    font-size: .88rem;
+    line-height: 1.5;
+    white-space: pre;
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  }
+  code {
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+    background: var(--code-bg);
+    padding: .1em .35em;
+    border-radius: 4px;
+    font-size: .9em;
+  }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+  strong { color: #1a1a1a; }
+  .divider {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 2.5rem 0;
+  }
+  .diagram-note {
+    font-size: .9rem;
+    color: var(--muted);
+    margin-top: .5rem;
+  }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .85rem;
+  }
+  @media print {
+    body { background: #fff; }
+    main { max-width: 100%; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>breadknife 架构规格</h1>
+<blockquote>
+  本文档面向实现者：项目群结构、时序图、接口契约、数据模型与转换、模块规格。
+  行为边界以 <a href="README.html">README.html</a> 为权威，实现骨架见 <a href="CODE.html">CODE.html</a>。
+</blockquote>
+
+<h2>1. 项目群结构</h2>
+<h3>1.1 文件结构</h3>
+<pre><code>breadknife/           # 项目群根（应用，二进制 bread）
+├── breadpan/         # 托盘客户端库
+├── boulanger/        # Watcher 角色库
+└── demo-tray/        # 托盘验收与调试工具</code></pre>
+<p class="diagram-note">
+  单一仓库，breadknife 为根。各成员的内部文件结构见各自项目的 CODE.html，父级不展开。
+</p>
+<h3>1.2 依赖视角</h3>
+<pre><code>
+   +-------------+               +-------------+
+   | breadknife  |               |  demo-tray  |
+   | bin: "bread"|               |  test tool  |
+   +------+------+               +------+------+
+          |                              |
+          +--------------+---------------+
+                         | depends
+                         v
+     +-------------------------------------+
+     |     breadpan          boulanger     |
+     +-------------------------------------+
+</code></pre>
+<p class="diagram-note">
+  breadpan ⊥ boulanger，两库互相零依赖。依赖关系只在依赖方文档表达（本文档与 demo-tray），
+  库文档不点名其他项目。跨库组装约定（先启动 boulanger 服务，再连接 breadpan）见 §4.3。
+</p>
+
+<h2>2. 技术栈</h2>
+<table>
+  <tr><th>项</th><th>选型</th></tr>
+  <tr><td>语言 / GUI</td><td>Rust + GTK4</td></tr>
+  <tr><td>Wayland 集成</td><td><code>gtk4-layer-shell</code>（Layer Surface 锚定）</td></tr>
+  <tr><td>DBus 通信</td><td><code>zbus</code></td></tr>
+  <tr><td>合成器通信</td><td>Hyprland IPC（Unix Socket，只读监听）</td></tr>
+  <tr><td>托盘协议栈</td><td>boulanger（Watcher 角色，先启动）+ breadpan（客户端，后连接）</td></tr>
+  <tr><td>调节后端</td><td>音量 <code>pamixer</code>（或 PulseAudio DBus）；亮度 <code>light</code>（或读写 <code>/sys/class/backlight</code>）</td></tr>
+</table>
+<pre><code>
+                +----------------------------------------+
+                |            bread (daemon)              |
+                |                                        |
+ Hyprland IPC   |  事件循环                               |
+ .socket2.sock --->  workspace / window-info /          |
+                |  tray / control-center                 | --> breadpan + boulanger
+ control socket |                                        |     -- session bus --> SNI / DBusMenu
+ bread.sock   --->  样式系统 (CSS 变量 + RELOAD)          | --> DBus (Notifications / UPower /
+                |                                        |     NetworkManager / MPRIS)
+                +----------------------------------------+ --> pamixer / light
+</code></pre>
+<p class="diagram-note">
+  Hyprland IPC 为只读监听，驱动界面更新；DBus 系统服务缺失时对应功能自动隐藏或降级；外部工具是音量与亮度调节的后端。
+</p>
+
+<h2>3. 运行模型</h2>
+<table>
+  <tr><th>项</th><th>规格</th></tr>
+  <tr><td>进程形态</td><td>单进程守护（Daemon），常驻后台；PID 文件 <code>/run/user/$UID/bread.pid</code></td></tr>
+  <tr><td>窗口管理</td><td>Daemon 维护 显示器 → 主窗口 的映射表，每个活动显示器对应一个独立 GTK Window 实例</td></tr>
+  <tr><td>启动</td><td>扫描当前已连接显示器，逐一生成对应 Window；注册 Hyprland IPC 监听器</td></tr>
+  <tr><td>运行</td><td>接收 IPC / Socket 事件，事件循环驱动 UI 更新</td></tr>
+  <tr><td>退出</td><td>接收 Socket <code>EXIT</code> 指令，销毁所有 Window，释放资源，退出进程</td></tr>
+</table>
+
+<h2>4. 接口契约</h2>
+
+<h3>4.1 Hyprland IPC（只读监听）</h3>
+<p>路径：<code>$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock</code>。契约：只订阅不回复。</p>
+<table>
+  <tr><th>事件</th><th>契约</th></tr>
+  <tr><td><code>monitoradded</code> / <code>monitorremoved</code></td><td>触发 Window 实例的创建与销毁</td></tr>
+  <tr><td><code>workspace&gt;&gt;X</code></td><td>触发 Workspace 模块状态切换</td></tr>
+  <tr><td><code>activewindow</code></td><td>触发窗口信息模块更新</td></tr>
+  <tr><td><code>configreloaded</code></td><td>可选：触发内部 UI 状态刷新</td></tr>
+</table>
+
+<h3>4.2 Unix Socket（控制接口）</h3>
+<p>路径：<code>/run/user/$UID/bread.sock</code>；契约：文本行协议，一行一条指令，以 <code>\n</code> 结尾，处理结果不回写。</p>
+<table>
+  <tr><th>指令</th><th>行为</th></tr>
+  <tr><td><code>EXIT</code></td><td>关闭守护进程</td></tr>
+  <tr><td><code>TOGGLE</code></td><td>切换任务栏显示/隐藏状态</td></tr>
+  <tr><td><code>RELOAD</code></td><td>热重载配置文件与 CSS 样式</td></tr>
+</table>
+
+<h3>4.3 托盘库组装契约</h3>
+<ul>
+  <li>装配顺序：<strong>boulanger 服务先启动</strong>（登记中心就绪），<strong>breadpan 后连接</strong>（客户端发现/跟踪 Item）；</li>
+  <li>本模块不接触 SNI / DBusMenu 协议细节，仅消费 breadpan 的事件流/快照/指令通道（两库契约见各自 ARCHITECTURE.html）；</li>
+  <li>breadpan 事件（快照、生命周期、属性、菜单变更、回执）是托盘 UI 更新的唯一驱动源。</li>
+</ul>
+
+<h2>5. 关键流程时序</h2>
+
+<h3>5.1 启动</h3>
+<pre><code>
+  启动者          bread(daemon)        boulanger        breadpan        Hyprland
+    |                  |                  |                |               |
+    |---- 启动 ------->|                  |                |               |
+    |                  |-- 服务启动 ----->|                |               |
+    |                  |<---- 就绪 -------|                |               |
+    |                  |-- 连接 ------------------------->|               |
+    |                  |<-- 快照+事件通道 ----------------|               |
+    |                  |-- 建立监听 ------------------------------------->|
+    |                  |-- 扫描显示器 ---------------------------------->|
+    |                  |<-- 显示器清单 ----------------------------------|
+    |                  |== 逐屏创建 Window（layer-shell 锚定）==          |
+    |                  |-- 启动控制 Socket 监听                           |
+    |                  |-- 进入事件循环                                   |
+</code></pre>
+
+<h3>5.2 显示器插拔</h3>
+<pre><code>
+  Hyprland          bread(daemon)        GTK 窗口
+    |                    |                  |
+    |-- monitoradded --->|                  |
+    |                    |-- 创建 Window -->|（锚定 Top|Left|Right，宽度=屏宽）
+    |                    |<--------------- | 就绪
+    |                    |                  |
+    |-- monitorremoved ->|                  |
+    |                    |-- 销毁 Window -->|
+    |                    |-- 更新映射表      |
+</code></pre>
+
+<h3>5.3 控制指令与热重载</h3>
+<pre><code>
+  调用方          bread.sock          bread(daemon)        样式系统
+    |                 |                    |                  |
+    |-- "RELOAD\n" -->|                    |                  |
+    |                 |-- 指令分发 ------->|                  |
+    |                 |                    |-- 重读配置        |
+    |                 |                    |-- 重读 CSS ----->|
+    |                 |                    |<-- 变量生效 ------|
+    |                 |                    |== 全组件即时换装 ==|
+</code></pre>
+
+<h3>5.4 托盘右键菜单（跨库）</h3>
+<pre><code>
+  用户          breadknife UI        breadpan          托盘 Item
+    |                 |                  |                  |
+    |-- 右键 -------->|                  |                  |
+    |                 |-- 弹出前通知 -->|                  |
+    |                 |                  |-- AboutToShow -->|
+    |                 |                  |<-- 建议刷新 ------|
+    |                 |-- menu() 现场拉取 ->|               |
+    |                 |                  |-- GetLayout ---->|
+    |                 |                  |<-- 最新全量布局 --|
+    |                 |<-- 菜单快照 -----|                  |
+    |                 |== GTK 渲染弹出 ==|                  |
+    |-- 点条目 ------>|                  |                  |
+    |                 |-- menu_activate ->|-- Event ------->|
+    |                 |<-- 受理结论 ------|<-- 异步回执 -----|
+</code></pre>
+
+<h3>5.5 通知到达</h3>
+<pre><code>
+  任意应用        DBus               breadknife            通知中心 UI
+    |               |                     |                     |
+    |-- Notify ---->|                     |                     |
+    |               |-- 通知参数 ------->|                     |
+    |               |   (org.freedesktop |                     |
+    |               |    .Notifications) |                     |
+    |               |                    |-- 缓存入列表 ------->|
+    |               |                    |== 入口计数刷新 ======|
+</code></pre>
+
+<h2>6. 数据模型与转换</h2>
+<table>
+  <tr><th>模型</th><th>内容</th><th>转换</th></tr>
+  <tr><td>窗口映射表</td><td>显示器 ID → 主窗口实例（Daemon 持有）</td><td>IPC 插拔事件 → 增删条目 → Window 创建/销毁</td></tr>
+  <tr><td>工作区映射表</td><td>工作区 ID → 所属显示器（按 <code>monitor</code> 属性反向建立）</td><td>启动/插拔时全量重建；<code>workspace&gt;&gt;X</code> 事件 → 三态切换</td></tr>
+  <tr><td>控制指令</td><td>行文本 → { EXIT, TOGGLE, RELOAD }</td><td>Socket 读入 → 指令分发</td></tr>
+  <tr><td>通知记录</td><td>应用名、图标、摘要、正文、通知 ID</td><td>DBus Notify 调用参数 → 缓存条目 → 列表/计数呈现</td></tr>
+  <tr><td>托盘 Item 视图</td><td>图标（主题名或位图）、状态、标题、有无菜单、存活标记</td><td>breadpan 快照/事件 → 卡片模型；图标经渲染直出 → 可绘制对象；无响应标记 → 置灰样式</td></tr>
+  <tr><td>样式变量集</td><td>底板/文字/强调/语义/边框五组 CSS 变量</td><td>变量文件 → GTK 样式表 → 组件呈现（RELOAD 全量重载）</td></tr>
+</table>
+
+<h2>7. 模块规格</h2>
+
+<h3>7.1 Workspace 模块</h3>
+<h4>绑定逻辑（反向映射）</h4>
+<ul>
+  <li>启动时及 Monitor 插拔时，遍历所有 Workspace，根据其 <code>monitor</code> 属性反向建立映射表；</li>
+  <li>遵循<strong>严格预分配</strong>原则：每个显示器固定管理若干连续 Workspace ID，不支持跨显示器移动。</li>
+</ul>
+<h4>UI 状态与交互</h4>
+<table>
+  <tr><th>状态</th><th>呈现</th></tr>
+  <tr><td>激活</td><td>高亮显示（<code>bg_active</code>、<code>fg_primary</code>），文字加粗</td></tr>
+  <tr><td>空</td><td>灰色（<code>fg_muted</code>）斜体，表示该 ID 存在但无窗口</td></tr>
+  <tr><td>紧急</td><td>红色标识（<code>danger</code>）</td></tr>
+</table>
+<ul>
+  <li>鼠标左键点击：切换至对应 Workspace；</li>
+  <li>滚轮滚动：在当前显示器的 Workspace 列表中顺序切换。</li>
+</ul>
+
+<h3>7.2 窗口信息模块</h3>
+<ul>
+  <li><strong>信息获取</strong>：监听 <code>activewindow</code> IPC 事件；</li>
+  <li><strong>图标</strong>：根据窗口 Class 查询系统 Icon Theme，找不到则显示默认图标；</li>
+  <li><strong>标题</strong>：单行显示，超出宽度截断（<code>PANGO_ELLIPSIZE_END</code>）；Hover 显示完整 Tooltip；</li>
+  <li><strong>通知中心</strong>：后台实现 <code>org.freedesktop.Notifications</code> DBus 接口（通知守护角色），应用发出的桌面通知经总线送达后缓存进列表；点击标题栏区域打开 GTK Popover 查看与交互。</li>
+</ul>
+
+<h3>7.3 系统托盘模块</h3>
+<p>
+  托盘协议栈由项目群成员库承接，本模块只做组装与 UI 呈现，不直接接触 SNI / DBusMenu 协议细节
+  （两库规格见 <a href="breadpan/ARCHITECTURE.html">breadpan/ARCHITECTURE.html</a> 与
+  <a href="boulanger/ARCHITECTURE.html">boulanger/ARCHITECTURE.html</a>）。
+</p>
+<table>
+  <tr><th>环节</th><th>规格</th></tr>
+  <tr><td>组装顺序</td><td>进程内先启动 boulanger 服务（登记中心就绪），再连接 breadpan（客户端发现/跟踪 Item）</td></tr>
+  <tr><td>图标显示</td><td>经 breadpan 的 GTK 渲染直出（主题命中 → 主题图标；未命中 → 位图纹理）取得可绘制对象后上屏</td></tr>
+  <tr><td>左键交互</td><td>转发 breadpan 的 Activate 指令；"整项即菜单"的 Item 转入菜单流程</td></tr>
+  <tr><td>右键菜单</td><td>弹出前通知（AboutToShow）→ 经 <code>menu()</code> 现场拉取最新布局 → GTK 渲染弹出 → 条目点击经 <code>menu_activate</code> 下发；弹窗打开期间收到 MenuChanged 时重取刷新（时序见 §5.4）</td></tr>
+  <tr><td>Tooltip</td><td>取 breadpan 交付的 ToolTip 数据悬停显示</td></tr>
+  <tr><td>可读性处理（UI 层职责）</td><td>自动给图标加高对比度边框或背景，依据图标深浅智能选择深色/浅色，保证深浅主题下清晰可辨</td></tr>
+  <tr><td>健康呈现</td><td>无响应 Item 置灰呈现（只标记，不移除）；移除仅由 breadpan 的 Removed 事件驱动</td></tr>
+</table>
+
+<h3>7.4 控制中心模块</h3>
+<h4>入口组件</h4>
+<p>布局：<code>[Battery] [Network] [Clock]</code></p>
+<table>
+  <tr><th>组件</th><th>规格</th></tr>
+  <tr><td>电池</td><td>DBus <code>org.freedesktop.UPower</code>；无电池设备自动隐藏</td></tr>
+  <tr><td>网络</td><td>DBus <code>org.freedesktop.NetworkManager</code>；显示 WiFi / Ethernet 图标</td></tr>
+  <tr><td>时钟</td><td>Monospace 字体，实时更新</td></tr>
+</table>
+<h4>弹出面板</h4>
+<table>
+  <tr><th>组件</th><th>规格</th></tr>
+  <tr><td>媒体控制</td><td>MPRIS DBus 接口，显示播放器信息及控制按钮</td></tr>
+  <tr><td>音量控制</td><td>调用 <code>pamixer</code>，或 PulseAudio DBus 接口</td></tr>
+  <tr><td>亮度控制</td><td>调用 <code>light</code>，或读写 <code>/sys/class/backlight</code></td></tr>
+  <tr><td>网络 / WiFi</td><td>显示状态；连接交互为 Phase 2 扩展</td></tr>
+  <tr><td>蓝牙</td><td>显示状态；配对交互为 Phase 2 扩展</td></tr>
+  <tr><td>日历</td><td>GTK Calendar 组件</td></tr>
+</table>
+
+<h2>8. 样式系统</h2>
+<h3>8.1 基础变量</h3>
+<pre><code>/* ── 底板 ── */
+@define-color bg_primary #1b1816;
+@define-color bg_secondary #24211e;
+@define-color bg_hover #302c29;
+@define-color bg_active #3d3835;
+/* ── 文字 ── */
+@define-color fg_primary #ecd9a8;
+@define-color fg_secondary #b8a078;
+@define-color fg_muted #6b5d48;
+/* ── 强调色 ── */
+@define-color accent #5c3d7a;
+@define-color accent_hover #735294;
+/* ── 语义色 ── */
+@define-color success #4a9c6c;
+@define-color warning #c4954e;
+@define-color danger #b8453a;
+/* ── 边框 ── */
+@define-color border rgba(236, 217, 168, 0.08);
+@define-color border_strong rgba(236, 217, 168, 0.15);</code></pre>
+<h3>8.2 组件样式规范</h3>
+<table>
+  <tr><th>组件</th><th>样式</th></tr>
+  <tr><td>主窗口</td><td>背景 <code>bg_primary</code>，底边框 <code>border_strong</code>，高度 30px</td></tr>
+  <tr><td>按钮</td><td>透明背景，圆角 6px，Hover 态 <code>bg_hover</code></td></tr>
+  <tr><td>Workspace 激活</td><td>背景 <code>bg_active</code>，文字加粗</td></tr>
+  <tr><td>Workspace 空</td><td>文字 <code>fg_muted</code>，斜体</td></tr>
+  <tr><td>控制中心入口</td><td>容器背景 <code>bg_secondary</code>，圆角 6px</td></tr>
+  <tr><td>滑块</td><td>滑轨高 4px，圆形滑块 12px，高亮 <code>accent</code></td></tr>
+</table>
+<h3>8.3 热重载</h3>
+<p><code>RELOAD</code> 指令重新加载配置文件与 CSS 样式表；所有组件样式基于上述变量，改色即见。</p>
+
+<h2>9. 路线图</h2>
+<h3>Phase 1：核心框架与基础交互（MVP）</h3>
+<p>交付标准：稳定运行，核心功能可用。</p>
+<table>
+  <tr><th>模块</th><th>功能点</th></tr>
+  <tr><td>架构</td><td>Daemon 生命周期、多显示器支持、Layer Shell 锚定</td></tr>
+  <tr><td>Workspace</td><td>反向映射、状态显示、点击/滚轮切换</td></tr>
+  <tr><td>Window Info</td><td>标题显示/截断、图标显示</td></tr>
+  <tr><td>Tray</td><td>图标显示、基础点击响应</td></tr>
+  <tr><td>Control Center</td><td>入口显示、面板弹出、音量/亮度/媒体控制基础功能</td></tr>
+  <tr><td>样式</td><td>CSS 加载、基础变量应用</td></tr>
+</table>
+<h3>Phase 2：完善功能与高级交互</h3>
+<p>交付标准：完整的用户体验。</p>
+<table>
+  <tr><th>模块</th><th>功能点</th></tr>
+  <tr><td>Window Info</td><td>通知中心列表显示与交互</td></tr>
+  <tr><td>Tray</td><td>图标状态实时同步、溢出折叠</td></tr>
+  <tr><td>Control Center</td><td>WiFi 列表刷新/连接、蓝牙设备配对、日历交互</td></tr>
+  <tr><td>Config</td><td>Unix Socket <code>RELOAD</code> 热重载支持</td></tr>
+</table>
+
+<hr class="divider">
+
+<h2>10. 文档地图</h2>
+<p>项目群事实（成员、文件结构、依赖）以本文档 §1 与根 README 为权威；各成员边界以各自 README 为权威。</p>
+<table>
+  <tr><th>文档</th><th>内容</th></tr>
+  <tr><td><a href="README.html">README.html</a></td><td>项目描述、WHAT &amp; WHY、使用与原型、项目群成员</td></tr>
+  <tr><td>ARCHITECTURE（本文档）</td><td>项目群结构、时序图、接口契约、数据模型与转换</td></tr>
+  <tr><td><a href="CODE.html">CODE.html</a></td><td>实现骨架：文件树、类型与签名、伪码调用栈</td></tr>
+  <tr><td><a href="BUILD.html">BUILD.html</a></td><td>构建依赖、构建与本地运行、发布与版本策略</td></tr>
+  <tr><td><a href="breadpan/ARCHITECTURE.html">breadpan/</a> · <a href="boulanger/ARCHITECTURE.html">boulanger/</a> · <a href="demo-tray/README.html">demo-tray/</a></td><td>成员项目文档</td></tr>
+</table>
+
+<footer>
+  修订历史：v0.1 · 2026-09-16 · 自 PRD-1.0 重构为架构层文档。v0.2 · 2026-09-18 · 按三层文档模型重组：新增关键流程时序与数据模型章节，签名移交 CODE.html。v0.3 · 2026-09-18 · DESIGN 解散：新增 §1 项目群结构（文件树 + 依赖视角），DESIGN 权威职责由本档与根 README 分担。
+</footer>
+
+</main>
+</body>
+</html>

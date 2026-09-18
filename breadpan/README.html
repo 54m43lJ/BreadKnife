@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadpan README</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --card: #ffffff;
+    --text: #2d2d2d;
+    --muted: #6b6b6b;
+    --accent: #b0722c;      /* 面包色系 */
+    --accent-light: #fdf3e7;
+    --border: #e3e0db;
+    --code-bg: #f4f1ec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  h1 {
+    font-size: 1.8rem;
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: .5rem;
+    margin-bottom: .5rem;
+  }
+  h2 {
+    font-size: 1.3rem;
+    margin-top: 2.8rem;
+    color: var(--accent);
+    border-left: 4px solid var(--accent);
+    padding-left: .6rem;
+  }
+  h3 {
+    font-size: 1.08rem;
+    margin-top: 1.6rem;
+    padding: .25rem .8rem;
+    background: var(--accent-light);
+    border-radius: 4px;
+    display: inline-block;
+  }
+  h4 { font-size: .98rem; margin-top: 1.3rem; }
+  blockquote {
+    margin: 1rem 0;
+    padding: .8rem 1.2rem;
+    background: var(--accent-light);
+    border-left: 4px solid var(--accent);
+    color: var(--muted);
+    font-size: .92rem;
+    border-radius: 0 6px 6px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    background: var(--card);
+    font-size: .93rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: .55rem .8rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  tr:nth-child(even) td { background: #fcfbf9; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    font-size: .88rem;
+    line-height: 1.5;
+    white-space: pre;
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  }
+  code {
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+    background: var(--code-bg);
+    padding: .1em .35em;
+    border-radius: 4px;
+    font-size: .9em;
+  }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+  strong { color: #1a1a1a; }
+  .divider {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 2.5rem 0;
+  }
+  .placeholder {
+    color: var(--muted);
+    font-style: italic;
+  }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .85rem;
+  }
+  @media print {
+    body { background: #fff; }
+    main { max-width: 100%; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>breadpan</h1>
+<blockquote>
+  SNI 协议客户端库 + DBusMenu 客户端库，以统一事件流交付托盘世界的全部变化；
+  为 GTK 应用提供深度整合（渲染直出 + 事件桥接）。
+</blockquote>
+
+<h2>WHAT &amp; WHY</h2>
+
+<h3>要解决的问题</h3>
+<p>
+  应用要在托盘世界当展示方（Host），必须完整实现 SNI 与 DBusMenu 两个协议的客户端侧：
+  Item 发现与跟踪、属性同步、菜单一致性、图标回退、Watcher 存亡——协议细节繁重且易错；
+  同时消费方几乎总是在 GTK 主线程渲染，事件需要可靠的桥接。
+  breadpan 把这一切收敛为「事件流 + 状态快照 + 现场读取 + 渲染直出」的统一交付。
+</p>
+
+<h3>成功长什么样</h3>
+<ul>
+  <li><strong>零协议词汇</strong>：消费方不接触 SNI/DBusMenu 细节即可完整呈现与交互；</li>
+  <li><strong>原子一致</strong>：订阅时刻拿到完整快照，其后事件流无重叠无缺口；</li>
+  <li><strong>诚实呈现</strong>：Item 存活状态如实标记，绝不替消费方做移除决定；</li>
+  <li><strong>裸会话自足</strong>：CI 在无托盘环境（仅需 dbus session）下借助测试替身完成全部验证。</li>
+</ul>
+
+<h2>你拿到什么</h2>
+<ul>
+  <li><strong>事件流 + 状态快照</strong>：订阅时刻的完整 Item 记录与 Watcher 存在性，与后续事件原子配对；</li>
+  <li><strong>交互指令</strong>：对 Item 的激活/滚动/菜单操作，同步给出成功或失败结论；</li>
+  <li><strong>菜单现场读取</strong>：每次读取即最新全量布局（零缓存）；</li>
+  <li><strong>GTK 渲染入口</strong>：图标 → 可绘制对象的一次性转换（主题命中 → 主题图标；未命中 → 位图纹理）；</li>
+  <li><strong>测试替身</strong>：内置最小 Watcher 替身与演示 Item，保证 CI 在裸会话下自足。</li>
+</ul>
+<p>渲染与交互呈现由你（消费方）负责。</p>
+
+<h2>本库不是什么</h2>
+<table>
+  <tr><th>不做</th><th>说明</th></tr>
+  <tr><td>不实现 Watcher 角色</td><td>只作为客户端观察其存亡；目标环境没有现成 Watcher 时，需自备该角色或使用环境自带的实现</td></tr>
+  <tr><td>不拥有任何 UI</td><td>无窗口/布局/事件循环；菜单渲染与弹出定位归消费方</td></tr>
+  <tr><td>不做 XEmbed/X11 传统托盘</td><td>场景钉死 Wayland + SNI</td></tr>
+  <tr><td>公开面零 async</td><td>内部执行模型对使用者不可见，不泄漏异步运行时</td></tr>
+</table>
+<p>完整的能力边界（含 AttentionMovieName、菜单缓存、移除无响应 Item 等"不做"清单）见
+<a href="ARCHITECTURE.html">ARCHITECTURE.html</a>。</p>
+
+<h2>集成与原型</h2>
+<h3>上手指引</h3>
+<ol>
+  <li>组装：连接 breadpan，取得 Handle 与事件通道（首事件为快照，随后为增量事件流）；</li>
+  <li>呈现：订阅事件流驱动 UI；图标经渲染入口转为可绘制对象（须在 GTK 主线程）；</li>
+  <li>交互：点击/滚轮/菜单操作经 Handle 的指令通道转发给对应 Item；</li>
+  <li>菜单：右键时先发出弹出前通知，再经 <code>menu()</code> 现场拉取最新布局渲染。</li>
+</ol>
+<h3>原型 / mock（占位）</h3>
+<p class="placeholder">待原型或 mock 实体出现后填充。</p>
+
+<h2>适用前提</h2>
+<ul>
+  <li>Wayland 会话 + GTK 框架；</li>
+  <li>workspace 内零反向依赖，独立编译测试；</li>
+  <li>目标环境需存在 Watcher 角色（环境自带，或由使用方自行组装提供）。</li>
+</ul>
+
+<footer>
+  文档：<a href="ARCHITECTURE.html">ARCHITECTURE</a> ·
+  <a href="CODE.html">CODE</a> · <a href="BUILD.html">BUILD</a>
+</footer>
+
+</main>
+</body>
+</html>

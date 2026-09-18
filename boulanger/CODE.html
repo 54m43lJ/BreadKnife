@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>boulanger 实现骨架</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --card: #ffffff;
+    --text: #2d2d2d;
+    --muted: #6b6b6b;
+    --accent: #b0722c;      /* 面包色系 */
+    --accent-light: #fdf3e7;
+    --border: #e3e0db;
+    --code-bg: #f4f1ec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  h1 {
+    font-size: 1.8rem;
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: .5rem;
+    margin-bottom: .5rem;
+  }
+  h2 {
+    font-size: 1.3rem;
+    margin-top: 2.8rem;
+    color: var(--accent);
+    border-left: 4px solid var(--accent);
+    padding-left: .6rem;
+  }
+  h3 {
+    font-size: 1.08rem;
+    margin-top: 1.6rem;
+    padding: .25rem .8rem;
+    background: var(--accent-light);
+    border-radius: 4px;
+    display: inline-block;
+  }
+  h4 { font-size: .98rem; margin-top: 1.3rem; }
+  blockquote {
+    margin: 1rem 0;
+    padding: .8rem 1.2rem;
+    background: var(--accent-light);
+    border-left: 4px solid var(--accent);
+    color: var(--muted);
+    font-size: .92rem;
+    border-radius: 0 6px 6px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    background: var(--card);
+    font-size: .93rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: .55rem .8rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  tr:nth-child(even) td { background: #fcfbf9; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    font-size: .88rem;
+    line-height: 1.5;
+    white-space: pre;
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  }
+  code {
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+    background: var(--code-bg);
+    padding: .1em .35em;
+    border-radius: 4px;
+    font-size: .9em;
+  }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+  strong { color: #1a1a1a; }
+  .divider {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 2.5rem 0;
+  }
+  .diagram-note {
+    font-size: .9rem;
+    color: var(--muted);
+    margin-top: .5rem;
+  }
+  .draft {
+    border-left-color: #b8453a;
+    color: #b8453a;
+    font-weight: 600;
+  }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .85rem;
+  }
+  @media print {
+    body { background: #fff; }
+    main { max-width: 100%; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>boulanger 实现骨架</h1>
+<blockquote class="draft">
+  状态：草稿（待评审定稿）。本档记录比架构更底层的实现细节：文件树、类型与方法签名（Rust 语法）、
+  关键流程调用栈（中性伪码，不采用语言风格、不死抠方法内部逻辑）。
+  上层语义见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a>。
+</blockquote>
+
+<h2>1. 文件树（规划）</h2>
+<pre><code>src/
+├── lib.rs           # 公开面出口：Service / ServiceHandle / 错误
+├── registry.rs      # 登记簿记：在册 Item 表 / Host 表（内存）
+├── service.rs       # 服务生命周期：名持有、导出、停止、让位
+├── iface.rs         # org.kde.StatusNotifierWatcher 协议面实现（方法+信号）
+└── bin.rs           # 独立常驻形态（bin 目标，信号退出）</code></pre>
+
+<h2>2. 类型与方法签名</h2>
+<pre><code>/// 进程内组装侧唯一公开面：服务启动/停止形态，无回调、无数据面
+pub struct Service;
+
+impl Service {
+    /// 申请持有 Watcher 名（allow-replacement）并导出协议面；阻塞至名字在位
+    pub fn start() -&gt; Result&lt;ServiceHandle, WatcherError&gt;;
+}
+
+pub struct ServiceHandle { /* 内部连接与登记簿记 */ }
+
+impl ServiceHandle {
+    /// 停止服务：释放名字、清理簿记；幂等；drop 自动调用
+    pub fn stop(&amp;self);
+}
+
+pub struct Registry {
+    items: Vec&lt;ItemEntry&gt;,   // 在册 Item：唯一名 + 对象路径
+    hosts: Vec&lt;HostEntry&gt;,   // 在册 Host：展示方标识
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum WatcherError {
+    #[error("session bus connect failed: {0}")]
+    Bus(String),
+    #[error("watcher name already owned elsewhere: {0}")]
+    NameTaken(String),
+    #[error("dbus call failed: {0}")]
+    Protocol(String),
+}</code></pre>
+
+<h3>2.1 协议面（iface.rs，DBus 接口形态）</h3>
+<pre><code>#[interface(name = "org.kde.StatusNotifierWatcher")]
+impl WatcherIface {
+    fn register_status_notifier_item(&amp;self, service: String);
+    fn register_status_notifier_host(&amp;self, service: String);
+    fn is_status_notifier_host_registered(&amp;self) -&gt; bool;
+    fn registered_status_notifier_items(&amp;self) -&gt; Vec&lt;String&gt;;
+    #[signal]
+    fn status_notifier_item_registered(&amp;self, service: &amp;str);
+    #[signal]
+    fn status_notifier_item_unregistered(&amp;self, service: &amp;str);
+}</code></pre>
+
+<h2>3. 关键流程调用栈（伪码）</h2>
+
+<h3>3.1 启动导出</h3>
+<pre><code>流程 Service::start()
+├── 连接会话总线
+├── 申请 Watcher 名（allow-replacement）
+│    └── 失败（已被他人持有且不让位）→ 返回 NameTaken
+├── 挂载协议面（方法 + 两类信号）
+├── 初始化空登记簿记
+└── 返回 ServiceHandle</code></pre>
+
+<h3>3.2 Item 报到</h3>
+<pre><code>收到 RegisterStatusNotifierItem(唯一名+路径)
+├── 在册 Item 表插入（已存在则幂等忽略）
+└── 广播 StatusNotifierItemRegistered(唯一名+路径)</code></pre>
+
+<h3>3.3 死亡清理</h3>
+<pre><code>收到 NameOwnerChanged(唯一名, 旧属主 → "")
+├── 在册 Item 表中移除该唯一名全部条目
+│    └── 每条 → 广播 StatusNotifierItemUnregistered
+└── 在册 Host 表中移除该唯一名（不广播）</code></pre>
+
+<h3>3.4 让位</h3>
+<pre><code>收到 NameLost（被外部 Watcher 顶替）
+├── 清空全部簿记
+├── 停止对外呈现（服务停止形态）
+└── 记录已让位状态（不再受理登记）</code></pre>
+
+<h3>3.5 停止</h3>
+<pre><code>流程 ServiceHandle::stop()
+├── 释放 Watcher 名（总线上名字消失，等同角色下线）
+├── 清空登记簿记
+└── 置已停止（幂等：重复调用直接返回）</code></pre>
+
+<footer>
+  修订历史：v0.0-draft · 2026-09-18 · 初稿：文件树、服务与协议面签名、五条主流程调用栈，待评审定稿。
+</footer>
+
+</main>
+</body>
+</html>

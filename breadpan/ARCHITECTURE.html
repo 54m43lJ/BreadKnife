@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadpan 架构规格</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --card: #ffffff;
+    --text: #2d2d2d;
+    --muted: #6b6b6b;
+    --accent: #b0722c;      /* 面包色系 */
+    --accent-light: #fdf3e7;
+    --border: #e3e0db;
+    --code-bg: #f4f1ec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.75;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+  h1 {
+    font-size: 1.8rem;
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: .5rem;
+    margin-bottom: .5rem;
+  }
+  h2 {
+    font-size: 1.3rem;
+    margin-top: 2.8rem;
+    color: var(--accent);
+    border-left: 4px solid var(--accent);
+    padding-left: .6rem;
+  }
+  h3 {
+    font-size: 1.08rem;
+    margin-top: 1.6rem;
+    padding: .25rem .8rem;
+    background: var(--accent-light);
+    border-radius: 4px;
+    display: inline-block;
+  }
+  h4 { font-size: .98rem; margin-top: 1.3rem; }
+  blockquote {
+    margin: 1rem 0;
+    padding: .8rem 1.2rem;
+    background: var(--accent-light);
+    border-left: 4px solid var(--accent);
+    color: var(--muted);
+    font-size: .92rem;
+    border-radius: 0 6px 6px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    background: var(--card);
+    font-size: .93rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: .55rem .8rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  tr:nth-child(even) td { background: #fcfbf9; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    font-size: .88rem;
+    line-height: 1.5;
+    white-space: pre;
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  }
+  code {
+    font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+    background: var(--code-bg);
+    padding: .1em .35em;
+    border-radius: 4px;
+    font-size: .9em;
+  }
+  pre code { background: none; padding: 0; }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+  strong { color: #1a1a1a; }
+  .divider {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 2.5rem 0;
+  }
+  .diagram-note {
+    font-size: .9rem;
+    color: var(--muted);
+    margin-top: .5rem;
+  }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .85rem;
+  }
+  @media print {
+    body { background: #fff; }
+    main { max-width: 100%; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>breadpan 架构规格</h1>
+<blockquote>
+  本文档面向实现者：时序图、接口契约、数据模型与转换。
+  能力边界以 <a href="README.html">README.html</a> 为权威，类型与签名见 <a href="CODE.html">CODE.html</a>。
+</blockquote>
+
+<h2>1. 术语</h2>
+<table>
+  <tr><th>术语</th><th>含义</th></tr>
+  <tr><td>Watcher</td><td>总线上的 <code>org.kde.StatusNotifierWatcher</code> 服务，负责登记托盘项与宿主（由外部实现提供：环境自带，或由使用方自行组装）</td></tr>
+  <tr><td>Host</td><td>托盘图标的展示方（即本库）。注册 <code>org.kde.StatusNotifierHost</code> 并向 Watcher 登记</td></tr>
+  <tr><td>Item</td><td>一个托盘项，即某个应用在总线上导出的 <code>org.kde.StatusNotifierItem</code> 对象</td></tr>
+  <tr><td>Menu</td><td>Item 通过 <code>Menu</code> 属性指向的 <code>com.canonical.dbusmenu</code> 对象</td></tr>
+  <tr><td>会话总线</td><td>DBus session bus，本库全部通信发生在此</td></tr>
+</table>
+
+<h2>2. 协议基础</h2>
+<ul>
+  <li><strong>SNI（StatusNotifierItem）</strong>：Item 侧属性集（类别、状态、标题、图标系、Tooltip、窗口 ID 等）、Watcher 登记接口、Host 登记接口；</li>
+  <li><strong>DBusMenu（<code>com.canonical.dbusmenu</code>）</strong>：菜单布局（<code>GetLayout</code>）、条目属性（<code>GetGroupProperties</code>）、变更信号（<code>LayoutUpdated</code> / <code>ItemsPropertiesUpdated</code>）、弹出前通知（<code>AboutToShow</code>）、条目事件下发（<code>Event</code>）；</li>
+  <li><strong>属性变更</strong>：标准 DBus <code>PropertiesChanged</code> 信号；</li>
+  <li>仅 SNI，不做 XEmbed/X11 传统托盘。</li>
+</ul>
+
+<h2>3. 运行模型</h2>
+<pre><code>
+   +----------------------------------+
+   |      消费方（托盘展示应用）       |
+   |  UI 线程: 事件 -> 渲染 / 交互     |
+   +----------------+-----------------+
+                    |  Handle (Clone+Send+Sync)
+                    |  事件通道 / GTK 事件桥接 / 渲染入口
+   +----------------+-----------------+
+   |             breadpan             |
+   |  前端: Handle + GTK 整合层        |
+   |  后端: 单一内部事件线程(zbus 执行器)|
+   |   - Host 登记 / Item 发现跟踪     |
+   |   - 属性同步(去抖) / 心跳探测     |
+   |   - DBusMenu 现场读取            |
+   +----------------+-----------------+
+                    | DBus session bus
+        +-----------+-------------+
+        |  Watcher (登记中心):      |
+        |  外部实现（环境自带或     |
+        |  使用方自行组装）          |
+        +-------------------------+
+</code></pre>
+<p class="diagram-note">
+  库启动后自持一条会话总线连接与一个内部事件线程；消费方在 UI 线程持有 Handle。
+</p>
+<table>
+  <tr><th>契约</th><th>规定</th></tr>
+  <tr><td>回调契约</td><td>原始回调在库的内部事件线程上<strong>串行</strong>触发；回调内不得阻塞、不得直接调用 GTK。需要主线程时使用 GTK 整合层的事件桥接（权威方案，见 §6.5）</td></tr>
+  <tr><td>通道契约</td><td>默认封装：内部以回调原语驱动 <code>std::sync::mpsc</code> 通道，消费方任意线程 <code>recv()</code>；缓冲满时丢弃并记录告警计数，绝不阻塞库线程</td></tr>
+  <tr><td>执行模型</td><td>内部使用 zbus 自带执行器；公开面零 async，不泄漏任何异步运行时</td></tr>
+</table>
+
+<h2>4. 接口契约（业务语言）</h2>
+<p>方法与类型签名的权威清单见 <a href="CODE.html">CODE.html</a>；本节只约束语义。</p>
+<table>
+  <tr><th>接口</th><th>契约</th></tr>
+  <tr><td>入口</td><td>连接会话总线并启动内部线程，<strong>阻塞至完成 Host 登记</strong>（或超时）；产出 Handle 与事件通道。回调原语经构建器叠加，可多次注册、按序串行触发</td></tr>
+  <tr><td>快照读取</td><td>全量 Item 列表 / 单个 Item 记录的即时读取</td></tr>
+  <tr><td>菜单现场读取</td><td>对指定 Item 返回最新全量菜单布局；<strong>零缓存</strong>，Item 无菜单或未就绪即失败返回</td></tr>
+  <tr><td>交互指令</td><td>激活 / 次级激活 / 滚轮 / 菜单条目触发 / 弹出前通知——同步给出受理结论，Item 侧异步结果经回执事件交付</td></tr>
+  <tr><td>订阅</td><td>可追加事件通道订阅者，独立于回调原语</td></tr>
+  <tr><td>停机</td><td>优雅停机：注销 Host、停内部线程；幂等；最后一个 Handle 实例 drop 时自动触发</td></tr>
+  <tr><td>GTK 渲染入口</td><td>图标 → 可绘制对象的一次性转换：<strong>主题命中 → 主题图标；未命中 → 位图纹理</strong>；须在 GTK 主线程调用</td></tr>
+  <tr><td>GTK 事件桥接</td><td>事件通道 → GTK 主上下文回调的权威桥接方案</td></tr>
+  <tr><td>测试替身</td><td><code>testing</code> 特性下提供可编程演示 Item 与最小 Watcher 替身（见 §10）</td></tr>
+</table>
+
+<h2>5. 数据模型与转换</h2>
+
+<h3>5.1 Item 记录</h3>
+<table>
+  <tr><th>字段</th><th>内容</th></tr>
+  <tr><td>唯一键</td><td>总线唯一名 + 对象路径。同一应用重启后唯一名变化 → 视为不同 Item（旧的 Removed、新的 Added）</td></tr>
+  <tr><td>类别 / 状态</td><td>四类（应用/通讯/系统服务/硬件）；三态（Passive / Active / NeedsAttention）</td></tr>
+  <tr><td>标题 / 描述</td><td>人类可读标识（SNI Id 属性）</td></tr>
+  <tr><td>主图标 / overlay / attention</td><td>图标来源三处，各自独立</td></tr>
+  <tr><td>Tooltip</td><td>图标 + 标题 + 描述</td></tr>
+  <tr><td>窗口 ID / 有无菜单</td><td>透传与标记</td></tr>
+</table>
+
+<h3>5.2 图标来源与二选一规则</h3>
+<table>
+  <tr><th>来源</th><th>规则</th></tr>
+  <tr><td>主题名</td><td><code>IconName</code> 非空时优先（规则固定，消费方无需判断）；渲染直出时查主题</td></tr>
+  <tr><td>位图</td><td>主题名缺失时交付；ARGB32、网络字节序、行跨度 = width×4；转纹理的色彩处理在渲染直出路径内完成</td></tr>
+</table>
+
+<h3>5.3 菜单条目</h3>
+<table>
+  <tr><th>字段</th><th>内容</th></tr>
+  <tr><td>条目 ID / 种类</td><td>dbusmenu 条目 id；标准 / 分隔线 / 子菜单</td></tr>
+  <tr><td>标签（双份）</td><td>已解析 <code>_</code> 助记符 + <strong>原始值逃生门</strong></td></tr>
+  <tr><td>可用 / 可见</td><td>灰置与隐藏标记</td></tr>
+  <tr><td>勾选态</td><td>checkmark/radio 时有值，否则为空</td></tr>
+  <tr><td>图标 / 子树</td><td>条目图标；子条目递归（深度截断于配置上限，默认 8）</td></tr>
+</table>
+
+<h3>5.4 转换总表</h3>
+<table>
+  <tr><th>输入</th><th>转换</th><th>输出</th></tr>
+  <tr><td>DBus Item 属性集</td><td>拉取 + 去抖合并</td><td>Item 记录 / Changed 事件</td></tr>
+  <tr><td>dbusmenu GetLayout + 条目属性</td><td>全量组装 + 助记符解析</td><td>菜单快照（menu() 返回值，非缓存）</td></tr>
+  <tr><td>图标来源（名/位图）</td><td>主题命中判定</td><td>主题图标 / 位图纹理（可绘制对象）</td></tr>
+  <tr><td>DBus 交互调用回执</td><td>归一化</td><td>InteractionResult 事件</td></tr>
+</table>
+
+<h2>6. 关键流程时序</h2>
+
+<h3>6.1 启动与快照</h3>
+<pre><code>
+  消费方          breadpan            Watcher(外部)        各 Item
+    |                |                       |                   |
+    |-- connect ---->|                       |                   |
+    |                |-- 连接会话总线         |                   |
+    |                |-- 注册 Host 唯一名     |                   |
+    |                |-- RegisterHost ------>|                   |
+    |                |-- 探测 Watcher 存亡 -->|                   |
+    |                |-- 查询在册清单 ------->|                   |
+    |                |<-- Item 清单 ----------|                   |
+    |                |== 逐个拉取全属性 ======================>|
+    |                |-- 入队 Snapshot(全部 Item, Watcher 存亡)  |
+    |<-- (Handle,通道) --|                     |                   |
+    |== recv(): Snapshot -> 增量事件流（原子衔接，无重叠无缺口）==|
+</code></pre>
+
+<h3>6.2 属性变更（去抖）</h3>
+<pre><code>
+  Item            breadpan 内部线程       事件通道
+    |                   |                   |
+    |-- PropertiesChanged -->|               |
+    |-- PropertiesChanged -->|  (窗口内合并)  |
+    |                   |-- 取并集,合成一次 -->|
+    |                   |   Changed{字段并集}  |
+</code></pre>
+
+<h3>6.3 菜单现场读取（零缓存）</h3>
+<pre><code>
+  消费方          breadpan              Item(dbusmenu)
+    |                |                       |
+    |-- menu() ----->|                       |
+    |                |-- GetLayout --------->|
+    |                |-- GetGroupProperties ->|
+    |                |<-- 布局+属性 ----------|
+    |                |== 组装全新快照(助记符解析+raw 逃生门,深度截断) ==|
+    |<-- 快照 -------|                        |
+    |                |                       |
+    |   (Item 侧 LayoutUpdated/ItemsPropertiesUpdated/AboutToShow
+    |    --> 仅转发 MenuChanged 事件,是否重取由消费方决定)      |
+</code></pre>
+
+<h3>6.4 交互转发与回执</h3>
+<pre><code>
+  消费方          breadpan                Item
+    |                |                     |
+    |-- activate --->|                     |
+    |                |-- Activate(x,y) --->|
+    |<-- 受理结论 ----|                     |
+    |                |<-- 调用结果 ---------|
+    |== 通道: InteractionResult{成功/失败} ==|
+</code></pre>
+
+<h3>6.5 心跳探测与 Watcher 存亡</h3>
+<pre><code>
+  breadpan 内部线程        Item                 Watcher
+    |                       |                     |
+    |-- 周期轻量属性读取 --->|                     |
+    |   (超时复用 timeout)   |                     |
+    |-- 连续失败 --> Unresponsive(true) 入队（只标记不移除）|
+    |-- 恢复响应 --> Unresponsive(false) 入队             |
+    |                       |                     |
+    |<-- Watcher 名字所有者变化 --------------------|
+    |== 重连 + 重新发现（叙述事件入队）; 存亡变迁入队 ==|
+</code></pre>
+<p class="diagram-note">
+  移除权专属唯一名消失（见 §8 事件清单）；SNI 不暴露 pid，库无强制退出通路。
+</p>
+
+<h2>7. 事件清单与投递语义</h2>
+
+<h3>7.1 事件清单（业务）</h3>
+<table>
+  <tr><th>事件</th><th>触发</th><th>消费方动作</th></tr>
+  <tr><td>快照</td><td>启动完成即投递一次：全部 Item 记录 + Watcher 存在性</td><td>初始化 UI</td></tr>
+  <tr><td>Added / Removed</td><td>运行期 Item 出现 / 唯一名消失</td><td>增删卡片</td></tr>
+  <tr><td>Changed</td><td>属性变更（去抖合并，字段取并集）</td><td>更新对应卡片</td></tr>
+  <tr><td>MenuChanged</td><td>dbusmenu 三类变更信号到达</td><td>决定何时重新 <code>menu()</code></td></tr>
+  <tr><td>WatcherChanged</td><td>ExternalUp / ExternalDown（只观察，不补位）</td><td>呈现登记中心状态</td></tr>
+  <tr><td>Unresponsive</td><td>心跳结论：无响应置位/解除</td><td>置灰 / 恢复（不移除）</td></tr>
+  <tr><td>InteractionResult</td><td>交互调用的异步回执</td><td>提示或日志</td></tr>
+  <tr><td>叙述</td><td>内部过程性说明（重连、重扫描等）</td><td>日志/调试</td></tr>
+  <tr><td>终止宣告</td><td>最后一个事件；此后 Handle 方法一律返回 Stopped</td><td>决定是否重建</td></tr>
+</table>
+
+<h3>7.2 投递语义</h3>
+<table>
+  <tr><th>语义</th><th>规定</th></tr>
+  <tr><td>快照</td><td>启动完成即投递快照；此后仅增量事件，快照与事件流原子配对、无重叠无缺口</td></tr>
+  <tr><td>顺序</td><td>同一 Item 的事件严格有序；全局不保证跨 Item 顺序</td></tr>
+  <tr><td>去抖</td><td><code>PropertiesChanged</code> 在合并窗口（默认 50 ms）内合并为一次 Changed，字段取并集</td></tr>
+  <tr><td>背压</td><td>通道满：丢弃 + 告警计数，绝不阻塞内部线程</td></tr>
+  <tr><td>终止</td><td>终止宣告是最后一个事件</td></tr>
+</table>
+
+<h2>8. 错误与容错</h2>
+<table>
+  <tr><th>错误类别</th><th>场景</th><th>呈现</th></tr>
+  <tr><td>总线类</td><td>会话总线连接失败</td><td>入口返回 Err</td></tr>
+  <tr><td>超时类</td><td>服务发现 / 调用 / 心跳超时</td><td>Err / 回执</td></tr>
+  <tr><td>目标缺失类</td><td>Item 不存在 / 无菜单未就绪</td><td>Err</td></tr>
+  <tr><td>协议类</td><td>属性缺失、类型不符等</td><td>降级为默认字段 / Err / 回执，<strong>库不 panic</strong></td></tr>
+  <tr><td>停机类</td><td>终止宣告之后的一切调用</td><td>统一返回 Stopped</td></tr>
+</table>
+<p><strong>容错总则</strong>：单个 Item 的死亡不影响其他 Item 的跟踪；总线断开 → 终止宣告 → Stopped，重建由消费方决定。</p>
+
+<h2>9. 线程与生命周期</h2>
+<ul>
+  <li>Handle：<code>Clone + Send + Sync + 'static</code>，全部方法线程安全；</li>
+  <li>内部线程固定为 1（事件线程，含 zbus 执行器），不创建线程池；</li>
+  <li>停机幂等；drop 最后一个 Handle 实例自动触发；</li>
+  <li>不安装任何全局状态：同进程可并行运行多个实例。</li>
+</ul>
+
+<h2>10. 测试替身</h2>
+<p>
+  <code>testing</code> 特性下提供：可编程<strong>演示 Item</strong>（制造 Item 侧全部协议变化）与<strong>最小 Watcher 替身</strong>（无外部 Watcher 环境下的登记中心替身）。
+  替身仅在测试特性下编译、为最小实现，不构成对外交付能力。
+</p>
+<table>
+  <tr><th>演示 Item 指令</th><th>制造的协议变化</th></tr>
+  <tr><td><code>status</code></td><td>Passive / Active / NeedsAttention 切换 → Changed</td></tr>
+  <tr><td><code>icon</code> / <code>pixmap</code></td><td>主题图标与内嵌位图间切换 → Changed</td></tr>
+  <tr><td><code>tooltip</code></td><td>设置/清除 Tooltip → Changed</td></tr>
+  <tr><td><code>menu add / toggle / remove</code>、<code>toggle_menu</code></td><td>菜单增删改、Menu 对象挂载/卸载 → MenuChanged</td></tr>
+  <tr><td><code>remove</code></td><td>注销 Item 并退出 → Removed</td></tr>
+</table>
+
+<h2>11. 独立性硬约束</h2>
+<ol>
+  <li>不依赖项目群任何其他模块（workspace 内零反向依赖）；</li>
+  <li>协议核心依赖白名单：<code>zbus</code>、<code>thiserror</code>、标准库；事件通道用 <code>std::sync::mpsc</code>；GTK 整合层额外引入 <code>gtk4</code> / <code>glib</code>；</li>
+  <li>禁止异步运行时出现在公开 API；</li>
+  <li>必须独立编译测试，不要求消费方工程存在（构建与 CI 见 <a href="BUILD.html">BUILD.html</a>）。</li>
+</ol>
+
+<h2>12. 测试与验收</h2>
+<table>
+  <tr><th>层级</th><th>内容</th></tr>
+  <tr><td>单元测试</td><td>去抖合并、IconSource 二选一规则、唯一键相等语义</td></tr>
+  <tr><td>集成测试</td><td>同进程 <code>Tray</code> + <code>testing</code> 替身：登记 → 属性变更 → 菜单变更 → 注销的全事件序列断言</td></tr>
+  <tr><td>外部 Watcher 存亡验收</td><td>外部 Watcher 在位时呈现在位；其消失时呈现在位消失并触发重新发现；使用方自行组装 Watcher 时装配顺序符合其约定</td></tr>
+  <tr><td>互操作验收</td><td>真实 SNI 提供方（<code>nm-applet</code>、<code>blueman-applet</code>）：发现、跟踪、激活回执正常</td></tr>
+</table>
+
+<h2>13. 版本与稳定性</h2>
+<ul>
+  <li>当前 v0.x：接口冻结基线；破坏性变更必须先修订文档并升版本号；</li>
+  <li>v1.0 冻结条件：§12 全部验收通过 + 真实桌面会话连续运行 72h 无终止宣告。</li>
+</ul>
+
+<footer>
+  修订历史：v0.1 · 2026-09-16 · 自 tray SPEC 重构。v0.2 · 2026-09-18 · 按三层文档模型重组：新增时序图与数据模型章节；Rust 签名（入口/Handle/事件/数据/错误/GTK/测试替身）移交 CODE.html，本文档保留业务契约。v0.3 · 2026-09-18 · 零项目名约束：文档内不再出现其他项目名，相关表述泛化为「外部 Watcher」「依赖方」等角色词汇。
+</footer>
+
+</main>
+</body>
+</html>
