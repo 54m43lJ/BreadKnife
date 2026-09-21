@@ -11,7 +11,7 @@
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC", sans-serif;
   background: var(--bg);
   color: var(--text);
   line-height: 1.75;
@@ -86,10 +86,10 @@ pre {
   font-size: .88rem;
   line-height: 1.5;
   white-space: pre;
-  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-family: "Maple Mono Normal NF CN", "Noto Sans Mono CJK SC", "Source Han Mono SC", "WenQuanYi Zen Hei Mono", "MS Gothic", monospace;
 }
 code {
-  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-family: "Maple Mono Normal NF CN", "Noto Sans Mono CJK SC", "Source Han Mono SC", "WenQuanYi Zen Hei Mono", "MS Gothic", monospace;
   background: var(--code-bg);
   padding: .1em .35em;
   border-radius: 4px;
