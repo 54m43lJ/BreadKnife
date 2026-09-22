@@ -32,7 +32,7 @@
 ├── gtk/
 │   ├── mod.rs           # 整合层出口（主线程约束说明）
 │   ├── paintable.rs     # 渲染直出：主题命中 → 主题图标；未命中 → 位图纹理
-│   └── bridge.rs        # 事件桥接：通道 → GTK 主上下文回调
+│   └── bridge.rs        # 事件桥接：通道 → GTK 主线程（GLib 主循环）搬运
 └── testing/
     ├── demo_item.rs     # 可编程演示 Item
     └── stub_watcher.rs  # 最小 Watcher 替身</code></pre>
@@ -54,7 +54,7 @@ impl Tray {
     pub fn connect(config: TrayConfig)
         -&gt; Result&lt;(TrayHandle, Receiver&lt;TrayEvent&gt;), TrayError&gt;;
 
-    /// 底层原语：以回调方式构建。事件全部经回调投递。
+    /// 底层原语（ARCHITECTURE §2 投递链 ①）：以回调方式构建。事件全部经回调投递。
     pub fn builder(config: TrayConfig) -&gt; TrayBuilder;
 }
 
@@ -83,13 +83,13 @@ impl TrayHandle {
     /// 通知 Item 某菜单即将展示（AboutToShow），返回是否建议刷新
     pub fn menu_about_to_show(&amp;self, id: &amp;TrayItemId, menu_item_id: i32) -&gt; Result&lt;bool, TrayError&gt;;
 
-    /// 追加订阅事件通道（独立于回调原语，可多订阅者）
+    /// 追加订阅事件通道（独立于 on_event 回调，可多订阅者）
     pub fn subscribe(&amp;self) -&gt; Receiver&lt;TrayEvent&gt;;
     /// 优雅停机：注销 Host、停内部线程；drop 最后一个实例时自动调用
     pub fn shutdown(&amp;self);
 }
 
-pub enum Orientation { Horizontal, Vertical }</code></pre>
+pub enum Orientation { Horizontal, Vertical }  // ← SNI Scroll(STRING orientation)：horizontal / vertical</code></pre>
 
 <h3>2.3 事件</h3>
 <pre><code>pub enum TrayEvent {
@@ -111,55 +111,79 @@ pub enum Orientation { Horizontal, Vertical }</code></pre>
 }
 
 pub enum WatcherState { ExternalUp, ExternalDown }
+/// ← 交互指令的官方方法：SNI §3.2 Activate / SecondaryActivate / Scroll；
+///    dbusmenu Event("clicked") / AboutToShow
 pub enum InteractionOp { Activate, SecondaryActivate, Scroll, MenuActivate, MenuAboutToShow }
+/// 变更字段并集的成员：与 SNI 官方属性组一一对应；
+/// 官方信号 New*（SNI §3.3）与 PropertiesChanged 均触发相应成员入集
 pub enum ItemField {
-    Status, Title, Description, Icon, OverlayIcon,
-    AttentionIcon, Tooltip, WindowId, Category, HasMenu,
+    Status,        // ← Status（官方信号 NewStatus）
+    Ident,         // ← Id
+    Title,         // ← Title（官方信号 NewTitle）
+    Icon,          // ← IconName + IconPixmap（官方信号 NewIcon）
+    OverlayIcon,   // ← OverlayIconName + OverlayIconPixmap（官方信号 NewOverlayIcon）
+    AttentionIcon, // ← AttentionIconName + AttentionIconPixmap（官方信号 NewAttentionIcon）
+    Tooltip,       // ← ToolTip（官方信号 NewToolTip）
+    WindowId,      // ← WindowId
+    Category,      // ← Category
+    IsMenuOnly,    // ← ItemIsMenu
+    HasMenu,       // ← Menu
 }</code></pre>
 
 <h3>2.4 数据模型</h3>
-<pre><code>/// 全局唯一键：总线唯一名 + 对象路径
-pub struct TrayItemId { pub bus_name: String, pub path: String }
+<p>字段级官方映射总表见 ARCHITECTURE.html §4；此处以行内注释标注对应官方字段与语义。</p>
+<pre><code>/// 全局唯一键：Item 注册到 Watcher 的服务名。
+/// 官方命名 org.freedesktop.StatusNotifierItem-PID-ID（SNI §3：PID=进程号，ID=同进程实例序号）；
+/// Watcher 的 RegisteredStatusNotifierItems 与 StatusNotifierItemRegistered/Unregistered
+/// 均以该服务名为准，对象路径不参与标识。
+pub struct TrayItemId { pub service: String }
 
 pub struct TrayItem {
-    pub id: TrayItemId,
-    pub category: TrayCategory,        // Application / Communications / SystemServices / Hardware
-    pub status: TrayStatus,            // Passive / Active / NeedsAttention
-    pub title: Option&lt;String&gt;,
-    pub description: Option&lt;String&gt;,   // SNI "Id" 属性
-    pub window_id: i32,
-    pub icon: IconSource,
-    pub overlay_icon: Option&lt;IconSource&gt;,
-    pub attention_icon: Option&lt;IconSource&gt;,
-    pub tooltip: Option&lt;ToolTip&gt;,
-    pub has_menu: bool,
+    pub id: TrayItemId,                     // 唯一键（见上）
+    pub category: TrayCategory,             // ← SNI Category：ApplicationStatus / Communications / SystemServices / Hardware
+    pub status: TrayStatus,                 // ← SNI Status：Passive / Active / NeedsAttention
+    pub ident: String,                      // ← SNI Id：应用内唯一、跨会话一致（如应用名）；识别用，不用于展示
+    pub title: Option&lt;String&gt;,              // ← SNI Title：面向用户展示名，可比 Id 更具描述性
+    pub is_menu_only: bool,                 // ← SNI ItemIsMenu（BOOL）：为真时优先展示菜单而非 Activate
+    pub window_id: u32,                     // ← SNI WindowId（UINT32）；不关心时为 0
+    pub icon: IconSource,                   // ← SNI IconName / IconPixmap（二选一规则见 ARCHITECTURE §4.2）
+    pub overlay_icon: Option&lt;IconSource&gt;,   // ← SNI OverlayIconName / OverlayIconPixmap
+    pub attention_icon: Option&lt;IconSource&gt;, // ← SNI AttentionIconName / AttentionIconPixmap
+    pub tooltip: Option&lt;ToolTip&gt;,           // ← SNI ToolTip (STRING, a(iiay), STRING, STRING)
+    pub has_menu: bool,                     // ← SNI Menu（OBJECT PATH）非空；路径由内部保存供 menu() 使用
 }
 
-/// 二选一规则固定：Name 优先，否则位图
+/// 二选一规则固定：Name 优先，否则位图（官方建议名优先于位图，SNI §3.1.6）
 pub enum IconSource { Name(String), Pixmap(Pixmap) }
 
-/// SNI IconPixmap：ARGB32、网络字节序、行跨度 = width * 4
+/// SNI IconPixmap：签名 a(iiay)，ARGB32、网络字节序、行跨度 = width * 4（SNI §6）
 pub struct Pixmap { pub width: u32, pub height: u32, pub argb: Vec&lt;u8&gt; }
 
+/// ← SNI ToolTip：图标名 + 位图 + 标题 + 描述
 pub struct ToolTip { pub icon: Option&lt;IconSource&gt;, pub title: String, pub description: String }
+// description 官方语义：可含标记子集 b/i/u/a/img（SNI §7），原样透传
 
 /// menu() 的返回值（非缓存）
 pub struct MenuSnapshot { pub revision: u32, pub root: Vec&lt;MenuItem&gt; }
+// revision ← dbusmenu GetLayout 返回的 revision（与 LayoutUpdated.revision 对应）
 
 pub struct MenuItem {
-    pub id: i32,
-    pub kind: MenuItemKind,            // Standard / Separator / Submenu
-    pub label: String,                 // 已解析助记符 "_"
-    pub raw_label: String,             // 原始值逃生门
-    pub enabled: bool,
-    pub visible: bool,
-    pub toggled: Option&lt;bool&gt;,
-    pub icon: Option&lt;IconSource&gt;,
-    pub children: Vec&lt;MenuItem&gt;,
+    pub id: i32,                     // ← dbusmenu 条目数字 id（GetLayout 布局 (i,a{sv},av) 的 i）
+    pub kind: MenuItemKind,          // ← type（standard/separator）+ children-display="submenu"
+    pub label: String,               // ← label 已解析：__ 显示为 _，第一个剩余 _ 后字符为访问键
+    pub raw_label: String,           // ← label 原始值（逃生门）
+    pub enabled: bool,               // ← enabled（官方缺省 true；非默认值才上报，组装时按默认值补全）
+    pub visible: bool,               // ← visible（官方缺省 true）
+    pub toggled: Option&lt;bool&gt;,       // ← toggle-type ∈ {checkmark, radio} 时按 toggle-state：
+                                     //    1→Some(true)，0→Some(false)，其余/缺省 -1→None
+    pub icon_name: Option&lt;String&gt;,   // ← icon-name（Freedesktop 图标名）
+    pub icon_data: Option&lt;Vec&lt;u8&gt;&gt;,  // ← icon-data（PNG 字节流；与 SNI 的 ARGB32 位图不同格式）
+    pub children: Vec&lt;MenuItem&gt;,     // ← GetLayout 递归布局（recursionDepth：-1 全部/0 不递归/n 层）；
+                                     //   深度截断于 menu_max_depth
 }
 
-pub enum TrayCategory { Application, Communications, SystemServices, Hardware }
-pub enum TrayStatus { Passive, Active, NeedsAttention }
+pub enum TrayCategory { ApplicationStatus, Communications, SystemServices, Hardware } // ← Category 官方四值
+pub enum TrayStatus { Passive, Active, NeedsAttention }                              // ← Status 官方三值
 pub enum MenuItemKind { Standard, Separator, Submenu }</code></pre>
 
 <h3>2.5 错误、GTK 整合与测试替身</h3>
@@ -180,7 +204,7 @@ pub enum TrayError {
 // ── GTK 整合层（均须在 GTK 主线程调用；示意签名）──
 /// 渲染直出：主题命中 → 主题图标；未命中 → 位图纹理
 pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
-/// 事件桥接（权威方案）：事件通道 → GTK 主上下文回调
+/// 事件桥接：事件通道 → GTK 主线程（GLib 主循环）搬运；机制见 ARCHITECTURE §2 投递链 ③
 pub fn bridge(rx: &amp;Receiver&lt;TrayEvent&gt;, cb: impl FnMut(TrayEvent) + 'static);
 
 // ── testing 特性 ──
@@ -206,18 +230,20 @@ impl DemoItem {
 <pre><code>流程 connect(config)
 ├── 连接会话总线
 ├── 启动内部事件线程（zbus 执行器宿主）
-├── 注册 Host 唯一名（_org.kde.StatusNotifierHost.pid-序号）
+├── 注册 Host 服务名（org.freedesktop.StatusNotifierHost-id，SNI §5）
 ├── 调用 Watcher.RegisterStatusNotifierHost
-├── 探测 Watcher 存在性 → 记录初始存亡
-├── 查询在册 Item 清单
+├── 探测 Watcher 存在性（IsStatusNotifierHostRegistered）→ 记录初始存亡
+├── 查询在册 Item 清单（RegisteredStatusNotifierItems）
 │    └── 对每个 Item
 │         ├── 拉取全属性 → 建立 Item 记录
-│         └── 订阅其 PropertiesChanged
+│         └── 订阅其 PropertiesChanged 与官方 New* 信号（§3.3）
 ├── 事件入队 Snapshot(全部 Item, Watcher 存亡)
 └── 返回 (Handle, 事件通道)</code></pre>
 
 <h3>3.2 属性变更去抖</h3>
 <pre><code>内部事件线程: 收到 PropertiesChanged(item, 字段)
+             或官方 New* 信号 (NewStatus/NewIcon/NewTitle/
+                               NewToolTip/NewOverlayIcon/NewAttentionIcon)
 ├── 追加进该 item 的待发变更集
 ├── 刷新去抖窗口计时
 └── 窗口到期
@@ -264,7 +290,7 @@ impl DemoItem {
 └── 置 Stopped（此后全部方法返回 TrayError::Stopped）</code></pre>
 
 <footer>
-  修订历史：v0.0-draft · 2026-09-18 · 初稿：文件树、六组类型签名、六条主流程调用栈，待评审定稿。
+  修订历史：v0.0-draft · 2026-09-18 · 初稿：文件树、六组类型签名、六条主流程调用栈，待评审定稿。v0.1-draft · 2026-09-21 · 数据模型逐字段对齐官方规范：TrayItemId 改为官方服务名（org.freedesktop.StatusNotifierItem-PID-ID）、SNI Id 与 Title 分离为 ident/title、补 ItemIsMenu（is_menu_only）、WindowId 改 u32；dbusmenu 条目映射修正（icon-name/icon-data 分离、toggle 语义、默认值补全）；ItemField 对齐官方属性组；变更触发源纳入官方 New* 信号。官方接口定义原文存于 reference/。
 </footer>
 
 </main>

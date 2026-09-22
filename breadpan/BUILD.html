@@ -22,7 +22,7 @@
   <tr><td>协议核心</td><td>纯 Rust（zbus），无系统库依赖</td></tr>
   <tr><td>GTK 整合层</td><td>gtk4 / glib 开发包（Arch: <code>pacman -S gtk4</code>）</td></tr>
 </table>
-<p>本库必须独立编译测试，不要求 workspace 内其他工程存在（独立性硬约束见 ARCHITECTURE §11）。</p>
+<p>本库必须独立编译测试，不要求 workspace 内其他工程存在（独立性硬约束见 ARCHITECTURE §10）。</p>
 
 <h2>构建与测试</h2>
 <pre><code>cargo build
@@ -33,7 +33,7 @@ cargo test --features testing   # 含测试替身（演示 Item / Watcher 替身
 <ul>
   <li><code>cargo build</code> / <code>cargo test</code> 在<strong>无显示服务</strong>环境通过；</li>
   <li>仅需 DBus session bus（集成测试不依赖 Wayland/X11）；</li>
-  <li>测试场景清单见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §12。</li>
+  <li>测试场景清单见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §11。</li>
 </ul>
 
 <footer>

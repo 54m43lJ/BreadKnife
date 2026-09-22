@@ -11,7 +11,9 @@
 
 <h1>breadpan</h1>
 <blockquote>
-  SNI 协议客户端库 + DBusMenu 客户端库，以统一事件流交付托盘世界的全部变化；
+  SNI 协议客户端库 + DBusMenu 客户端库（协议原文链接见
+  <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §4 与 <a href="reference/com.canonical.dbusmenu.xml">reference/</a>），
+  以统一事件流交付托盘世界的全部变化；
   为 GTK 应用提供深度整合（渲染直出 + 事件桥接）。
 </blockquote>
 
@@ -48,7 +50,7 @@
   <tr><th>不做</th><th>说明</th></tr>
   <tr><td>不实现 Watcher 角色</td><td>只作为客户端观察其存亡；目标环境没有现成 Watcher 时，需自备该角色或使用环境自带的实现</td></tr>
   <tr><td>不拥有任何 UI</td><td>无窗口/布局/事件循环；菜单渲染与弹出定位归消费方</td></tr>
-  <tr><td>不做 XEmbed/X11 传统托盘</td><td>场景钉死 Wayland + SNI</td></tr>
+  <tr><td>不做 XEmbed/X11 传统托盘</td><td>场景钉死 Wayland + SNI（传统规范原文：<a href="https://specifications.freedesktop.org/systemtray-spec/latest/">Freedesktop System Tray Specification</a>）</td></tr>
   <tr><td>公开面零 async</td><td>内部执行模型对使用者不可见，不泄漏异步运行时</td></tr>
 </table>
 <p>完整的能力边界（含 AttentionMovieName、菜单缓存、移除无响应 Item 等"不做"清单）见
@@ -62,8 +64,6 @@
   <li>交互：点击/滚轮/菜单操作经 Handle 的指令通道转发给对应 Item；</li>
   <li>菜单：右键时先发出弹出前通知，再经 <code>menu()</code> 现场拉取最新布局渲染。</li>
 </ol>
-<h3>原型 / mock（占位）</h3>
-<p class="placeholder">待原型或 mock 实体出现后填充。</p>
 
 <h2>适用前提</h2>
 <ul>
