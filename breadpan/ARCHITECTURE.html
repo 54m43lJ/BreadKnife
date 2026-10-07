@@ -11,10 +11,9 @@
 
 <h1>breadpan 架构规格</h1>
 <blockquote>
-  本文档面向实现者：时序图、接口契约、数据模型与转换。
-  能力边界以 <a href="README.html">README.html</a> 为权威；
-  接口与数据模型以签名和伪代码描述（完整清单见 <a href="CODE.html">CODE.html</a>），业务语言仅作注释补充。
-  协议范围仅 SNI，不做 XEmbed/X11 传统托盘（<a href="https://specifications.freedesktop.org/systemtray-spec/latest/">Freedesktop System Tray Specification</a>）。
+  本文档面向消费方（依赖本库的应用与其开发者）：术语、架构图、对外接口契约与数据模型。
+  能力级边界以 <a href="README.html">README.html</a>「本库不是什么」为权威；
+  内部结构与机制见 <a href="CODE.html">CODE.html</a>。
 </blockquote>
 
 <h2>1. 术语</h2>
@@ -25,41 +24,37 @@
   <tr><td>Item</td><td>一个托盘项，即某个应用在总线上导出的 <code>org.freedesktop.StatusNotifierItem</code> 对象（<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item">官方定义 §3</a>）</td></tr>
   <tr><td>Menu</td><td>Item 通过 <code>Menu</code> 属性指向的 <code>com.canonical.dbusmenu</code> 对象（接口定义原文：<a href="reference/com.canonical.dbusmenu.xml">reference/com.canonical.dbusmenu.xml</a>）</td></tr>
   <tr><td>会话总线</td><td>DBus session bus，本库全部通信发生在此（<a href="https://dbus.freedesktop.org/doc/dbus-specification.html">D-Bus 规范</a>）</td></tr>
-  <tr><td>zbus</td><td>纯 Rust 的 DBus 实现，本库协议核心唯一的外部依赖；其异步执行器宿主于内部事件线程（见 §2 执行模型）</td></tr>
+  <tr><td>zbus</td><td>纯 Rust 的 DBus 实现，本库协议核心唯一的外部依赖</td></tr>
   <tr><td>GTK 主线程</td><td>GTK/GLib 主循环（MainContext）所在线程；一切 UI 操作与 <code>gtk::bridge</code> 交付的闭包都在此执行</td></tr>
 </table>
 
-<h2>2. 运行模型</h2>
+<h2>2. 架构图</h2>
+
+<h3>2.1 总体架构</h3>
 <pre><code>
    +----------------------------------+
    |      消费方（托盘展示应用）      |
-   |  UI 线程: 事件 -> 渲染 / 交互    |
+   |  UI 线程: 事件 -&gt; 渲染 / 交互    |
    +----------------+-----------------+
-                    |  Handle (Clone+Send+Sync)
+                    |  TrayHandle (Clone+Send+Sync)
                     |  事件通道 / GTK 事件桥接 / 渲染入口
    +----------------+---------------------+
    |             breadpan                 |
    |  前端: Handle + GTK 整合层           |
-   |  后端: 单一内部事件线程(zbus 执行器) |
-   |   - Host 登记 / Item 发现跟踪        |
-   |   - 属性同步(去抖) / 心跳探测        |
-   |   - DBusMenu 现场读取                |
+   |  后端: 内部事件线程（见 CODE.html）  |
    +----------------+---------------------+
                     | DBus session bus
         +-----------+-------------+
-        |  Watcher (登记中心):    |
-        |  外部实现（环境自带或   |
-        |  使用方自行组装）       |
+        |  Watcher（登记中心）    |
         +-------------------------+
 </code></pre>
-<p class="diagram-note">
-  库启动后自持一条会话总线连接与一个内部事件线程；消费方在 UI 线程持有 Handle。
-</p>
-<pre><code>事件投递链（每个事件的一条路；编号 = 下表环节）:
+
+<h3>2.2 事件投递链</h3>
+<pre><code>每个事件的一条路；编号 = 下表环节:
 
  内部事件线程          库前端                       消费方
  ═══════════ ①  ════════════════ ②  ══════ ③  ═══════════
- 事件出队 ──> on_event 回调 ──send──> Receiver ──bridge──> 闭包（GTK 主线程）
+ 事件出队 ──&gt; on_event 回调 ──send──&gt; Receiver ──bridge──&gt; 闭包（GTK 主线程）
              按注册顺序串行      std::sync::mpsc  GLib 主循环搬运
 </code></pre>
 <p class="diagram-note">
@@ -69,150 +64,11 @@
 <table>
   <tr><th>环节</th><th>机制</th><th>约束（机制未覆盖处）</th></tr>
   <tr><td>① 回调<br><code>TrayBuilder::on_event</code></td><td>事件出队后由内部事件线程调用；注册多个时按注册顺序依次执行</td><td>回调内阻塞会拖停内部线程，其后全部事件延迟；不得直接调用 GTK——需要主线程时沿链交给 ③</td></tr>
-  <tr><td>② 事件通道<br><code>Tray::connect</code> · <code>TrayHandle::subscribe</code></td><td><code>connect</code> 以 ① 为底组装：回调把事件 <code>send</code> 进 <code>std::sync::mpsc</code> 通道并返回 <code>Receiver</code>；<code>subscribe()</code> 为同一内部流追加独立 <code>Receiver</code></td><td>通道缓冲满：丢弃该事件并递增告警计数，绝不阻塞内部线程（有损交付）</td></tr>
+  <tr><td>② 事件通道<br><code>Tray::connect</code> · <code>TrayHandle::subscribe</code></td><td><code>connect</code> 以 ① 为底组装：回调把事件 <code>send</code> 进 <code>std::sync::mpsc</code> 通道并返回 <code>Receiver</code>；<code>subscribe()</code> 为同一内部流追加独立 <code>Receiver</code>；交付语义（顺序/去抖/背压）见 §3.2</td><td>公开 API 全部为同步签名（能力级边界见 <a href="README.html">README.html</a>）</td></tr>
   <tr><td>③ GTK 桥接<br><code>gtk::bridge</code></td><td>向 GTK 主线程的 GLib 主循环注册内部转发，把 ② 的事件逐个搬到主线程调用消费方闭包</td><td>闭包在主线程执行，阻塞即卡 UI</td></tr>
-  <tr><td>宿主线程<br><code>Tray::connect</code></td><td>内部事件线程同时宿主 zbus 执行器：DBus 收发、事件组装与投递在同一线程完成</td><td>公开 API 全部为同步签名，不出现 async 类型——消费方无需异步运行时</td></tr>
 </table>
 
-<h2>3. 接口契约</h2>
-<p>签名即契约，注释只补充签名表达不了的语义。完整清单（<code>TrayConfig</code>、错误枚举、测试替身方法）见 <a href="CODE.html">CODE.html</a>。</p>
-<pre><code>// ── 入口 ──
-impl Tray {
-    /// 阻塞至完成 Host 登记（或超时）；通道首事件为快照，与后续事件原子衔接
-    pub fn connect(config: TrayConfig) -&gt; Result&lt;(TrayHandle, Receiver&lt;TrayEvent&gt;), TrayError&gt;;
-    /// 底层原语（§2 投递链 ①）：事件全部经回调投递
-    pub fn builder(config: TrayConfig) -&gt; TrayBuilder;
-}
-
-impl TrayBuilder {
-    /// 可多次调用；按注册顺序、在内部事件线程串行触发
-    pub fn on_event(self, cb: impl Fn(&amp;TrayEvent) + Send + 'static) -&gt; Self;
-    /// 组装并启动，语义同 connect
-    pub fn spawn(self) -&gt; Result&lt;TrayHandle, TrayError&gt;;
-}
-
-// ── 查询 ──
-impl TrayHandle {
-    pub fn items(&amp;self) -&gt; Vec&lt;TrayItem&gt;;
-    pub fn item(&amp;self, id: &amp;TrayItemId) -&gt; Option&lt;TrayItem&gt;;
-    /// 零缓存：每次调用现场拉取；Item 无菜单或未就绪 → Err
-    pub fn menu(&amp;self, id: &amp;TrayItemId) -&gt; Result&lt;MenuSnapshot, TrayError&gt;;
-
-    // ── 交互：同步返回受理结论；Item 侧异步结果经 InteractionResult 事件交付 ──
-    pub fn activate(&amp;self, id: &amp;TrayItemId, x: i32, y: i32) -&gt; Result&lt;(), TrayError&gt;;
-    pub fn secondary_activate(&amp;self, id: &amp;TrayItemId, x: i32, y: i32) -&gt; Result&lt;(), TrayError&gt;;
-    pub fn scroll(&amp;self, id: &amp;TrayItemId, delta: i32, orient: Orientation) -&gt; Result&lt;(), TrayError&gt;;
-    pub fn menu_activate(&amp;self, id: &amp;TrayItemId, menu_item_id: i32) -&gt; Result&lt;(), TrayError&gt;;
-    /// AboutToShow；返回是否建议刷新
-    pub fn menu_about_to_show(&amp;self, id: &amp;TrayItemId, menu_item_id: i32) -&gt; Result&lt;bool, TrayError&gt;;
-
-    /// 追加事件通道订阅者（§2 投递链 ②）
-    pub fn subscribe(&amp;self) -&gt; Receiver&lt;TrayEvent&gt;;
-    /// 优雅停机：注销 Host、停内部线程；幂等；最后一个实例 drop 时自动触发
-    pub fn shutdown(&amp;self);
-}
-
-// ── GTK 整合层 ──
-/// 主题命中 → 主题图标；未命中 → 位图纹理。须在 GTK 主线程调用
-pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
-/// 事件通道 → GTK 主线程搬运（§2 投递链 ③）
-pub fn bridge(rx: &amp;Receiver&lt;TrayEvent&gt;, cb: impl FnMut(TrayEvent) + 'static);
-
-// ── testing 特性（见 §9）──
-pub fn spawn_demo_item(config: TrayConfig) -&gt; Result&lt;DemoItem, TrayError&gt;;
-pub fn spawn_stub_watcher() -&gt; Result&lt;StubWatcher, TrayError&gt;;</code></pre>
-
-<h2>4. 数据模型与转换</h2>
-<p>数据结构即模型，官方字段映射以行内注释标注。规范原文：
-<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item-properties">SNI §3.1 属性</a> ·
-<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-watcher">§4 Watcher</a> ·
-<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#icon-pixmap">§6 位图</a> ·
-<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#markup">§7 标记子集</a> ·
-<a href="reference/com.canonical.dbusmenu.xml">dbusmenu 接口定义</a> ·
-<a href="https://specifications.freedesktop.org/icon-naming-spec/latest/">Icon Naming Spec</a> ·
-<a href="https://specifications.freedesktop.org/icon-theme-spec/latest/">Icon Theme Spec</a>。
-官方定义、本库不透传：<code>AttentionMovieName</code>（SNI §3.1.12，能力边界见 README）、<code>ContextMenu</code> 方法（§3.2.1）。</p>
-
-<h3>4.1 Item 记录</h3>
-<pre><code>/// 唯一键：Item 注册到 Watcher 的服务名。
-/// 官方命名 org.freedesktop.StatusNotifierItem-PID-ID（PID=进程号，ID=同进程实例序号，SNI §3；
-/// 总线名构成见 D-Bus 规范 Bus Names）。Watcher 的 RegisteredStatusNotifierItems 与
-/// StatusNotifierItemRegistered/Unregistered 信号均以该服务名为准，对象路径不参与标识：
-/// 服务名消失 → Removed；同名重现（应用重启）→ 视为新 Item（Added）。
-/// 历史实现普遍以 org.kde.* 前缀提供同一接口（如 nm-applet）：
-/// 监听与调用对 org.freedesktop.*（原文拼写）与 org.kde.* 两套前缀等价处理，表述以原文为准。
-pub struct TrayItemId { pub service: String }
-
-pub struct TrayItem {
-    pub id: TrayItemId,
-    pub category: TrayCategory,             // ← Category：ApplicationStatus/Communications/SystemServices/Hardware
-    pub status: TrayStatus,                 // ← Status：Passive 可隐藏 / Active 应展示 / NeedsAttention 应强调
-    pub ident: String,                      // ← Id：应用内唯一、跨会话一致（如应用名）；识别用，不用于展示
-    pub title: Option&lt;String&gt;,              // ← Title：面向用户展示名，可比 Id 更具描述性
-    pub is_menu_only: bool,                 // ← ItemIsMenu：为真时优先展示菜单而非 Activate
-    pub window_id: u32,                     // ← WindowId（UINT32）；不关心时为 0
-    pub icon: IconSource,                   // ← IconName + IconPixmap（二选一规则见 §4.2）
-    pub overlay_icon: Option&lt;IconSource&gt;,   // ← OverlayIconName + OverlayIconPixmap
-    pub attention_icon: Option&lt;IconSource&gt;, // ← AttentionIconName + AttentionIconPixmap
-    pub tooltip: Option&lt;ToolTip&gt;,           // ← ToolTip (STRING, a(iiay), STRING, STRING)；描述可含标记子集（SNI §7），原样透传
-    pub has_menu: bool,                     // ← Menu（OBJECT PATH）非空；路径由内部保存供 menu() 使用
-}
-
-pub enum TrayCategory { ApplicationStatus, Communications, SystemServices, Hardware }
-pub enum TrayStatus { Passive, Active, NeedsAttention }
-
-/// ← SNI ToolTip：图标名 + 位图 + 标题 + 描述
-pub struct ToolTip { pub icon: Option&lt;IconSource&gt;, pub title: String, pub description: String }</code></pre>
-
-<h3>4.2 图标来源与二选一规则</h3>
-<pre><code>/// 二选一规则固定：IconName 非空 → Name，否则 → Pixmap（官方建议名优先于位图，SNI §3.1.6）
-pub enum IconSource { Name(String), Pixmap(Pixmap) }
-
-// Name：Freedesktop 图标名（命名见 Icon Naming Spec）；渲染直出时按 Icon Theme Spec 查主题
-// Pixmap：主题名缺失时交付；转纹理的色彩处理在渲染直出路径内完成
-
-/// SNI 位图：签名 a(iiay)，ARGB32、网络字节序、行跨度 = width × 4（SNI §6）
-pub struct Pixmap { pub width: u32, pub height: u32, pub argb: Vec&lt;u8&gt; }</code></pre>
-
-<h3>4.3 菜单条目</h3>
-<pre><code>pub struct MenuSnapshot {
-    pub revision: u32,      // ← GetLayout 返回的 revision（与 LayoutUpdated.revision 对应）
-    pub root: Vec&lt;MenuItem&gt;,
-}
-
-pub struct MenuItem {
-    pub id: i32,                     // ← 布局 (i, a{sv}, av) 的条目 id；Event/AboutToShow 以它寻址
-    pub kind: MenuItemKind,          // ← type（standard/separator）+ children-display="submenu"
-    pub label: String,               // ← label 已解析：__ 显示为 _，第一个剩余 _ 后字符为访问键
-    pub raw_label: String,           // ← label 原始值（逃生门）
-    pub enabled: bool,               // ← enabled，缺省 true
-    pub visible: bool,               // ← visible，缺省 true
-    pub toggled: Option&lt;bool&gt;,       // ← toggle-type ∈ {checkmark, radio} 时按 toggle-state：
-                                     //   1→Some(true)，0→Some(false)，其余/缺省 -1→None
-    pub icon_name: Option&lt;String&gt;,   // ← icon-name（Freedesktop 图标名）
-    pub icon_data: Option&lt;Vec&lt;u8&gt;&gt;,  // ← icon-data（PNG 字节流；与 SNI ARGB32 位图不同格式）
-    pub children: Vec&lt;MenuItem&gt;,     // ← GetLayout 递归布局（recursionDepth：-1 全部/0 不递归/n 层）；
-                                     //   深度截断于 menu_max_depth
-}
-
-pub enum MenuItemKind { Standard, Separator, Submenu }
-
-// toggle-state：0 off / 1 on / 其余 indeterminate；radio 组互斥由 Item 侧维护
-// enabled/visible 缺省 true：官方约定非默认值的属性才会上报，组装时须按默认值补全
-// 官方定义、本库不透传：条目属性 shortcut；vendor 专属属性与事件（x-&lt;vendor&gt;-* 前缀）</code></pre>
-
-<h3>4.4 转换总表</h3>
-<table>
-  <tr><th>输入</th><th>转换</th><th>输出</th></tr>
-  <tr><td>DBus Item 属性集</td><td>拉取 + 去抖合并</td><td>Item 记录 / Changed 事件</td></tr>
-  <tr><td>dbusmenu GetLayout + 条目属性</td><td>全量组装 + 助记符解析</td><td>菜单快照（menu() 返回值，非缓存）</td></tr>
-  <tr><td>图标来源（名/位图）</td><td>主题命中判定</td><td>主题图标 / 位图纹理（可绘制对象）</td></tr>
-  <tr><td>DBus 交互调用回执</td><td>归一化</td><td>InteractionResult 事件</td></tr>
-</table>
-
-<h2>5. 关键流程时序</h2>
-
-<h3>5.1 启动与快照</h3>
+<h3>2.3 时序：启动与快照</h3>
 <pre><code>
   消费方              breadpan            Watcher(外部)            各 Item
     |                    |                       |                    |
@@ -229,10 +85,10 @@ pub enum MenuItemKind { Standard, Separator, Submenu }
     |                    |== 逐个拉取全属性 =========================>|
     |                    |-- 入队 Snapshot(全部 Item, Watcher 存亡) --|
     |<-- (Handle,通道) --|                       |                    |
-    |== recv(): Snapshot -> 增量事件流（原子衔接，无重叠无缺口）======|
+    |== recv(): Snapshot -&gt; 增量事件流（原子衔接，无重叠无缺口）======|
 </code></pre>
 
-<h3>5.2 属性变更（去抖）</h3>
+<h3>2.4 时序：属性变更（去抖）</h3>
 <pre><code>
   Item                breadpan 内部线程          事件通道
     |                        |                      |
@@ -243,9 +99,9 @@ pub enum MenuItemKind { Standard, Separator, Submenu }
     |                        |-- 取并集,合成一次 -->|
     |                        |   Changed{字段并集}  |
 </code></pre>
-<p>官方 New* 信号原文见 <a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item-signals">SNI 规范 §3.3</a>；其与 <code>PropertiesChanged</code>（<a href="https://dbus.freedesktop.org/doc/dbus-specification.html#standard-interfaces-properties">D-Bus 规范 · 标准接口</a>）同为变更触发源，统一进入去抖合并；信号与字段的对应见 <a href="CODE.html">CODE.html</a> <code>ItemField</code>。</p>
+<p>官方 New* 信号原文见 <a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item-signals">SNI 规范 §3.3</a>；其与 <code>PropertiesChanged</code>（<a href="https://dbus.freedesktop.org/doc/dbus-specification.html#standard-interfaces-properties">D-Bus 规范 · 标准接口</a>）同为变更触发源，统一进入去抖合并；信号与字段的对应见 §3.2 <code>ItemField</code>。</p>
 
-<h3>5.3 菜单现场读取（零缓存）</h3>
+<h3>2.5 时序：菜单现场读取（零缓存）</h3>
 <pre><code>
   消费方          breadpan              Item(dbusmenu)
     |                |                        |
@@ -260,7 +116,7 @@ pub enum MenuItemKind { Standard, Separator, Submenu }
     |    --> 仅转发 MenuChanged 事件,是否重取由消费方决定)      |
 </code></pre>
 
-<h3>5.4 交互转发与回执</h3>
+<h3>2.6 时序：交互转发与回执</h3>
 <pre><code>
   消费方          breadpan                Item
     |                |                     |
@@ -271,107 +127,290 @@ pub enum MenuItemKind { Standard, Separator, Submenu }
     |== 通道: InteractionResult{成功/失败} ==|
 </code></pre>
 
-<h3>5.5 心跳探测与 Watcher 存亡</h3>
+<h3>2.7 时序：Watcher 存亡与重发现</h3>
 <pre><code>
-  breadpan 内部线程        Item                          Watcher
-    |                       |                               |
-    |-- 周期轻量属性读取 -->|                               |
-    |   (超时复用 timeout)  |                               |
-    |-- 连续失败 --> Unresponsive(true) 入队（只标记不移除）|
-    |-- 恢复响应 --> Unresponsive(false) 入队               |
-    |                       |                               |
-    |<-- Watcher 名字所有者变化 ----------------------------|
-    |== 重连 + 重新发现（叙述事件入队）; 存亡变迁入队 ==|
+  Watcher                breadpan             事件通道
+     |                      |                    |
+     |== 名字所有者消失 ===>|                    |
+     |                      |-- Narration(重连准备)
+     |                      |-- WatcherChanged(ExternalDown)
+     |                      |-- 重连 + 重新发现
+     |                      |   (Snapshot 修正 / Added / Removed)
+     |<-- 所有者出现 ------|                    |
+     |                      |-- WatcherChanged(ExternalUp)
 </code></pre>
-<p class="diagram-note">
-  移除权专属服务名消失（见 §6 事件清单）。pid 仅能从官方服务名的 PID 段解析（<code>org.freedesktop.StatusNotifierItem-PID-ID</code>，§4.1 唯一键）；
-  官方未定义任何强制退出方法，库无强制退出通路。
-</p>
+<p class="diagram-note">探测与重连的内部机制见 <a href="CODE.html">CODE.html</a> 调用栈；只观察不补位，存亡语义见 §3.2 事件表。</p>
 
-<h2>6. 事件清单与投递语义</h2>
+<h2>3. 接口</h2>
 
-<h3>6.1 事件清单（业务）</h3>
+<h3>3.1 API 规范</h3>
+<p>公开面的唯一完整清单，签名即契约，注释只补充签名表达不了的语义。内部组装方式见 <a href="CODE.html">CODE.html</a>。</p>
+<pre><code>// ── 配置 ──
+pub struct TrayConfig {
+    pub timeout_ms: u64,     // 服务发现/调用/心跳超时，默认 2000 ms
+    pub debounce_ms: u64,    // 属性变更合并窗口，默认 50 ms
+    pub menu_max_depth: u8,  // 菜单拉取最大深度，默认 8
+}
+
+// ── 入口 ──
+impl Tray {
+    /// 阻塞至完成 Host 登记（或超时）；通道首事件为快照，与后续事件原子衔接
+    pub fn connect(config: TrayConfig) -&gt; Result&lt;(TrayHandle, Receiver&lt;TrayEvent&gt;), TrayError&gt;;
+    /// 底层原语（§2.2 投递链 ①）：事件全部经回调投递
+    pub fn builder(config: TrayConfig) -&gt; TrayBuilder;
+}
+
+impl TrayBuilder {
+    /// 可多次调用；按注册顺序、在内部事件线程串行触发
+    pub fn on_event(self, cb: impl Fn(&amp;TrayEvent) + Send + 'static) -&gt; Self;
+    /// 组装并启动，语义同 connect
+    pub fn spawn(self) -&gt; Result&lt;TrayHandle, TrayError&gt;;
+}
+
+// ── Handle ──
+pub struct TrayHandle;  // Clone + Send + Sync + 'static，全部方法线程安全
+
+impl TrayHandle {
+    pub fn items(&amp;self) -&gt; Vec&lt;TrayItem&gt;;
+    pub fn item(&amp;self, id: &amp;TrayItemId) -&gt; Option&lt;TrayItem&gt;;
+    /// 零缓存：每次调用现场拉取；Item 无菜单或未就绪 → Err
+    pub fn menu(&amp;self, id: &amp;TrayItemId) -&gt; Result&lt;MenuSnapshot, TrayError&gt;;
+
+    // ── 交互：同步返回受理结论；Item 侧异步结果经 InteractionResult 事件交付 ──
+    pub fn activate(&amp;self, id: &amp;TrayItemId, x: i32, y: i32) -&gt; Result&lt;(), TrayError&gt;;
+    pub fn secondary_activate(&amp;self, id: &amp;TrayItemId, x: i32, y: i32) -&gt; Result&lt;(), TrayError&gt;;
+    pub fn scroll(&amp;self, id: &amp;TrayItemId, delta: i32, orient: Orientation) -&gt; Result&lt;(), TrayError&gt;;
+    pub fn menu_activate(&amp;self, id: &amp;TrayItemId, menu_item_id: i32) -&gt; Result&lt;(), TrayError&gt;;
+    /// AboutToShow；返回是否建议刷新
+    pub fn menu_about_to_show(&amp;self, id: &amp;TrayItemId, menu_item_id: i32) -&gt; Result&lt;bool, TrayError&gt;;
+
+    /// 追加事件通道订阅者（§2.2 投递链 ②）
+    pub fn subscribe(&amp;self) -&gt; Receiver&lt;TrayEvent&gt;;
+    /// 优雅停机：注销 Host、停内部线程；幂等；最后一个实例 drop 时自动触发
+    pub fn shutdown(&amp;self);
+}
+
+pub enum Orientation { Horizontal, Vertical }  // ← SNI Scroll(STRING orientation)：horizontal / vertical
+
+// ── GTK 整合层 ──
+/// 主题命中 → 主题图标；未命中 → 位图纹理。须在 GTK 主线程调用
+pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
+/// 事件通道 → GTK 主线程搬运（§2.2 投递链 ③）
+pub fn bridge(rx: &amp;Receiver&lt;TrayEvent&gt;, cb: impl FnMut(TrayEvent) + 'static);
+
+// ── testing 特性：裸会话（仅需 DBus session bus）下的自足验证 ──
+pub fn spawn_demo_item(config: TrayConfig) -&gt; Result&lt;DemoItem, TrayError&gt;;
+pub fn spawn_stub_watcher() -&gt; Result&lt;StubWatcher, TrayError&gt;;
+
+/// 可编程演示 Item：制造 Item 侧全部协议变化
+impl DemoItem {
+    pub fn set_status(&amp;self, s: TrayStatus);        // Passive/Active/NeedsAttention 切换 → Changed
+    pub fn set_icon_name(&amp;self, name: &amp;str);        // 主题图标 → Changed
+    pub fn use_pixmap(&amp;self, on: bool);             // 内嵌位图与主题图标间切换 → Changed
+    pub fn set_tooltip(&amp;self, t: Option&lt;ToolTip&gt;);  // 设置/清除 Tooltip → Changed
+    pub fn menu_add(&amp;self, label: &amp;str) -&gt; i32;     // 菜单增 → MenuChanged
+    pub fn menu_toggle(&amp;self, id: i32);             // 菜单改 → MenuChanged
+    pub fn menu_remove(&amp;self, id: i32);             // 菜单删 → MenuChanged
+    pub fn toggle_menu(&amp;self);                      // Menu 对象挂载/卸载 → MenuChanged
+    pub fn set_unresponsive(&amp;self, on: bool);       // 停止/恢复应答心跳 → Unresponsive
+    pub fn remove(self);                            // 注销 Item 并退出 → Removed
+}</code></pre>
+<p class="diagram-note">补全（机制不覆盖的细则）：不安装任何全局状态，同进程可并行运行多个实例；本库不实现 Watcher、不拥有 UI、公开面零 async 等能力级边界以 <a href="README.html">README.html</a> 为权威。</p>
+
+<h3>3.2 消息与错误</h3>
+<pre><code>pub enum TrayEvent {
+    /// 订阅起点：完整 Item 记录 + Watcher 存在性，与后续事件原子衔接
+    Snapshot { items: Vec&lt;TrayItem&gt;, watcher_up: bool },
+    Added(TrayItem),
+    /// 服务名消失；同名重现（应用重启）视为新 Item（见 §3.3 TrayItemId）
+    Removed(TrayItemId),
+    /// 属性变更（去抖合并后的字段并集）
+    Changed { id: TrayItemId, changed: Vec&lt;ItemField&gt;, item: TrayItem },
+    /// dbusmenu 变更信号到达；不代为重拉，是否重取由消费方决定
+    MenuChanged(TrayItemId),
+    WatcherChanged(WatcherState),
+    /// 心跳结论：无响应标记置位/解除（只标记，不移除）
+    Unresponsive { id: TrayItemId, unresponsive: bool },
+    /// 交互调用的异步回执
+    InteractionResult { id: TrayItemId, op: InteractionOp, result: Result&lt;(), String&gt; },
+    /// 内部过程叙述（重连、重扫描等）
+    Narration(String),
+    /// 终止宣告：最后一个事件，此后 Handle 方法一律返回 Stopped
+    Fatal(String),
+}
+
+pub enum WatcherState { ExternalUp, ExternalDown }
+
+/// ← 交互指令的官方方法：SNI §3.2 Activate / SecondaryActivate / Scroll；
+///    dbusmenu Event("clicked") / AboutToShow
+pub enum InteractionOp { Activate, SecondaryActivate, Scroll, MenuActivate, MenuAboutToShow }
+
+/// 变更字段并集的成员：与 SNI 官方属性组一一对应；
+/// 官方信号 New*（SNI §3.3）与 PropertiesChanged 均触发相应成员入集
+pub enum ItemField {
+    Status,        // ← Status（官方信号 NewStatus）
+    Ident,         // ← Id
+    Title,         // ← Title（官方信号 NewTitle）
+    Icon,          // ← IconName + IconPixmap（官方信号 NewIcon）
+    OverlayIcon,   // ← OverlayIconName + OverlayIconPixmap（官方信号 NewOverlayIcon）
+    AttentionIcon, // ← AttentionIconName + AttentionIconPixmap（官方信号 NewAttentionIcon）
+    Tooltip,       // ← ToolTip（官方信号 NewToolTip）
+    WindowId,      // ← WindowId
+    Category,      // ← Category
+    IsMenuOnly,    // ← ItemIsMenu
+    HasMenu,       // ← Menu
+}</code></pre>
+<h4>事件清单与建议动作</h4>
 <table>
-  <tr><th>事件</th><th>触发</th><th>消费方动作</th></tr>
-  <tr><td>快照</td><td>启动完成即投递一次：全部 Item 记录 + Watcher 存在性</td><td>初始化 UI</td></tr>
-  <tr><td>Added / Removed</td><td>运行期 Item 出现 / 服务名消失（映射 Watcher 信号 <code>StatusNotifierItemRegistered</code> / <code>StatusNotifierItemUnregistered</code>，§4.3）</td><td>增删卡片</td></tr>
+  <tr><th>事件</th><th>含义与触发</th><th>建议动作</th></tr>
+  <tr><td>Snapshot</td><td>启动完成即投递一次：全部 Item 记录 + Watcher 存在性</td><td>初始化 UI</td></tr>
+  <tr><td>Added / Removed</td><td>运行期 Item 出现 / 服务名消失（映射 Watcher 信号 <code>StatusNotifierItemRegistered</code> / <code>StatusNotifierItemUnregistered</code>，SNI §4.3）</td><td>增删卡片</td></tr>
   <tr><td>Changed</td><td>属性变更（去抖合并，字段取并集）</td><td>更新对应卡片</td></tr>
-  <tr><td>MenuChanged</td><td>dbusmenu 三类变更信号到达（<code>LayoutUpdated</code> / <code>ItemsPropertiesUpdated</code> / <code>AboutToShow</code>，接口定义原文）</td><td>决定何时重新 <code>menu()</code></td></tr>
+  <tr><td>MenuChanged</td><td>dbusmenu 三类变更信号到达（<code>LayoutUpdated</code> / <code>ItemsPropertiesUpdated</code> / <code>AboutToShow</code>，<a href="reference/com.canonical.dbusmenu.xml">接口定义原文</a>）</td><td>决定何时重新 <code>menu()</code></td></tr>
   <tr><td>WatcherChanged</td><td>ExternalUp / ExternalDown（观察 <code>IsStatusNotifierHostRegistered</code>、<code>StatusNotifierHostRegistered</code> 信号与名字所有权变化；只观察，不补位）</td><td>呈现登记中心状态</td></tr>
   <tr><td>Unresponsive</td><td>心跳结论：无响应置位/解除</td><td>置灰 / 恢复（不移除）</td></tr>
   <tr><td>InteractionResult</td><td>交互调用的异步回执</td><td>提示或日志</td></tr>
-  <tr><td>叙述</td><td>内部过程性说明（重连、重扫描等）</td><td>日志/调试</td></tr>
-  <tr><td>终止宣告</td><td>最后一个事件；此后 Handle 方法一律返回 Stopped</td><td>决定是否重建</td></tr>
+  <tr><td>Narration</td><td>内部过程性说明（重连、重扫描等）</td><td>日志/调试</td></tr>
+  <tr><td>Fatal</td><td>终止宣告，最后一个事件</td><td>决定是否重建</td></tr>
 </table>
-
-<h3>6.2 投递语义</h3>
+<h4>投递语义</h4>
 <table>
   <tr><th>语义</th><th>规定</th></tr>
   <tr><td>快照</td><td>启动完成即投递快照；此后仅增量事件，快照与事件流原子配对、无重叠无缺口</td></tr>
   <tr><td>顺序</td><td>同一 Item 的事件严格有序；全局不保证跨 Item 顺序</td></tr>
   <tr><td>去抖</td><td><code>PropertiesChanged</code> 在合并窗口（默认 50 ms）内合并为一次 Changed，字段取并集</td></tr>
-  <tr><td>背压</td><td>通道满：丢弃 + 告警计数，绝不阻塞内部线程</td></tr>
+  <tr><td>背压</td><td>通道满：丢弃 + 告警计数，绝不阻塞内部线程（有损交付）</td></tr>
   <tr><td>终止</td><td>终止宣告是最后一个事件</td></tr>
 </table>
-
-<h2>7. 错误与容错</h2>
+<h4>错误</h4>
+<pre><code>#[derive(Debug, thiserror::Error)]
+pub enum TrayError {
+    #[error("session bus connect failed: {0}")]
+    Bus(String),
+    #[error("operation timed out after {ms} ms")]
+    Timeout { ms: u64 },
+    #[error("item {0} not found")]
+    ItemNotFound(String),
+    #[error("dbus call failed: {0}")]
+    Protocol(String),
+    #[error("tray runtime stopped")]
+    Stopped,
+}</code></pre>
 <table>
-  <tr><th>错误类别</th><th>场景</th><th>呈现</th></tr>
-  <tr><td>总线类</td><td>会话总线连接失败</td><td>入口返回 Err</td></tr>
-  <tr><td>超时类</td><td>服务发现 / 调用 / 心跳超时</td><td>Err / 回执</td></tr>
-  <tr><td>目标缺失类</td><td>Item 不存在 / 无菜单未就绪</td><td>Err</td></tr>
-  <tr><td>协议类</td><td>属性缺失、类型不符等</td><td>按路线分配：跟踪面（快照/Added/Changed）字段级降级为默认值，Item 照常在册；<code>menu()</code> 现场读取失败返回 Err；交互指令受理阶段返回 Err、异步阶段以 InteractionResult 失败回执交付。<strong>库不 panic</strong></td></tr>
-  <tr><td>停机类</td><td>终止宣告之后的一切调用</td><td>统一返回 Stopped</td></tr>
+  <tr><th>错误</th><th>含义与场景</th><th>建议动作</th></tr>
+  <tr><td>Bus</td><td>会话总线连接失败</td><td>检查 session bus 环境后重试 <code>connect</code></td></tr>
+  <tr><td>Timeout</td><td>服务发现 / 调用 / 心跳超时（<code>timeout_ms</code>）</td><td>重试，或放宽 <code>TrayConfig::timeout_ms</code></td></tr>
+  <tr><td>ItemNotFound</td><td>Item 不在册 / 无菜单或未就绪</td><td>以最新快照或 Changed 事件校准后再操作</td></tr>
+  <tr><td>Protocol</td><td>协议类失败（属性缺失、类型不符等）</td><td>跟踪面已字段级降级（见 §3.3）；<code>menu()</code> 现场读取与交互受理阶段返回本错误，可重试或跳过该 Item</td></tr>
+  <tr><td>Stopped</td><td>终止宣告之后的一切调用</td><td>库已停机，按需重建实例</td></tr>
 </table>
-<p><strong>容错总则</strong>：单个 Item 的死亡不影响其他 Item 的跟踪；总线断开 → 终止宣告 → Stopped，重建由消费方决定。</p>
+<p class="diagram-note">容错总则：单个 Item 的死亡不影响其他 Item 的跟踪；协议类错误绝不 panic；总线断开 → Fatal → Stopped，重建由消费方决定。</p>
 
-<h2>8. 线程与生命周期</h2>
-<ul>
-  <li>Handle：<code>Clone + Send + Sync + 'static</code>，全部方法线程安全；</li>
-  <li>内部线程固定为 1（事件线程，含 zbus 执行器），不创建线程池；</li>
-  <li>停机幂等；drop 最后一个 Handle 实例自动触发；</li>
-  <li>不安装任何全局状态：同进程可并行运行多个实例。</li>
-</ul>
+<h3>3.3 数据模型与转换</h3>
+<p>官方字段映射见下方字段定义表。规范原文：
+<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item-properties">SNI §3.1 属性</a> ·
+<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-watcher">§4 Watcher</a> ·
+<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#icon-pixmap">§6 位图</a> ·
+<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#markup">§7 标记子集</a> ·
+<a href="reference/com.canonical.dbusmenu.xml">dbusmenu 接口定义</a> ·
+<a href="https://specifications.freedesktop.org/icon-naming-spec/latest/">Icon Naming Spec</a> ·
+<a href="https://specifications.freedesktop.org/icon-theme-spec/latest/">Icon Theme Spec</a>。</p>
+<pre><code>pub struct TrayItemId { pub service: String }
 
-<h2>9. 测试替身</h2>
-<p>
-  <code>testing</code> 特性下提供：可编程<strong>演示 Item</strong>（制造 Item 侧全部协议变化）与<strong>最小 Watcher 替身</strong>（无外部 Watcher 环境下的登记中心替身）。
-  替身仅在测试特性下编译、为最小实现，不构成对外交付能力。
-</p>
+pub struct TrayItem {
+    pub id: TrayItemId,
+    pub category: TrayCategory,
+    pub status: TrayStatus,
+    pub ident: String,
+    pub title: Option&lt;String&gt;,
+    pub is_menu_only: bool,
+    pub window_id: u32,
+    pub icon: IconSource,
+    pub overlay_icon: Option&lt;IconSource&gt;,
+    pub attention_icon: Option&lt;IconSource&gt;,
+    pub tooltip: Option&lt;ToolTip&gt;,
+    pub has_menu: bool,
+}
+
+pub enum TrayCategory { ApplicationStatus, Communications, SystemServices, Hardware }
+pub enum TrayStatus { Passive, Active, NeedsAttention }
+
+pub struct ToolTip { pub icon: Option&lt;IconSource&gt;, pub title: String, pub description: String }
+
+pub enum IconSource { Name(String), Pixmap(Pixmap) }
+
+pub struct Pixmap { pub width: u32, pub height: u32, pub argb: Vec&lt;u8&gt; }
+
+pub struct MenuSnapshot { pub revision: u32, pub root: Vec&lt;MenuItem&gt; }
+
+pub struct MenuItem {
+    pub id: i32,
+    pub kind: MenuItemKind,
+    pub label: String,
+    pub raw_label: String,
+    pub enabled: bool,
+    pub visible: bool,
+    pub toggled: Option&lt;bool&gt;,
+    pub icon_name: Option&lt;String&gt;,
+    pub icon_data: Option&lt;Vec&lt;u8&gt;&gt;,
+    pub children: Vec&lt;MenuItem&gt;,
+}
+
+pub enum MenuItemKind { Standard, Separator, Submenu }</code></pre>
+
+<h4>TrayItemId / TrayItem 字段定义</h4>
 <table>
-  <tr><th>演示 Item 指令</th><th>制造的协议变化</th></tr>
-  <tr><td><code>status</code></td><td>Passive / Active / NeedsAttention 切换 → Changed</td></tr>
-  <tr><td><code>icon</code> / <code>pixmap</code></td><td>主题图标与内嵌位图间切换 → Changed</td></tr>
-  <tr><td><code>tooltip</code></td><td>设置/清除 Tooltip → Changed</td></tr>
-  <tr><td><code>menu add / toggle / remove</code>、<code>toggle_menu</code></td><td>菜单增删改、Menu 对象挂载/卸载 → MenuChanged</td></tr>
-  <tr><td><code>remove</code></td><td>注销 Item 并退出 → Removed</td></tr>
+  <tr><th>字段</th><th>含义</th><th>规范依据</th></tr>
+  <tr><td>id.service</td><td>唯一键：Item 注册到 Watcher 的服务名。官方命名 <code>org.freedesktop.StatusNotifierItem-PID-ID</code>（PID=进程号，ID=同进程实例序号）；对象路径不参与标识：服务名消失 → Removed，同名重现（应用重启）→ 视为新 Item（Added）；pid 仅能从服务名 PID 段解析</td><td>SNI §3；总线名构成见 <a href="https://dbus.freedesktop.org/doc/dbus-specification.html">D-Bus 规范 · Bus Names</a></td></tr>
+  <tr><td>category</td><td>ApplicationStatus / Communications / SystemServices / Hardware</td><td>SNI §3.1 Category</td></tr>
+  <tr><td>status</td><td>Passive 可隐藏 / Active 应展示 / NeedsAttention 应强调</td><td>SNI §3.1 Status</td></tr>
+  <tr><td>ident</td><td>应用内唯一、跨会话一致（如应用名）；识别用，不用于展示</td><td>SNI §3.1 Id</td></tr>
+  <tr><td>title</td><td>面向用户展示名，可比 ident 更具描述性</td><td>SNI §3.1 Title</td></tr>
+  <tr><td>is_menu_only</td><td>为真时优先展示菜单而非 Activate</td><td>SNI §3.1 ItemIsMenu</td></tr>
+  <tr><td>window_id</td><td>宿主窗口 id；不关心时为 0</td><td>SNI §3.1 WindowId（UINT32）</td></tr>
+  <tr><td>icon / overlay_icon / attention_icon</td><td>图标来源，二选一规则见 IconSource 字段表</td><td>SNI §3.1 IconName + IconPixmap / OverlayIcon* / AttentionIcon*</td></tr>
+  <tr><td>tooltip</td><td>悬停提示；描述可含标记子集，原样透传</td><td>SNI §3.1 ToolTip · §7 标记子集</td></tr>
+  <tr><td>has_menu</td><td>Menu 属性非空；菜单对象路径由内部保存供 <code>menu()</code> 使用</td><td>SNI §3.1 Menu（OBJECT PATH）</td></tr>
 </table>
+<p class="diagram-note">历史实现普遍以 <code>org.kde.*</code> 前缀提供同一接口（如 nm-applet）：监听与调用对 <code>org.freedesktop.*</code>（原文拼写）与 <code>org.kde.*</code> 两套前缀等价处理，表述以原文为准。</p>
 
-<h2>10. 独立性硬约束</h2>
-<ol>
-  <li>不依赖项目群任何其他模块（workspace 内零反向依赖）；</li>
-  <li>协议核心依赖白名单：<code>zbus</code>、<code>thiserror</code>、标准库；事件通道用 <code>std::sync::mpsc</code>；GTK 整合层额外引入 <code>gtk4</code> / <code>glib</code>；</li>
-  <li>禁止异步运行时出现在公开 API；</li>
-  <li>必须独立编译测试，不要求消费方工程存在（构建与 CI 见 <a href="BUILD.html">BUILD.html</a>）。</li>
-</ol>
-
-<h2>11. 测试与验收</h2>
+<h4>ToolTip / IconSource / Pixmap 字段定义</h4>
 <table>
-  <tr><th>层级</th><th>内容</th></tr>
-  <tr><td>单元测试</td><td>去抖合并、IconSource 二选一规则、唯一键相等语义</td></tr>
-  <tr><td>集成测试</td><td>同进程 <code>Tray</code> + <code>testing</code> 替身：登记 → 属性变更 → 菜单变更 → 注销的全事件序列断言</td></tr>
-  <tr><td>外部 Watcher 存亡验收</td><td>外部 Watcher 在位时呈现在位；其消失时呈现在位消失并触发重新发现；使用方自行组装 Watcher 时装配顺序符合其约定</td></tr>
-  <tr><td>互操作验收</td><td>真实 SNI 提供方（<code>nm-applet</code>、<code>blueman-applet</code>）：发现、跟踪、激活回执正常</td></tr>
+  <tr><th>字段</th><th>含义</th><th>规范依据</th></tr>
+  <tr><td>ToolTip.icon / title / description</td><td>官方四元组 (STRING, a(iiay), STRING, STRING) 的映射：图标来源 + 标题 + 描述</td><td>SNI §3.1 ToolTip</td></tr>
+  <tr><td>IconSource::Name</td><td>Freedesktop 图标名；渲染直出时按主题规范查主题</td><td><a href="https://specifications.freedesktop.org/icon-naming-spec/latest/">Icon Naming Spec</a> · <a href="https://specifications.freedesktop.org/icon-theme-spec/latest/">Icon Theme Spec</a></td></tr>
+  <tr><td>IconSource::Pixmap</td><td>主题名缺失时交付的位图；转纹理的色彩处理在渲染直出路径内完成</td><td>SNI §3.1.6：官方建议名优先于位图（二选一规则固定：Name 非空 → Name，否则 → Pixmap）</td></tr>
+  <tr><td>Pixmap.width / height / argb</td><td>位图尺寸与像素数据：ARGB32、网络字节序、行跨度 = width × 4</td><td>SNI §6（签名 a(iiay)）</td></tr>
 </table>
 
-<h2>12. 版本与稳定性</h2>
-<ul>
-  <li>当前 v0.x：接口冻结基线；破坏性变更必须先修订文档并升版本号；</li>
-  <li>v1.0 冻结条件：§11 全部验收通过 + 真实桌面会话连续运行 72h 无终止宣告。</li>
-</ul>
+<h4>MenuSnapshot / MenuItem 字段定义</h4>
+<table>
+  <tr><th>字段</th><th>含义</th><th>规范依据</th></tr>
+  <tr><td>MenuSnapshot.revision</td><td>布局版本号，与 dbusmenu <code>LayoutUpdated.revision</code> 对应</td><td><a href="reference/com.canonical.dbusmenu.xml">dbusmenu · GetLayout</a></td></tr>
+  <tr><td>MenuSnapshot.root</td><td>递归全量布局（recursionDepth = -1），深度截断于 <code>menu_max_depth</code></td><td>dbusmenu · GetLayout（recursionDepth：-1 全部/0 不递归/n 层）</td></tr>
+  <tr><td>MenuItem.id</td><td>条目数字 id（布局 (i, a{sv}, av) 的 i）；<code>Event</code>/<code>AboutToShow</code> 以它寻址</td><td>dbusmenu · GetLayout / Event / AboutToShow</td></tr>
+  <tr><td>kind</td><td>standard / separator / submenu（type + children-display="submenu"）</td><td>dbusmenu · type / children-display</td></tr>
+  <tr><td>label</td><td>已解析助记符：<code>__</code> 显示为 <code>_</code>，第一个剩余 <code>_</code> 后字符为访问键</td><td>dbusmenu · label</td></tr>
+  <tr><td>raw_label</td><td>label 原始值（逃生门）</td><td>dbusmenu · label</td></tr>
+  <tr><td>enabled / visible</td><td>可用 / 可见；官方缺省 true——仅非默认值的属性才会上报，组装时按默认值补全</td><td>dbusmenu · enabled / visible</td></tr>
+  <tr><td>toggled</td><td>toggle-type ∈ {checkmark, radio} 时按 toggle-state：1→Some(true)，0→Some(false)，其余/缺省 -1→None；radio 组互斥由 Item 侧维护</td><td>dbusmenu · toggle-type / toggle-state</td></tr>
+  <tr><td>icon_name</td><td>Freedesktop 图标名</td><td>dbusmenu · icon-name · <a href="https://specifications.freedesktop.org/icon-naming-spec/latest/">Icon Naming Spec</a></td></tr>
+  <tr><td>icon_data</td><td>PNG 字节流（与 SNI 的 ARGB32 位图不同格式）</td><td>dbusmenu · icon-data</td></tr>
+  <tr><td>children</td><td>子条目递归布局</td><td>dbusmenu · GetLayout</td></tr>
+</table>
+<p class="diagram-note">官方定义、本库不透传的字段：Item 属性 <code>AttentionMovieName</code>（SNI §3.1.12）与 <code>ContextMenu</code> 方法（§3.2.1）；条目属性 <code>shortcut</code>；vendor 专属属性与事件（<code>x-&lt;vendor&gt;-*</code> 前缀）。能力级边界以 <a href="README.html">README.html</a> 为权威。</p>
+
+<h4>转换总表</h4>
+<table>
+  <tr><th>输入</th><th>转换</th><th>输出</th></tr>
+  <tr><td>Watcher 在册清单与信号 → 各 Item 的 DBus 属性集</td><td>拉取 + 去抖合并</td><td>TrayItem；TrayEvent::Snapshot / Added / Changed</td></tr>
+  <tr><td>dbusmenu GetLayout + GetGroupProperties</td><td>全量组装 + 助记符解析</td><td>MenuSnapshot（<code>menu()</code> 返回值，非缓存）</td></tr>
+  <tr><td>IconSource</td><td>主题命中判定（Icon Theme Spec）</td><td>gdk::Paintable（主题图标 / 位图纹理）</td></tr>
+  <tr><td>DBus 交互调用回执</td><td>归一化</td><td>TrayEvent::InteractionResult</td></tr>
+</table>
 
 <footer>
-  修订历史：v0.1 · 2026-09-16 · 自 tray SPEC 重构。v0.2 · 2026-09-18 · 按三层文档模型重组：新增时序图与数据模型章节；Rust 签名（入口/Handle/事件/数据/错误/GTK/测试替身）移交 CODE.html，本文档保留业务契约。v0.3 · 2026-09-18 · 零项目名约束：文档内不再出现其他项目名，相关表述泛化为「外部 Watcher」「依赖方」等角色词汇。v0.4 · 2026-09-18 · 协议类错误定案：三结局按路线分配（跟踪面字段降级 / menu() 返回 Err / 交互受理 Err + 回执）。v0.5 · 2026-09-21 · 对齐官方原文：数据模型逐字段标注官方映射（唯一键改用官方服务名 org.freedesktop.StatusNotifierItem-PID-ID，Id 与 Title 分离，补 ItemIsMenu；dbusmenu 条目属性逐一映射）；变更触发源纳入官方 New* 信号；更正 pid 与 org.kde.* 前缀表述。v0.6 · 2026-09-21 · 取消「协议基础」章：总线名规则与前缀兼容并入 §4.1 唯一键，官方 New*/PropertiesChanged 原文链接并入 §5.2，协议范围句移至卷首；其余章节重编号。v0.7 · 2026-09-22 · §2 契约表按机制优先重写：新增投递链小图（① on_event → ② 事件通道 → ③ gtk::bridge → 主线程），环节逐条对应方法签名，约束降为机制的补全；对外接口处直接写签名，业务语言表述仅保留于 §3/§4（卷首约定）；「GLib 主循环」「zbus」入 §1 术语统一措辞。v0.8 · 2026-09-22 · §3 接口契约、§4 数据模型改为伪代码描述：签名与数据结构为主体，业务语言降为注释补充；§4 映射表砍去伪代码可表达的内容，官方原文链接集中于节首引导段。
+  修订历史：v0.1 · 2026-09-16 · 自 tray SPEC 重构。v0.2 · 2026-09-18 · 按三层文档模型重组：新增时序图与数据模型章节；Rust 签名（入口/Handle/事件/数据/错误/GTK/测试替身）移交 CODE.html，本文档保留业务契约。v0.3 · 2026-09-18 · 零项目名约束：文档内不再出现其他项目名，相关表述泛化为「外部 Watcher」「依赖方」等角色词汇。v0.4 · 2026-09-18 · 协议类错误定案：三结局按路线分配（跟踪面字段降级 / menu() 返回 Err / 交互受理 Err + 回执）。v0.5 · 2026-09-21 · 对齐官方原文：数据模型逐字段标注官方映射（唯一键改用官方服务名 org.freedesktop.StatusNotifierItem-PID-ID，Id 与 Title 分离，补 ItemIsMenu；dbusmenu 条目属性逐一映射）；变更触发源纳入官方 New* 信号；更正 pid 与 org.kde.* 前缀表述。v0.6 · 2026-09-21 · 取消「协议基础」章：总线名规则与前缀兼容并入唯一键定义，官方 New*/PropertiesChanged 原文链接并入属性变更时序，协议范围句移至卷首；其余章节重编号。v0.7 · 2026-09-22 · §2 契约表按机制优先重写：新增投递链小图（① on_event → ② 事件通道 → ③ gtk::bridge → 主线程），环节逐条对应方法签名，约束降为机制的补全；「GLib 主循环」「zbus」入术语表统一措辞。v0.8 · 2026-09-22 · 接口契约、数据模型改为伪代码描述：签名与数据结构为主体，业务语言降为注释补充。v0.9 · 2026-09-22 · 按 GUIDELINES.md 重组为 术语/架构图/接口 三章：TrayConfig、Orientation、TrayEvent、WatcherState、InteractionOp、ItemField、TrayError、DemoItem 等公开签名自 CODE.html 移入并去重（消息与错误=伪码+含义与建议动作表）；数据模型改无注释伪码 + 字段定义表（官方映射自注释下沉入表）+ 引用确切对象名的转换表；砍心跳探测内部时序（归 CODE 调用栈）、线程与生命周期章（细则并入接口补全与 CODE）、测试替身/测试与验收/版本与稳定性三章；能力级边界权威归 README；依赖白名单与测试场景移交 BUILD.html。
 </footer>
 
 </main>

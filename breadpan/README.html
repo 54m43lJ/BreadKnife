@@ -11,8 +11,9 @@
 
 <h1>breadpan</h1>
 <blockquote>
-  SNI 协议客户端库 + DBusMenu 客户端库（协议原文链接见
-  <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §4 与 <a href="reference/com.canonical.dbusmenu.xml">reference/</a>），
+  SNI 协议客户端库 + DBusMenu 客户端库（协议原文存
+  <a href="reference/com.canonical.dbusmenu.xml">reference/</a>，引用清单见
+  <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §3.3），
   以统一事件流交付托盘世界的全部变化；
   为 GTK 应用提供深度整合（渲染直出 + 事件桥接）。
 </blockquote>
@@ -35,7 +36,9 @@
   <li><strong>裸会话自足</strong>：CI 在无托盘环境（仅需 dbus session）下借助测试替身完成全部验证。</li>
 </ul>
 
-<h2>你拿到什么</h2>
+<h2>用户交互</h2>
+
+<h3>交付面</h3>
 <ul>
   <li><strong>事件流 + 状态快照</strong>：订阅时刻的完整 Item 记录与 Watcher 存在性，与后续事件原子配对；</li>
   <li><strong>交互指令</strong>：对 Item 的激活/滚动/菜单操作，同步给出成功或失败结论；</li>
@@ -45,18 +48,6 @@
 </ul>
 <p>渲染与交互呈现由你（消费方）负责。</p>
 
-<h2>本库不是什么</h2>
-<table>
-  <tr><th>不做</th><th>说明</th></tr>
-  <tr><td>不实现 Watcher 角色</td><td>只作为客户端观察其存亡；目标环境没有现成 Watcher 时，需自备该角色或使用环境自带的实现</td></tr>
-  <tr><td>不拥有任何 UI</td><td>无窗口/布局/事件循环；菜单渲染与弹出定位归消费方</td></tr>
-  <tr><td>不做 XEmbed/X11 传统托盘</td><td>场景钉死 Wayland + SNI（传统规范原文：<a href="https://specifications.freedesktop.org/systemtray-spec/latest/">Freedesktop System Tray Specification</a>）</td></tr>
-  <tr><td>公开面零 async</td><td>内部执行模型对使用者不可见，不泄漏异步运行时</td></tr>
-</table>
-<p>完整的能力边界（含 AttentionMovieName、菜单缓存、移除无响应 Item 等"不做"清单）见
-<a href="ARCHITECTURE.html">ARCHITECTURE.html</a>。</p>
-
-<h2>集成与原型</h2>
 <h3>上手指引</h3>
 <ol>
   <li>组装：连接 breadpan，取得 Handle 与事件通道（首事件为快照，随后为增量事件流）；</li>
@@ -65,11 +56,23 @@
   <li>菜单：右键时先发出弹出前通知，再经 <code>menu()</code> 现场拉取最新布局渲染。</li>
 </ol>
 
+<h2>本库不是什么</h2>
+<p>能力级边界以本节为权威。</p>
+<table>
+  <tr><th>不做</th><th>说明</th></tr>
+  <tr><td>不实现 Watcher 角色</td><td>只作为客户端观察其存亡；目标环境没有现成 Watcher 时，需自备该角色或使用环境自带的实现</td></tr>
+  <tr><td>不拥有任何 UI</td><td>无窗口/布局/事件循环；菜单渲染与弹出定位归消费方</td></tr>
+  <tr><td>不做 XEmbed/X11 传统托盘</td><td>场景钉死 Wayland + SNI（传统规范原文：<a href="https://specifications.freedesktop.org/systemtray-spec/latest/">Freedesktop System Tray Specification</a>）</td></tr>
+  <tr><td>不提供移除/强制退出 Item 的通路</td><td>移除权专属服务名消失；官方未定义任何强制退出方法，pid 仅能从官方服务名的 PID 段解析</td></tr>
+  <tr><td>公开面零 async</td><td>内部执行模型对使用者不可见，不泄漏异步运行时</td></tr>
+</table>
+<p>字段级透传取舍（AttentionMovieName、菜单 shortcut、vendor 属性等）见
+<a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §3.3 数据模型字段表。</p>
+
 <h2>适用前提</h2>
 <ul>
   <li>Wayland 会话 + GTK 框架；</li>
-  <li>workspace 内零反向依赖，独立编译测试；</li>
-  <li>目标环境需存在 Watcher 角色（环境自带，或由使用方自行组装提供）。</li>
+  <li>目标环境需存在 Watcher（定义见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §1 术语表）。</li>
 </ul>
 
 <footer>
