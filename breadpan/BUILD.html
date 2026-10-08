@@ -19,16 +19,16 @@
 <table>
   <tr><th>项</th><th>说明</th></tr>
   <tr><td>Rust 工具链</td><td>rustup / cargo</td></tr>
-  <tr><td>协议核心依赖白名单</td><td><code>zbus</code>、<code>thiserror</code>、标准库；事件通道用 <code>std::sync::mpsc</code>——纯 Rust，无系统库依赖</td></tr>
+  <tr><td>协议核心依赖白名单</td><td><code>zbus</code>（启用 tokio 特性）、<code>tokio</code>（sync + rt，仅库内部运行时）、<code>zvariant</code> / <code>serde</code>（属性 → 原生结构反序列化）、<code>thiserror</code>、标准库——事件通道为 tokio mpsc</td></tr>
   <tr><td>GTK 整合层</td><td>gtk4 / glib 开发包（Arch: <code>pacman -S gtk4</code>）</td></tr>
-  <tr><td>测试环境</td><td>仅需 DBus session bus；<strong>无需显示服务</strong>（不依赖 Wayland/X11），集成测试经 testing 替身在裸会话完成</td></tr>
+  <tr><td>测试环境</td><td>仅需 DBus session bus；<strong>无需显示服务</strong>（不依赖 Wayland/X11）</td></tr>
 </table>
 <p>本库必须独立编译测试，不要求 workspace 内其他工程存在。</p>
 
 <h2>构建与测试</h2>
 <pre><code>cargo build
 cargo test
-cargo test --features testing   # 含测试替身（演示 Item / Watcher 替身）</code></pre>
+cargo run --example minimal   # 运行示例（examples/ 为唯一示例目录，见 README「实例代码」）</code></pre>
 
 <footer>
   文档：<a href="README.html">README</a> ·

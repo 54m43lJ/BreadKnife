@@ -10,7 +10,8 @@ And each serves a distinct purpose.
 
 Other constraints:
 - Optinally, `reference/` directory can store any official documentation downloaded from internet as a authoritative source of truth.
-- Adhere to the single source of truth rule. Any definition should only appear once across the entire project in the most appropriate position, and other appearances should always come in the form of links.
+- Adhere to the single source of truth rule. Any definition should only appear once across the entire project in the most appropriate position, and other appearances should always come in the form of hyperlinks.
+- Do not keep any record of amendments to previous versions because it only add confusion to the context.
 
 ## Readme
 1. WHAT & WHY

@@ -16,20 +16,20 @@
   上层语义见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a>。
 </blockquote>
 
-<h2>1. 文件树（规划）</h2>
+<h2 id="sec-1">1. 文件树（规划）</h2>
 <pre><code>src/
 ├── main.rs          # 入口：组装 → 启动 GTK 主循环
 ├── app.rs           # 窗口装配：卡片流 + 事件日志 + 测试台
 ├── cards.rs         # 卡片流：Item → 卡片视图，事件驱动更新
 ├── log.rs           # 事件日志：TrayEvent → 单行文本（带时间戳）
-└── bench.rs         # 测试台：演示 Item 驱动 + Watcher 启停</code></pre>
+└── bench.rs         # 测试台：演示 Item + 总线名替身（均本工具内部实现，导出 SNI / dbusmenu 对象）</code></pre>
 
-<h2>2. 类型与方法签名</h2>
+<h2 id="sec-2">2. 类型与方法签名</h2>
 <pre><code>pub struct App {
     tray: breadpan::TrayHandle,
     rx: Receiver&lt;breadpan::TrayEvent&gt;,
-    watcher: Option&lt;boulanger::ServiceHandle&gt;,  // 持有/释放 = Some/None
-    demo: Option&lt;breadpan::DemoItem&gt;,           // 演示 Item 句柄
+    stub: Option&lt;bench::StubWatcher&gt;,           // 总线名替身（占名 / 申请同名；本工具内部实现）
+    demo: Option&lt;bench::DemoItem&gt;,              // 演示 Item 句柄（本工具内部实现）
     cards: CardsView,
     log: EventLog,
 }
@@ -62,59 +62,53 @@ pub enum BenchCommand {
     ToggleMenu,
     Unresponsive(bool),
     RemoveItem,
-    WatcherHold,
-    WatcherRelease,
+    WatcherClaim,
 }</code></pre>
 
-<h2>3. 关键流程调用栈（伪码）</h2>
+<h2 id="sec-3">3. 关键流程调用栈（伪码）</h2>
 
-<h3>3.1 启动组装</h3>
+<h3 id="sec-3-1">3.1. 启动组装</h3>
 <pre><code>流程 App::run()
-├── 启动 boulanger 服务 → 服务句柄
-├── 连接 breadpan（testing 替身就绪）→ (Handle, 通道)
+├── Tray::start（本工具替身就绪）→ (Handle, 通道)
+│    （登记中心就位 + 存量 Item 反向发现）
 ├── 创建窗口：卡片流（上）+ 事件日志（下）+ 测试台控件
-├── 经 bridge 把事件通道接到 GTK 主线程
+├── glib::spawn_future_local 异步消费事件流（GTK 主线程）
 ├── 注册演示 Item（测试台初始动作）
 └── 进入 GTK 主循环</code></pre>
 
-<h3>3.2 事件消费</h3>
+<h3 id="sec-3-2">3.2. 事件消费</h3>
 <pre><code>on_tray_event(ev)
 ├── 日志追加一行（时间戳 + 事件类型 + 摘要）
 └── 按事件类型更新卡片流
      ├── Snapshot → 重建全部卡片
-     ├── Added → 新建卡片（icon_paintable 渲染直出）
-     ├── Changed → 更新对应卡片字段
+     ├── Added → item(id) 现场读取 → 新建卡片（icon_paintable 渲染直出）
+     ├── Changed → item(id) 重读 → 更新卡片字段
      ├── Removed → 删除卡片
-     ├── Unresponsive(true/false) → 置灰/恢复
-     └── 其余（MenuChanged / WatcherChanged / 回执 / 叙述 / 终止）→ 仅日志呈现</code></pre>
+     ├── 周期重读 alive=false → 置灰；alive=true → 恢复
+     └── 其余（MenuChanged / Displaced / 回执 / 叙述 / 终止）→ 仅日志呈现</code></pre>
 
-<h3>3.3 右键菜单</h3>
+<h3 id="sec-3-3">3.3. 右键菜单</h3>
 <pre><code>用户右键卡片
-├── menu_about_to_show → 是否建议刷新
-├── menu() 现场拉取 → 菜单快照
+├── right_click() → Outcome::Menu(快照)（Menu 流程内含 AboutToShow）
 ├── 按 kind 渲染 GTK 弹出菜单（Separator/子菜单/勾选态）
 ├── 条目点击 → menu_activate
 ├── popup 打开期间收到 MenuChanged
 │    └── 重取 menu() → 替换菜单内容（保持弹窗）
 └── 全程日志可见</code></pre>
 
-<h3>3.4 测试台指令</h3>
+<h3 id="sec-3-4">3.4. 测试台指令</h3>
 <pre><code>on_bench_command(cmd)
 ├── Item 侧指令 → 调 DemoItem 对应方法（status/icon/pixmap/tooltip/menu/…）
-├── Unresponsive(on) → DemoItem 停止/恢复应答心跳
-├── WatcherRelease → boulanger 服务 stop；watcher = None
-├── WatcherHold → boulanger 服务 start；watcher = Some(句柄)
+├── Unresponsive(on) → DemoItem 停止/恢复应答（制造 alive=false / true 变化）
+├── WatcherClaim → spawn 替身申请同名 → 日志呈现申请结论
+│    （Tray 持有期被拒 / Tray 停机后替身持有成功）；stub = Some(句柄)
 └── RemoveItem → DemoItem 注销；demo = None</code></pre>
 
-<h3>3.5 关闭清理</h3>
+<h3 id="sec-3-5">3.5. 关闭清理</h3>
 <pre><code>窗口关闭
 ├── drop 演示 Item（自动注销）
-├── TrayHandle::shutdown（注销 Host、停内部线程）
-└── boulanger 服务 stop → 退出</code></pre>
-
-<footer>
-  修订历史：v0.0-draft · 2026-09-18 · 初稿：文件树、类型签名、五条主流程调用栈，待评审定稿。
-</footer>
+├── TrayHandle::shutdown（释放 Watcher 名、停内部线程）
+└── drop 总线名替身 → 退出</code></pre>
 
 </main>
 </body>

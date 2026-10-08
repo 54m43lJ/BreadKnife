@@ -11,69 +11,82 @@
 
 <h1>breadpan</h1>
 <blockquote>
-  SNI 协议客户端库 + DBusMenu 客户端库（协议原文存
-  <a href="reference/com.canonical.dbusmenu.xml">reference/</a>，引用清单见
-  <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §3.3），
-  以统一事件流交付托盘世界的全部变化；
-  为 GTK 应用提供深度整合（渲染直出 + 事件桥接）。
+  SNI 托盘协议栈单库：登记中心（Watcher）内置，开箱即用。
+  消费方只面对五件事——Item 数据打包获取、Item 事件流、Item 交互、菜单读取、
+  打包生成可渲染的 GTK 对象。
 </blockquote>
 
 <h2>WHAT &amp; WHY</h2>
 
 <h3>要解决的问题</h3>
 <p>
-  应用要在托盘世界当展示方（Host），必须完整实现 SNI 与 DBusMenu 两个协议的客户端侧：
-  Item 发现与跟踪、属性同步、菜单一致性、图标回退、Watcher 存亡——协议细节繁重且易错；
-  同时消费方几乎总是在 GTK 主线程渲染，事件需要可靠的桥接。
-  breadpan 把这一切收敛为「事件流 + 状态快照 + 现场读取 + 渲染直出」的统一交付。
+  展示系统托盘，必须完整实现 SNI 与 DBusMenu 两个协议：Item 发现与跟踪、属性同步、
+  菜单一致性、图标回退——协议细节繁重且易错；裸 Hyprland 等环境连登记中心都没有。
+  breadpan 把登记中心与展示逻辑收进同一个库，协议词汇不出库——
+  消费方代码里只有「取数据、收事件、发交互、读菜单、拿渲染对象」。
 </p>
 
 <h3>成功长什么样</h3>
 <ul>
-  <li><strong>零协议词汇</strong>：消费方不接触 SNI/DBusMenu 细节即可完整呈现与交互；</li>
-  <li><strong>原子一致</strong>：订阅时刻拿到完整快照，其后事件流无重叠无缺口；</li>
-  <li><strong>诚实呈现</strong>：Item 存活状态如实标记，绝不替消费方做移除决定；</li>
-  <li><strong>裸会话自足</strong>：CI 在无托盘环境（仅需 dbus session）下借助测试替身完成全部验证。</li>
+  <li><strong>一次启动即用</strong>：<code>Tray::start</code> 一行，登记中心就位、存量 Item 就绪；</li>
+  <li><strong>零协议词汇</strong>：SNI/DBusMenu 细节不出现在消费方代码里；</li>
+  <li><strong>零详情缓存</strong>：登记只存唯一名 + 对象路径 + 存活字段（alive），其余信息一律 DBus 即时读取，交付即最新；</li>
+  <li><strong>原子一致</strong>：首事件即完整快照，其后增量事件无重叠无缺口；</li>
+  <li><strong>异步交付</strong>：事件流走单实例 tokio mpsc（<code>start</code> 交付唯一通道），主线程经 <code>glib::spawn_future_local</code> await 消费，不阻塞 UI；</li>
+  <li><strong>渲染直出</strong>：图标一次性转成可绘制对象，直接上屏。</li>
 </ul>
 
 <h2>用户交互</h2>
 
 <h3>交付面</h3>
-<ul>
-  <li><strong>事件流 + 状态快照</strong>：订阅时刻的完整 Item 记录与 Watcher 存在性，与后续事件原子配对；</li>
-  <li><strong>交互指令</strong>：对 Item 的激活/滚动/菜单操作，同步给出成功或失败结论；</li>
-  <li><strong>菜单现场读取</strong>：每次读取即最新全量布局（零缓存）；</li>
-  <li><strong>GTK 渲染入口</strong>：图标 → 可绘制对象的一次性转换（主题命中 → 主题图标；未命中 → 位图纹理）；</li>
-  <li><strong>测试替身</strong>：内置最小 Watcher 替身与演示 Item，保证 CI 在裸会话下自足。</li>
-</ul>
+<table>
+  <tr><th>能力</th><th>入口</th></tr>
+  <tr><td>Item 数据打包获取</td><td><code>TrayHandle::items()</code> / <code>item()</code>：DBus 即时读取 → 原生结构（图标、状态、标题、Tooltip、存活等），零缓存、读取即最新；首事件 <code>Snapshot</code> 与之同构</td></tr>
+  <tr><td>Item 事件流</td><td><code>Tray::start</code> 返回的唯一 tokio mpsc 通道（单实例，无追加订阅），轻量事实事件（出现/移除/变更通告，均不携带详情数据）原子衔接，取数走查询</td></tr>
+  <tr><td>Item 交互</td><td>每个语义输入一个方法：<code>left_click(_at)</code> / <code>middle_click(_at)</code> / <code>right_click(_at)</code> / <code>scroll_up(_by)</code> / <code>scroll_down(_by)</code> / <code>scroll_left(_by)</code> / <code>scroll_right(_by)</code>——缺省 (0,0) / 步数 1，路由到具体 DBus 交互由库内完成；菜单数据直接返回（Outcome::Menu），VOID 调用回执走事件流。<code>menu_activate</code> 是唯一的延续方法（提交弹出菜单条目点击），打开菜单不需要它</td></tr>
+  <tr><td>菜单读取</td><td><code>menu()</code>：内置 AboutToShow 前置通知（dbusmenu 常规步骤，触发 Item 惰性更新），随后现场拉取最新全量布局（零缓存）</td></tr>
+  <tr><td>GTK 渲染直出</td><td><code>icon_paintable(icon) -&gt; gdk::Paintable</code>：主题命中 → 主题图标；未命中 → 位图纹理</td></tr>
+</table>
 <p>渲染与交互呈现由你（消费方）负责。</p>
 
 <h3>上手指引</h3>
 <ol>
-  <li>组装：连接 breadpan，取得 Handle 与事件通道（首事件为快照，随后为增量事件流）；</li>
-  <li>呈现：订阅事件流驱动 UI；图标经渲染入口转为可绘制对象（须在 GTK 主线程）；</li>
-  <li>交互：点击/滚轮/菜单操作经 Handle 的指令通道转发给对应 Item；</li>
-  <li>菜单：右键时先发出弹出前通知，再经 <code>menu()</code> 现场拉取最新布局渲染。</li>
+  <li>启动：<code>Tray::start(config)</code> → (Handle, 事件通道)；</li>
+  <li>呈现：<code>glib::spawn_future_local</code> 异步消费事件流（<code>rx.recv().await</code>）驱动 UI；图标经渲染直出转可绘制对象；</li>
+  <li>交互：左键/中键/右键/滚轮各对应一个 Handle 方法（*_at / *_by 变体传显式值）；弹出菜单的条目点击经 <code>menu_activate</code>；</li>
+  <li>菜单：右键 <code>menu()</code> 一次到位——内含 AboutToShow 前置通知与最新布局拉取。</li>
 </ol>
 
 <h2>本库不是什么</h2>
 <p>能力级边界以本节为权威。</p>
 <table>
   <tr><th>不做</th><th>说明</th></tr>
-  <tr><td>不实现 Watcher 角色</td><td>只作为客户端观察其存亡；目标环境没有现成 Watcher 时，需自备该角色或使用环境自带的实现</td></tr>
+  <tr><td>不缓存 SNI 详情</td><td>登记簿记仅存唯一名 + 对象路径 + 存活字段（alive）；属性/图标/菜单等详情一律 DBus 即时读取（zvariant/serde 反序列化为原生结构），变更以轻量事件通告、不推数据</td></tr>
   <tr><td>不拥有任何 UI</td><td>无窗口/布局/事件循环；菜单渲染与弹出定位归消费方</td></tr>
+  <tr><td>不对进程外 Host 负责</td><td>自包含设计：逻辑 Host 是进程内下游；总线上 Host 相关成员仅保留兼容桩（受理即忘 / 恒真），零簿记</td></tr>
+  <tr><td>不做外部 Watcher 客户端模式</td><td>多个 Watcher 不能共存：启动期总线名已被持有 → <code>NameTaken</code> 报错（建议整体退出或隐藏托盘功能）；持有期不可被替换（切换须先手动终止本程序）；所有权异常丢失 → <code>Displaced</code> 终局报错，不重试、不夺回</td></tr>
   <tr><td>不做 XEmbed/X11 传统托盘</td><td>场景钉死 Wayland + SNI（传统规范原文：<a href="https://specifications.freedesktop.org/systemtray-spec/latest/">Freedesktop System Tray Specification</a>）</td></tr>
   <tr><td>不提供移除/强制退出 Item 的通路</td><td>移除权专属服务名消失；官方未定义任何强制退出方法，pid 仅能从官方服务名的 PID 段解析</td></tr>
-  <tr><td>公开面零 async</td><td>内部执行模型对使用者不可见，不泄漏异步运行时</td></tr>
+  <tr><td>不泄漏 tokio 运行时</td><td>运行时为库内私有，消费方无需装配；公开面无 async fn——异步只出现在事件通道消费端（<code>recv().await</code>，由 <code>glib::spawn_future_local</code> 承载），入口与交互方法均为同步签名</td></tr>
 </table>
 <p>字段级透传取舍（AttentionMovieName、菜单 shortcut、vendor 属性等）见
-<a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §3.3 数据模型字段表。</p>
+<a href="ARCHITECTURE.html#sec-3-3">ARCHITECTURE.html §3.3 数据模型字段表</a>。</p>
 
 <h2>适用前提</h2>
 <ul>
   <li>Wayland 会话 + GTK 框架；</li>
-  <li>目标环境需存在 Watcher（定义见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §1 术语表）。</li>
+  <li>DBus session bus 可用，且 Watcher 总线名未被他人持有——多个 Watcher 不能共存，已被持有则 <code>NameTaken</code>（定义见 <a href="ARCHITECTURE.html#sec-1">ARCHITECTURE.html §1 术语表</a>）。</li>
 </ul>
+
+<h2>实例代码</h2>
+<p>
+  唯一示例目录 <code>examples/</code>，均可直接运行（<code>cargo run --example &lt;name&gt;</code>）：
+</p>
+<table>
+  <tr><th>示例</th><th>演示内容</th></tr>
+  <tr><td><code>minimal</code></td><td>最小消费方：启动 → 消费事件流 → 打印快照与全部事件</td></tr>
+  <tr><td><code>interactions</code></td><td>交互与菜单：activate / 滚轮 / <code>menu()</code> 现场读取 / <code>menu_activate</code></td></tr>
+</table>
 
 <footer>
   文档：<a href="ARCHITECTURE.html">ARCHITECTURE</a> ·

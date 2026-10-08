@@ -20,7 +20,7 @@
   <tr><th>项</th><th>说明</th></tr>
   <tr><td>Rust 工具链</td><td>rustup / cargo</td></tr>
   <tr><td>GTK</td><td>gtk4 开发包（Arch: <code>pacman -S gtk4</code>）</td></tr>
-  <tr><td>workspace 依赖</td><td>breadpan + boulanger（本仓库成员）</td></tr>
+  <tr><td>workspace 依赖</td><td>breadpan（本仓库成员）</td></tr>
 </table>
 
 <h2>构建与运行</h2>
@@ -31,8 +31,8 @@ cargo run -p demo-tray   # 一条命令在本地会话中启动</code></pre>
 <ul>
   <li>DBus session bus（必需）；</li>
   <li>Wayland 会话 + GTK（窗口呈现）；</li>
-  <li><strong>纯 Hyprland（无任何托盘环境）即可完整运行</strong>——工具窗口内自备 Watcher 角色与演示 Item；</li>
-  <li>验收操作与预期观察的对照表见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> §7。</li>
+  <li><strong>纯 Hyprland（无任何托盘环境）即可完整运行</strong>——托盘协议栈随库内置（<code>Tray::start</code> 即含登记中心），演示 Item 由本工具自备；</li>
+  <li>验收操作与预期观察的对照表见 <a href="ARCHITECTURE.html#sec-7">ARCHITECTURE.html §7</a>。</li>
 </ul>
 
 <footer>

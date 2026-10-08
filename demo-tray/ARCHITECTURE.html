@@ -15,29 +15,29 @@
   使用说明与能力边界见 <a href="README.html">README.html</a>，实现骨架见 <a href="CODE.html">CODE.html</a>。
 </blockquote>
 
-<h2>1. 进程组装</h2>
+<h2 id="sec-1">1. 进程组装</h2>
 <pre><code>
    +-------------------------------------------+
    |                demo-tray                  |
    |  GTK4 窗口: 卡片流 + 事件日志              |
-   |  测试台: 演示 Item 驱动 / Watcher 启停      |
-   +------+-------------------------+----------+
-          |                         |
-      breadpan                  boulanger
-   (客户端 + GTK 整合)       (Watcher 服务, 可启停)
-          +-----------+-----------+
-                      |
-               DBus session bus
+   |  测试台: 演示 Item 驱动 / 总线名替身        |
+   +--------------------+----------------------+
+                        |
+                    breadpan
+        (Tray::start: 登记中心 + Host API + GTK 整合)
+                        |
+                 DBus session bus
 </code></pre>
 <p class="diagram-note">
-  装配顺序：先启动 boulanger 服务（登记中心就绪），再连接 breadpan（与两库的组装约定一致）。
-  测试台复用两库的测试/控制能力：演示 Item 来自 breadpan 的 <code>testing</code> 特性，
-  Watcher 角色持有/释放即 boulanger 服务的启停。
+  组装：一次 <code>Tray::start</code>（登记中心就位 + 存量 Item 反向发现）。
+  测试台自备演示 Item 与总线名替身（本工具内部实现，不依赖库公开面）：
+  演示 Item 制造 Item 侧全部变化；总线名替身验证名字独占——Tray 持有期申请同名被拒，
+  占名环境下启动制造 NameTaken。
 </p>
 
-<h2>2. 接口契约</h2>
+<h2 id="sec-2">2. 接口契约</h2>
 
-<h3>2.1 测试台指令面</h3>
+<h3 id="sec-2-1">2.1. 测试台指令面</h3>
 <table>
   <tr><th>指令</th><th>制造的协议变化</th></tr>
   <tr><td><code>status</code></td><td>Passive / Active / NeedsAttention 切换</td></tr>
@@ -45,60 +45,57 @@
   <tr><td><code>tooltip</code></td><td>设置 / 清除 Tooltip</td></tr>
   <tr><td><code>menu add / toggle / remove</code></td><td>菜单条目增删改</td></tr>
   <tr><td><code>toggle-menu</code></td><td>挂载 / 卸载 Menu 对象</td></tr>
-  <tr><td><code>unresponsive</code></td><td>停止/恢复应答心跳，制造无响应标记与置灰</td></tr>
+  <tr><td><code>unresponsive</code></td><td>停止/恢复应答，制造 alive=false / true 变化与置灰</td></tr>
   <tr><td><code>remove</code></td><td>注销演示 Item</td></tr>
-  <tr><td><code>watcher hold / release</code></td><td>boulanger 服务启停，制造 Watcher 存亡变迁</td></tr>
+  <tr><td><code>watcher claim</code></td><td>总线名替身申请同名并呈现申请结论：Tray 持有期被拒（不可替换）；Tray 停机后替身持有成功，此时重新 <code>Tray::start</code> → NameTaken</td></tr>
 </table>
 
-<h3>2.2 对两库的使用契约</h3>
+<h3 id="sec-2-2">2.2. 对库的使用契约</h3>
 <ul>
-  <li>breadpan：仅使用公开 API 与 <code>testing</code> 特性——本工具是两库用法的示范载体，因此<strong>不得</strong>依赖任何非公开面；</li>
-  <li>boulanger：仅使用服务启动/停止形态；</li>
-  <li>事件呈现覆盖 breadpan 事件清单的全部类型（含叙述与终止宣告）。</li>
+  <li>仅使用公开 API——演示 Item 与总线名替身为本工具内部实现，<strong>不得</strong>依赖库任何非公开面；</li>
+  <li>事件呈现覆盖 breadpan 事件清单的全部类型（含叙述与终局宣告 Fatal / Displaced）。</li>
 </ul>
 
-<h2>3. 界面结构</h2>
+<h2 id="sec-3">3. 界面结构</h2>
 <table>
   <tr><th>区域</th><th>规格</th></tr>
   <tr><td>卡片流（上部）</td><td>每个在册 Item 一张卡片：图标、状态、标题；经 breadpan 渲染直出取得可绘制对象</td></tr>
-  <tr><td>事件日志（下部）</td><td>逐行打印全部事件类型（含快照、存亡变迁、交互回执与内部过程叙述），带时间戳</td></tr>
-  <tr><td>测试台控件</td><td>驱动演示 Item 与 Watcher 角色的操作入口（指令面见 §2.1）</td></tr>
+  <tr><td>事件日志（下部）</td><td>逐行打印全部事件类型（含快照、终局宣告、交互回执与内部过程叙述），带时间戳</td></tr>
+  <tr><td>测试台控件</td><td>驱动演示 Item 与总线名替身的操作入口（指令面见 <a href="#sec-2-1">§2.1</a>）</td></tr>
 </table>
 
-<h2>4. 数据模型</h2>
+<h2 id="sec-4">4. 数据模型</h2>
 <table>
   <tr><th>模型</th><th>内容</th><th>转换</th></tr>
-  <tr><td>卡片</td><td>Item ID → { 图标可绘制对象, 状态, 标题, 置灰标记 }</td><td>breadpan 快照/事件 → 卡片字段更新；Unresponsive → 置灰</td></tr>
+  <tr><td>卡片</td><td>Item ID → { 图标可绘制对象, 状态, 标题, 置灰标记 }</td><td>breadpan 快照/事实事件 → 现场重读 → 卡片更新；alive=false → 置灰</td></tr>
   <tr><td>日志条目</td><td>时间戳 + 事件类型 + 摘要</td><td>TrayEvent → 单行文本追加（只追加，不截断）</td></tr>
-  <tr><td>测试台状态</td><td>演示 Item 句柄 + Watcher 服务句柄（持有/释放）</td><td>指令 → 替身调用</td></tr>
+  <tr><td>测试台状态</td><td>演示 Item 句柄 + 总线名替身句柄</td><td>指令 → 替身调用</td></tr>
 </table>
 
-<h2>5. 关键流程时序</h2>
+<h2 id="sec-5">5. 关键流程时序</h2>
 
-<h3>5.1 启动组装</h3>
+<h3 id="sec-5-1">5.1. 启动组装</h3>
 <pre><code>
-  启动者        demo-tray           boulanger         breadpan
-    |               |                    |                 |
-    |-- run ------->|                    |                 |
-    |               |-- 服务启动 ------->|                 |
-    |               |<-- 服务句柄 --------|                 |
-    |               |-- 连接(测试替身就绪) ---------------->|
-    |               |<-- (Handle, 通道) --------------------|
+  启动者        demo-tray              breadpan
+    |               |                      |
+    |-- run ------->|                      |
+    |               |-- Tray::start ----->|
+    |               |   (登记中心就位 + 存量 Item 反向发现)
+    |               |<-- (Handle, 通道) ---|
     |               |== 首事件 Snapshot --> 卡片流 + 日志 ==|
-    |               |-- 注册演示 Item（测试台）              |
+    |               |-- 注册演示 Item（测试台）|
 </code></pre>
 
-<h3>5.2 右键菜单全流程</h3>
+<h3 id="sec-5-2">5.2. 右键菜单全流程</h3>
 <pre><code>
   用户          demo-tray UI         breadpan           演示 Item
     |               |                    |                  |
     |-- 右键 ------>|                    |                  |
-    |               |-- AboutToShow ---->|                  |
-    |               |                    |-- AboutToShow -->|
-    |               |<-- 建议刷新 --------|<-- 是 -----------|
-    |               |-- menu() --------->|                  |
+    |               |-- right_click ---->|                  |
+    |               |                    |-- AboutToShow -->|（内含前置通知）
+    |               |                    |<-- 需要更新? -----|
     |               |<-- 全量快照 --------|-- GetLayout ---->|
-    |               |== 渲染弹出 =========|                  |
+    |               |== 渲染弹出 =========|<-- 布局+属性 -----|
     |-- 点条目 ---->|                    |                  |
     |               |-- menu_activate -->|-- Event -------->|
     |               |<-- 回执事件（日志可见）|<-- 结果 ---------|
@@ -106,53 +103,49 @@
     |    --> demo-tray 重取 menu() --> 菜单内容更新)         |
 </code></pre>
 
-<h3>5.3 Watcher 存亡</h3>
+<h3 id="sec-5-3">5.3. 名字独占</h3>
 <pre><code>
-  测试台        demo-tray           boulanger         breadpan
-    |               |                    |                 |
-    |-- release --->|                    |                 |
-    |               |-- stop ----------->|                 |
-    |               |                    |== 名字消失 ==    |
-    |               |<-- ExternalDown（日志）--------------|
-    |-- hold ----->|                     |                 |
-    |               |-- 服务启动 ------->|                 |
-    |               |<-- ExternalUp（日志）-----------------|
+  测试台        demo-tray              breadpan         总线名替身
+    |               |                      |                |
+    |-- claim ----->|                      |                |
+    |               |-- spawn 替身，申请同名 -------------->|
+    |               |<-- 申请结论：被拒（Tray 持有中，不可替换）|
+    |   (Tray 停机后再次 claim → 替身持有成功；                 |
+    |    此时重新 Tray::start → NameTaken，提示多 Watcher 不共存)|
 </code></pre>
+<p class="diagram-note">正常持有期不存在让位/夺回（所有权语义见 <a href="../breadpan/ARCHITECTURE.html#sec-2-8">breadpan §2.8</a>）；Displaced 属极罕见边缘路径，仅总线层异常可触发，窗口内不复现，验收归集成测试。</p>
 
-<h2>6. 示范与复现职责</h2>
+<h2 id="sec-6">6. 示范与复现职责</h2>
 <table>
   <tr><th>职责</th><th>实现要点</th></tr>
   <tr><td>渲染示范</td><td>GTK4 简单窗口内的卡片渲染，走深度整合的渲染直出路径（主题命中 → 主题图标；未命中 → 位图纹理）</td></tr>
-  <tr><td>交互复现</td><td>左键激活（含"整项即菜单"Item 的菜单行为）、滚轮、右键菜单全流程（§5.2）、popup 打开期间菜单变更重取</td></tr>
+  <tr><td>交互复现</td><td>左键激活（含"整项即菜单"Item 的菜单行为）、中键、四向滚轮、右键菜单全流程（<a href="#sec-5-2">§5.2</a>）、popup 打开期间菜单变更重取</td></tr>
   <tr><td>事件观察</td><td>事件日志覆盖 breadpan 事件模型的全部类型</td></tr>
-  <tr><td>状态呈现示范</td><td>无响应 Item 置灰——示范"诚实状态呈现"（只标记，不移除）</td></tr>
-  <tr><td>测试台</td><td>演示 Item 制造全部 Item 侧变化；boulanger 启停制造 Watcher 存亡变迁</td></tr>
+  <tr><td>状态呈现示范</td><td>alive=false 的 Item 置灰——示范"诚实状态呈现"（只标记，不移除）</td></tr>
+  <tr><td>测试台</td><td>演示 Item 制造全部 Item 侧变化；总线名替身验证占名与顶替拒绝</td></tr>
 </table>
 
-<h2>7. 验收基准</h2>
+<h2 id="sec-7">7. 验收基准</h2>
 <p>
   在纯 Hyprland 会话（无任何托盘环境）中，以下对照表全部符合即为托盘功能链路验收通过。
-  事件类型与 <a href="../breadpan/ARCHITECTURE.html">breadpan §7</a> 一一对应。
+  事件类型与 <a href="../breadpan/ARCHITECTURE.html#sec-3-2">breadpan ARCHITECTURE §3.2 事件表</a>一一对应。
 </p>
 <table>
   <tr><th>操作</th><th>预期观察</th></tr>
-  <tr><td>启动（boulanger 启动 → breadpan 连接）</td><td>日志首现快照与 ExternalUp</td></tr>
+  <tr><td>启动（一次 Tray::start）</td><td>日志首现快照</td></tr>
   <tr><td>注册演示 Item</td><td>Added + 卡片出现</td></tr>
-  <tr><td>status / icon / pixmap / tooltip 变更</td><td>Changed（对应字段）+ 卡片即时更新</td></tr>
+  <tr><td>status / icon / pixmap / tooltip 变更</td><td>Changed → 重读后卡片即时更新</td></tr>
   <tr><td>menu 增删改 / toggle-menu</td><td>MenuChanged</td></tr>
-  <tr><td>左键 / 滚轮</td><td>交互回执成功</td></tr>
-  <tr><td>右键</td><td>AboutToShow → 现场拉取 → 菜单弹出 → 条目触发回执</td></tr>
+  <tr><td>左键 / 中键 / 滚轮</td><td>交互回执成功</td></tr>
+  <tr><td>右键</td><td>right_click() → 菜单弹出 → 条目触发回执</td></tr>
   <tr><td>popup 打开期间菜单变更</td><td>重取后菜单内容更新</td></tr>
   <tr><td>"整项即菜单" Item 左键</td><td>转入菜单流程</td></tr>
-  <tr><td>unresponsive 置位 / 解除</td><td>无响应标记置位/解除；卡片置灰 / 恢复，Item 不被移除</td></tr>
+  <tr><td>unresponsive（停止应答）</td><td>周期重读 alive=false → 卡片置灰；恢复应答后 alive=true 解除，Item 不被移除</td></tr>
   <tr><td>remove / 演示 Item 进程退出</td><td>Removed + 卡片消失</td></tr>
-  <tr><td>watcher release / hold</td><td>ExternalDown / ExternalUp</td></tr>
-  <tr><td>关闭窗口</td><td>优雅停机：注销 Host、停止内部线程与 boulanger 服务</td></tr>
+  <tr><td>watcher claim（Tray 持有期）</td><td>替身申请被拒，托盘不受影响、无事件</td></tr>
+  <tr><td>watcher claim（Tray 停机后）+ 重新 Tray::start</td><td>替身持有成功；随后 NameTaken 报错并提示多 Watcher 不共存</td></tr>
+  <tr><td>关闭窗口</td><td>优雅停机：释放 Watcher 名、停止内部线程</td></tr>
 </table>
-
-<footer>
-  修订历史：v0.1 · 2026-09-16 · 自 tray SPEC 脚手架章节重构。v0.2 · 2026-09-18 · 按三层文档模型重组：新增接口契约、数据模型与时序图章节。v0.3 · 2026-09-18 · DESIGN 解散：组装约定改引根 ARCHITECTURE。v0.4 · 2026-09-18 · 平级互不引用：移除对根文档的引用，组装约定改为自含表述。
-</footer>
 
 </main>
 </body>
