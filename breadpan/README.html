@@ -43,8 +43,8 @@
   <tr><th>能力</th><th>入口</th></tr>
   <tr><td>Item 数据打包获取</td><td><code>TrayHandle::items()</code> / <code>item()</code>：DBus 即时读取 → 原生结构（图标、状态、标题、Tooltip、存活等），零缓存、读取即最新；首事件 <code>Snapshot</code> 与之同构</td></tr>
   <tr><td>Item 事件流</td><td><code>Tray::start</code> 返回的唯一 tokio mpsc 通道（单实例，无追加订阅），轻量事实事件（出现/移除/变更通告，均不携带详情数据）原子衔接，取数走查询</td></tr>
-  <tr><td>Item 交互</td><td>每个语义输入一个方法：<code>left_click(_at)</code> / <code>middle_click(_at)</code> / <code>right_click(_at)</code> / <code>scroll_up(_by)</code> / <code>scroll_down(_by)</code> / <code>scroll_left(_by)</code> / <code>scroll_right(_by)</code>——缺省 (0,0) / 步数 1，路由到具体 DBus 交互由库内完成；菜单数据直接返回（Outcome::Menu），VOID 调用回执走事件流。<code>menu_activate</code> 是唯一的延续方法（提交弹出菜单条目点击），打开菜单不需要它</td></tr>
-  <tr><td>菜单读取</td><td><code>menu()</code>：内置 AboutToShow 前置通知（dbusmenu 常规步骤，触发 Item 惰性更新），随后现场拉取最新全量布局（零缓存）</td></tr>
+  <tr><td>Item 交互</td><td>每个语义输入一个方法：<code>left_click(_at)</code> / <code>middle_click(_at)</code> / <code>right_click(_at)</code> / <code>scroll_up(_by)</code> / <code>scroll_down(_by)</code> / <code>scroll_left(_by)</code> / <code>scroll_right(_by)</code>——缺省 (0,0) / 步数 1，路由到具体 DBus 交互由库内完成；菜单数据直接返回（Outcome::Menu），VOID 调用回执走事件流。延续方法两个：<code>menu_activate</code>（提交弹出条目点击）、<code>menu_expand</code>（展开子菜单层）；打开菜单不需要它们</td></tr>
+  <tr><td>菜单读取</td><td><code>menu()</code>：内置 AboutToShow 前置通知（dbusmenu 常规步骤，触发 Item 惰性更新），随后现场拉取根层单层布局（零缓存·懒加载）；子层经 <code>menu_expand(id, entry_id)</code> 按需逐层展开</td></tr>
   <tr><td>GTK 渲染直出</td><td><code>icon_paintable(icon) -&gt; gdk::Paintable</code>：主题命中 → 主题图标；未命中 → 位图纹理</td></tr>
 </table>
 <p>渲染与交互呈现由你（消费方）负责。</p>
@@ -54,7 +54,7 @@
   <li>启动：<code>Tray::start(config)</code> → (Handle, 事件通道)；</li>
   <li>呈现：<code>glib::spawn_future_local</code> 异步消费事件流（<code>rx.recv().await</code>）驱动 UI；图标经渲染直出转可绘制对象；</li>
   <li>交互：左键/中键/右键/滚轮各对应一个 Handle 方法（*_at / *_by 变体传显式值）；弹出菜单的条目点击经 <code>menu_activate</code>；</li>
-  <li>菜单：右键 <code>menu()</code> 一次到位——内含 AboutToShow 前置通知与最新布局拉取。</li>
+  <li>菜单：右键 <code>menu()</code> 拉取根层（AboutToShow 前置内含）；子菜单经 <code>menu_expand</code> 按需展开。</li>
 </ol>
 
 <h2>本库不是什么</h2>

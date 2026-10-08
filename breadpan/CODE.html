@@ -23,14 +23,14 @@
 ├── handle.rs            # TrayConfig + TrayHandle 前端（指令受理 → 内部线程投递）
 ├── events.rs            # TrayEvent、单事件通道（tokio mpsc；start 交付唯一 Receiver）
 ├── tracker.rs           # Item 登记簿记（最小集）：报到 / 反向发现 / 死亡清理
-├── props.rs             # 属性即时读取（zvariant/serde → 原生结构）+ 变更通告去抖
+├── props.rs             # 属性即时读取（zvariant/serde → 原生结构）
 ├── dbus/
 │   ├── mod.rs           # DBus 域出口（内部聚合，不直接对外）
 │   ├── bus.rs           # 会话总线连接（zbus tokio 特性）与库内 tokio 运行时宿主
 │   ├── watcher.rs       # 登记中心服务：名持有（不可替换）、所有权丢失上报、停机
 │   ├── iface.rs         # org.kde.StatusNotifierWatcher 协议面（ARCHITECTURE §3.4）
 │   ├── heartbeat.rs     # 周期存活探测：结果写入登记簿记（alive 字段）
-│   ├── menu.rs          # dbusmenu 现场读取（零缓存）
+│   ├── menu.rs          # dbusmenu 现场读取（零缓存·逐层懒加载）
 │   └── interact.rs      # 语义输入路由（ARCHITECTURE §2.7）+ InteractionResult 回执
 └── gtk/
     ├── mod.rs           # 整合层出口（渲染直出；主线程约束说明）
@@ -38,9 +38,9 @@
 
 examples/                # 唯一示例目录：可运行的用法实例（README「实例代码」表）
 ├── minimal.rs           # 最小消费方：start → 消费事件流 → 打印快照与事件
-└── interactions.rs      # 交互与菜单：activate / scroll / menu() 现场读取 / menu_activate</code></pre>
+└── interactions.rs      # 交互与菜单：activate / scroll / menu()·menu_expand 现场读取 / menu_activate</code></pre>
 <p>分组约定：dbus/ 收拢 DBus 域实现——总线连接、Watcher 服务与协议面、存活探测、
-dbusmenu 读取、交互路由；登记簿记与属性取数/去抖（tracker、props）留顶层，
+dbusmenu 读取、交互路由；登记簿记与属性取数（tracker、props）留顶层，
 handle/events 为公开前端。</p>
 <p>运行约束：内部线程固定为 1——宿主 tokio CurrentThread 运行时，DBus 收发（zbus tokio 特性）、
 事件组装与投递全部在此异步线程完成，不创建线程池；事件通道为单实例 tokio mpsc
@@ -57,6 +57,7 @@ pub(crate) struct RuntimeShared {
     watcher: WatcherService,        // 登记中心服务；所有权丢失 → on_lost → Displaced 终局
     tracker: RwLock&lt;ItemTracker&gt;,
     events: Arc&lt;EventQueue&gt;,
+    pending: HashSet&lt;TrayItemId&gt;, // 变更合并待通告集合（仅内部线程触及）：信号 → insert；节拍（debounce_ms）到期 drain → Changed(id)
     bus: BusCenter,               // 同步方法经 rt.block_on 受理指令（受 timeout_ms 约束）
     stopped: AtomicBool,
 }
@@ -64,7 +65,7 @@ pub(crate) struct RuntimeShared {
 // ── events.rs：事件队列（单实例单通道；start 交付唯一 Receiver，无追加订阅）──
 pub(crate) struct EventQueue {
     tx: tokio::sync::mpsc::Sender&lt;TrayEvent&gt;,   // 唯一通道发送端；Receiver 仅经 Tray::start 交付
-    dropped: AtomicU64,                       // 背压丢弃告警计数（单通道，计数语义唯一）
+    dropped: AtomicU64,                       // 背压丢弃告警计数（单通道）
 }
 impl EventQueue {
     /// 建队：(队列, 唯一 Receiver)；容量为库内定值，此后库内不再发放 Receiver
@@ -85,7 +86,7 @@ pub(crate) struct ItemEntry {
 }
 pub(crate) struct ItemTracker { items: HashMap&lt;TrayItemId, ItemEntry&gt; }
 impl ItemTracker {
-    /// 启动期反向发现：ListNames 命中官方命名模式 → Introspect 探测 → 最小集入册
+    /// 启动期反向发现：ListNames 命中 org.kde.StatusNotifierItem- 前缀 → Introspect 探测 → 最小集入册
     pub(crate) fn discover_existing(&amp;mut self) -&gt; Vec&lt;TrayItemId&gt;;
     /// 报到受理：最小集幂等插入（含 Menu / ItemIsMenu 属性探测）；已存在 → Ok(false)
     pub(crate) fn register(&amp;mut self, bus: &amp;BusCenter, service: &amp;str, path: &amp;str) -&gt; Result&lt;bool, TrayError&gt;;
@@ -97,20 +98,10 @@ impl ItemTracker {
     pub(crate) fn path_of(&amp;self, id: &amp;TrayItemId) -&gt; Option&lt;&amp;str&gt;;
 }
 
-// ── props.rs：属性即时读取 + 变更通告去抖 ──
+// ── props.rs：属性即时读取 ──
 /// 现场读取单个 Item 全部官方属性，经 zvariant/serde 反序列化为 TrayItem
 /// （ARCHITECTURE §3.3 字段表）；items()/item()/Snapshot 的统一取数路径
 pub(crate) fn fetch_item(bus: &amp;BusCenter, entry: &amp;ItemEntry) -&gt; Result&lt;TrayItem, TrayError&gt;;
-/// 变更信号按 Item 合并去抖（零详情跟踪：无字段并集）
-pub(crate) struct Debouncer {
-    pending: HashSet&lt;TrayItemId&gt;,
-    window: Duration,            // TrayConfig::debounce_ms
-}
-impl Debouncer {
-    pub(crate) fn on_change(&amp;mut self, id: TrayItemId);  // 记入待通告集合 + 刷新计时
-    /// 窗口到期：返回去重后的 id 列表（Changed(id) 事件原料）
-    pub(crate) fn flush(&amp;mut self) -&gt; Vec&lt;TrayItemId&gt;;
-}
 
 // ── dbus/bus.rs：会话总线连接与 tokio 运行时宿主 ──
 pub(crate) struct BusCenter {
@@ -156,12 +147,12 @@ impl Heartbeat {
     pub(crate) fn probe(&amp;mut self, bus: &amp;BusCenter, tracker: &amp;mut ItemTracker);
 }
 
-// ── dbus/menu.rs：dbusmenu 现场读取（零缓存）──
-pub(crate) struct MenuReader { max_depth: u8 }
+// ── dbus/menu.rs：dbusmenu 现场读取（零缓存·逐层懒加载）──
+pub(crate) struct MenuReader;
 impl MenuReader {
-    /// AboutToShow(根 id=0) → GetLayout（深度截断）+ GetGroupProperties
-    /// → 组装 MenuSnapshot（助记符解析 + raw 逃生门 + 默认值补全）；不落任何缓存
-    pub(crate) fn read(&amp;self, bus: &amp;BusCenter, menu_path: &amp;str) -&gt; Result&lt;MenuSnapshot, TrayError&gt;;
+    /// AboutToShow(parent) → GetLayout(parentId, recursionDepth=1) + GetGroupProperties
+    /// → 组装该层 MenuSnapshot（助记符解析 + raw 逃生门 + 默认值补全）；不落任何缓存
+    pub(crate) fn read(&amp;self, bus: &amp;BusCenter, menu_path: &amp;str, parent: i32) -&gt; Result&lt;MenuSnapshot, TrayError&gt;;
     /// LayoutUpdated / ItemsPropertiesUpdated → 仅入队 MenuChanged
     pub(crate) fn forward_signals(&amp;self, bus: &amp;BusCenter) -&gt; Result&lt;(), TrayError&gt;;
 }
@@ -194,13 +185,16 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
 ├── 逐个现场读取（fetch_item）→ 事件入队 Snapshot(全部 Item 记录)
 └── 返回 (Handle, 事件通道)</code></pre>
 
-<h3 id="sec-3-2">3.2. 属性变更去抖</h3>
+<h3 id="sec-3-2">3.2. 变更通告合并（固定窗口节流）</h3>
 <pre><code>内部 tokio 运行时: 收到 PropertiesChanged(item)
              或官方 New* 信号 (NewStatus/NewIcon/NewTitle/
                                NewToolTip/NewOverlayIcon/NewAttentionIcon)
-├── Debouncer::on_change(item)（记入待通告集合，刷新窗口计时）
-└── 窗口到期
-     └── Changed(id) → 入队 → 投递（tokio mpsc 单通道，满则丢弃）</code></pre>
+├── pending.insert(item)（仅记入待通告集合；无计时重置——连发不推迟交付）
+└── 固定节拍到期（每 debounce_ms 一次，与信号无关）
+     └── pending.drain() → 逐个 Changed(id) → 入队 → 投递（单通道，满则丢弃）</code></pre>
+<p>合并针对的是重读放大：Item 侧的双重上报（New* 与 PropertiesChanged 并发、状态切换伴随连发）
+与进度型 Item 的高频刷新，经零缓存架构放大为消费方的重复现场读取；窗口节流把重读频率压到
+每 Item 至多 1 次/窗口。事实事件幂等，窗口内折叠不丢信息。</p>
 
 <h3 id="sec-3-3">3.3. 报到与死亡清理</h3>
 <pre><code>内部: 收到 RegisterStatusNotifierItem(唯一名+路径)
@@ -214,18 +208,18 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
 ├── 逐条广播 StatusNotifierItemUnregistered
 └── 逐条入队 Removed</code></pre>
 
-<h3 id="sec-3-4">3.4. 菜单现场读取（Menu 流程，interact 与 menu() 共用）</h3>
-<pre><code>流程 menu(id)
+<h3 id="sec-3-4">3.4. 菜单现场读取（Menu 流程，interact 与 menu()/menu_expand() 共用）</h3>
+<pre><code>流程 menu(id) / menu_expand(id, entry_id)
 ├── 校验 Item 在册（否则 ItemNotFound）
-├── 现场读取 Menu 属性 → dbusmenu 对象路径（零缓存）
-├── AboutToShow(根 id=0)（常规前置；应答异常视为未变更）
-├── GetLayout（深度截断 menu_max_depth）
+├── dbusmenu 对象路径取自登记簿记（注册时探测 Menu 属性；None = 无菜单，不可拉取）
+├── AboutToShow(parent)（常规前置；应答异常视为未变更；根层 parent=0，展开层=entry_id）
+├── GetLayout(parentId=parent, recursionDepth=1)（懒加载：每次一层）
 ├── GetGroupProperties
-├── 组装 MenuSnapshot
+├── 组装该层 MenuSnapshot
 │    ├── 解析助记符 "_" → label
 │    ├── 保留原文 → raw_label
-│    └── 按 visible/enabled/toggled 归一化条目
-└── 返回快照（不落任何缓存）
+│    └── 按 visible/enabled/children-display/toggle-type/toggle-state 归一化条目
+└── 返回单层快照（不落任何缓存；深层经 menu_expand 按需展开）
 
 内部: 收到 LayoutUpdated / ItemsPropertiesUpdated
 └── 入队 MenuChanged(item)（不代为重拉）</code></pre>
