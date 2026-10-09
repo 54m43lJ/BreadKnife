@@ -29,6 +29,7 @@ pub(crate) struct BusParts {
     pub(crate) config: TrayConfig,
     pub(crate) stopping: Arc<AtomicBool>,
     pub(crate) stopped: Arc<AtomicBool>,
+    pub(crate) snapshot_done: Arc<AtomicBool>,
     pub(crate) stop_tx: watch::Sender<bool>,
     pub(crate) fatal_tx: watch::Sender<String>,
     pub(crate) displaced_tx: watch::Sender<bool>,
@@ -47,6 +48,7 @@ impl BusParts {
             config,
             stopping: Arc::new(AtomicBool::new(false)),
             stopped: Arc::new(AtomicBool::new(false)),
+            snapshot_done: Arc::new(AtomicBool::new(false)),
             stop_tx,
             fatal_tx,
             displaced_tx,
@@ -67,6 +69,11 @@ pub(crate) struct BusCenter {
     pub(crate) config: TrayConfig,
     stopping: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
+    /// 快照栅栏：置位前入册的 Item 由快照承载（静默入册），其后走增量事件——
+    /// 保证首事件即快照、无重叠无缺口。
+    snapshot_done: Arc<AtomicBool>,
+    /// 启动期（快照前）的死亡清理缓冲：快照投递后按快照内容冲刷。
+    deferred_removed: Arc<Mutex<Vec<TrayItemId>>>,
     stop_tx: watch::Sender<bool>,
     fatal_tx: watch::Sender<String>,
     displaced_tx: watch::Sender<bool>,
@@ -84,6 +91,8 @@ impl BusCenter {
             config: parts.config,
             stopping: parts.stopping,
             stopped: parts.stopped,
+            snapshot_done: parts.snapshot_done,
+            deferred_removed: Arc::new(Mutex::new(Vec::new())),
             stop_tx: parts.stop_tx,
             fatal_tx: parts.fatal_tx,
             displaced_tx: parts.displaced_tx,
@@ -207,6 +216,25 @@ impl BusCenter {
 
     pub(crate) fn set_stopped(&self) {
         self.stopped.store(true, Ordering::SeqCst);
+    }
+
+    /// 快照是否已收集（其后的报到走增量事件）。
+    pub(crate) fn is_snapshot_done(&self) -> bool {
+        self.snapshot_done.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn mark_snapshot_done(&self) {
+        self.snapshot_done.store(true, Ordering::SeqCst);
+    }
+
+    /// 启动期死亡清理缓冲（快照投递前不投 Removed）。
+    pub(crate) fn defer_removed(&self, id: TrayItemId) {
+        self.deferred_removed.lock().unwrap().push(id);
+    }
+
+    /// 取走启动期死亡清理缓冲。
+    pub(crate) fn take_deferred_removed(&self) -> Vec<TrayItemId> {
+        std::mem::take(&mut *self.deferred_removed.lock().unwrap())
     }
 
     /// 停机路径主动置位（名释放引发的 NameOwnerChanged 不触发 Displaced）。

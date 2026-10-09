@@ -38,17 +38,27 @@ fn config_defaults() {
 
 #[test]
 fn split_service_arg_variants() {
-    let (n, p) = split_service_arg("org.kde.StatusNotifierItem-1-2");
+    // 服务名 → 默认路径
+    let (n, p) = split_service_arg("org.kde.StatusNotifierItem-1-2", None).unwrap();
     assert_eq!(n, "org.kde.StatusNotifierItem-1-2");
     assert_eq!(p, "/StatusNotifierItem");
 
-    let (n, p) = split_service_arg("org.foo/Custom/Path");
+    // name/path 就地切分
+    let (n, p) = split_service_arg("org.foo/Custom/Path", None).unwrap();
     assert_eq!(n, "org.foo");
     assert_eq!(p, "/Custom/Path");
 
-    let (n, p) = split_service_arg(":1.42");
+    // 唯一名
+    let (n, p) = split_service_arg(":1.42", None).unwrap();
     assert_eq!(n, ":1.42");
     assert_eq!(p, "/StatusNotifierItem");
+
+    // Ayatana 纯对象路径 → 服务名取注册方唯一名；无 sender → 不可受理
+    let (n, p) = split_service_arg("/org/ayatana/NotificationItem/xyz", Some(":1.77")).unwrap();
+    assert_eq!(n, ":1.77");
+    assert_eq!(p, "/org/ayatana/NotificationItem/xyz");
+    assert!(split_service_arg("/org/ayatana/NotificationItem/xyz", None).is_none());
+    assert!(split_service_arg("", None).is_none());
 }
 
 #[test]
@@ -465,6 +475,31 @@ fn is_mock_event(ev: &TrayEvent, kind: &str) -> bool {
     }
 }
 
+/// 轮询等待并返回首个匹配事件（fire-and-forget 调用回执的竞态护栏）。
+fn recv_matching(
+    rx: &mut tokio::sync::mpsc::Receiver<TrayEvent>,
+    ms: u64,
+    pred: impl Fn(&TrayEvent) -> bool,
+) -> Option<TrayEvent> {
+    let deadline = Instant::now() + Duration::from_millis(ms);
+    loop {
+        match rx.try_recv() {
+            Ok(ev) => {
+                if pred(&ev) {
+                    return Some(ev);
+                }
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => return None,
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                if Instant::now() >= deadline {
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+}
+
 /// 轮询等待条件成立（fire-and-forget 调用回执的竞态护栏）。
 fn wait_until(ms: u64, pred: impl Fn() -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_millis(ms);
@@ -549,6 +584,31 @@ fn lifecycle() {
         eventually_recv(&mut rx, 3000, |ev| is_mock_event(ev, "added")),
         "expected Added({MOCK_ID})"
     );
+
+    // Ayatana 风格报到：参数为纯对象路径 → 服务名取注册方唯一名
+    let mock_unique = conn.unique_name().unwrap().to_string();
+    let ayatana_conn = conn.clone();
+    rt.block_on(async move {
+        ayatana_conn
+            .call_method(
+                Some("org.kde.StatusNotifierWatcher"),
+                "/StatusNotifierWatcher",
+                Some(WATCHER_IFACE),
+                "RegisterStatusNotifierItem",
+                &MOCK_ITEM_PATH,
+            )
+            .await
+            .unwrap();
+    });
+    assert!(
+        eventually_recv(
+            &mut rx,
+            3000,
+            |ev| matches!(ev, TrayEvent::Added(id) if id == &mock_unique)
+        ),
+        "expected Added({mock_unique}) for ayatana-style path registration"
+    );
+    assert!(handle.item(&mock_unique).is_some());
 
     // 协议面：在册清单包含 mock；Host 桩恒真
     let props_conn = conn.clone();
@@ -671,6 +731,8 @@ fn lifecycle() {
     assert!(wait_until(3000, || calls.contains("scroll 1 horizontal")));
 
     // 变更通告：New* 信号与 PropertiesChanged 同窗口合并为单次 Changed
+    // （同一对象双注册：规范名 / Ayatana 唯一名，Changed 落点任一）
+    let mock_ids = [MOCK_ID.to_string(), mock_unique.clone()];
     *title.lock().unwrap() = "Mock v2".to_string();
     let sig_conn = conn.clone();
     rt.block_on(async move {
@@ -686,13 +748,18 @@ fn lifecycle() {
         .unwrap();
     });
     assert!(
-        eventually_recv(&mut rx, 3000, |ev| is_mock_event(ev, "changed")),
+        recv_matching(&mut rx, 3000, |ev| matches!(
+            ev,
+            TrayEvent::Changed(id) if mock_ids.contains(id)
+        ))
+        .is_some(),
         "expected Changed after New* / PropertiesChanged"
     );
     let updated = handle.item(&MOCK_ID.to_string()).unwrap();
     assert_eq!(updated.title.as_deref(), Some("Mock v2"));
 
     // ItemIsMenu 随 PropertiesChanged 就地更新：左键路由转入 Menu 流程
+    // （路由标记更新在收到 Changed 的那个 id 的条目上）
     *menu_only.lock().unwrap() = true;
     let mi_conn = conn.clone();
     rt.block_on(async move {
@@ -706,25 +773,35 @@ fn lifecycle() {
         .await
         .unwrap();
     });
-    assert!(
-        eventually_recv(&mut rx, 3000, |ev| is_mock_event(ev, "changed")),
-        "expected Changed after ItemIsMenu update"
-    );
-    assert!(wait_until(3000, || {
+    let routing_id = match recv_matching(&mut rx, 3000, |ev| {
         matches!(
-            handle.left_click(&MOCK_ID.to_string()),
-            Ok(InteractionOutcome::Menu(_))
+            ev,
+            TrayEvent::Changed(id) if mock_ids.contains(id)
         )
-    }));
+    }) {
+        Some(TrayEvent::Changed(id)) => id,
+        other => panic!("expected Changed after ItemIsMenu update, got {other:?}"),
+    };
+    assert!(
+        matches!(
+            handle.left_click(&routing_id),
+            Ok(InteractionOutcome::Menu(_))
+        ),
+        "left_click on {routing_id} must route to Menu after ItemIsMenu update"
+    );
 
-    // 菜单变更信号 → MenuChanged（不代为重拉）
+    // 菜单变更信号 → MenuChanged（不代为重拉；落点 id 任一）
     let menu_sig_conn = conn.clone();
     rt.block_on(async move {
         let emitter = SignalEmitter::new(&menu_sig_conn, MOCK_MENU_PATH).unwrap();
         MockMenu::layout_updated(&emitter, 8, 0).await.unwrap();
     });
     assert!(
-        eventually_recv(&mut rx, 3000, |ev| is_mock_event(ev, "menu_changed")),
+        recv_matching(&mut rx, 3000, |ev| matches!(
+            ev,
+            TrayEvent::MenuChanged(id) if mock_ids.contains(id)
+        ))
+        .is_some(),
         "expected MenuChanged after LayoutUpdated"
     );
 
@@ -742,7 +819,7 @@ fn lifecycle() {
     );
     assert_eq!(handle.item(&MOCK_ID.to_string()), None);
 
-    // 停机：幂等；此后一律 Stopped；通道关闭（recv → None）
+    // 停机：幂等；此后一律 Stopped；排空残余事件后通道关闭（recv → None）
     handle.shutdown();
     handle.shutdown();
     assert!(matches!(
@@ -754,8 +831,13 @@ fn lifecycle() {
         Err(TrayError::Stopped)
     ));
     assert_eq!(handle.items(), Vec::<TrayItem>::new());
+    // 双注册（规范名 + Ayatana 唯一名）可能残留队列事件：先排空再确认关闭
+    while recv_within(&mut rx, 1000).is_some() {}
     assert!(
-        recv_within(&mut rx, 1000).is_none(),
+        matches!(
+            rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)
+        ),
         "channel must close after shutdown"
     );
 }

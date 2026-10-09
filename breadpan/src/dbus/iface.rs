@@ -22,8 +22,15 @@ pub(crate) struct WatcherIface {
 #[zbus::interface(name = "org.kde.StatusNotifierWatcher")]
 impl WatcherIface {
     /// Item 报到：登记总线唯一名 + 对象路径；报到即拉取跟踪；重复报到幂等。
-    async fn register_status_notifier_item(&self, service: &str) {
-        if let Err(e) = dbus::register_item(&self.bus, service, true).await {
+    /// 参数可为服务名、`"name/path"`，或 Ayatana 风格的纯对象路径
+    /// （此时服务名取注册方唯一名）。
+    async fn register_status_notifier_item(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+        service: &str,
+    ) {
+        let sender = header.sender().map(|s| s.to_string());
+        if let Err(e) = dbus::register_item(&self.bus, service, sender.as_deref(), true).await {
             self.bus
                 .events
                 .send(crate::events::TrayEvent::Narration(format!(
@@ -67,8 +74,13 @@ pub(crate) struct FreedesktopWatcherIface {
 
 #[zbus::interface(name = "org.freedesktop.StatusNotifierWatcher")]
 impl FreedesktopWatcherIface {
-    async fn register_status_notifier_item(&self, service: &str) {
-        if let Err(e) = dbus::register_item(&self.bus, service, true).await {
+    async fn register_status_notifier_item(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+        service: &str,
+    ) {
+        let sender = header.sender().map(|s| s.to_string());
+        if let Err(e) = dbus::register_item(&self.bus, service, sender.as_deref(), true).await {
             self.bus
                 .events
                 .send(crate::events::TrayEvent::Narration(format!(

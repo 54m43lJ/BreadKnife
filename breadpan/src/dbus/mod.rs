@@ -40,8 +40,16 @@ pub(crate) const DBUS_PATH: &str = "/";
 pub(crate) const DBUS_IFACE: &str = "org.freedesktop.DBus";
 pub(crate) const INTROSPECTABLE_IFACE: &str = "org.freedesktop.DBus.Introspectable";
 
-/// 报到/发现参数解析：`"name"` → (name, /StatusNotifierItem)；`"name/path"` 就地切分。
-pub(crate) fn split_service_arg(arg: &str) -> (String, String) {
+/// 报到/发现参数解析：
+/// - `"name"` → (name, /StatusNotifierItem)；
+/// - `"name/path"` 就地切分；
+/// - `"/path"`（Ayatana 风格纯对象路径）→ 服务名取注册方唯一名（由调用方提供）。
+pub(crate) fn split_service_arg(arg: &str, sender: Option<&str>) -> Option<(String, String)> {
+    if arg.starts_with('/') {
+        // 纯对象路径（Ayatana 风格）：服务名 = 注册方唯一名
+        let sender = sender?;
+        return Some((sender.to_string(), arg.to_string()));
+    }
     match arg.split_once('/') {
         Some((name, path)) if !name.is_empty() && !path.is_empty() => {
             let path = if path.starts_with('/') {
@@ -49,20 +57,26 @@ pub(crate) fn split_service_arg(arg: &str) -> (String, String) {
             } else {
                 format!("/{path}")
             };
-            (name.to_string(), path)
+            Some((name.to_string(), path))
         }
-        _ => (arg.to_string(), DEFAULT_ITEM_PATH.to_string()),
+        _ if !arg.is_empty() => Some((arg.to_string(), DEFAULT_ITEM_PATH.to_string())),
+        _ => None,
     }
 }
 
-/// 报到受理：探测路由标记（Menu / ItemIsMenu）→ 最小集入册 →（announce）协议面广播 + Added。
-/// 已存在 → 原地刷新并返回 false（幂等）。
+/// 报到受理：解析注册参数（含 Ayatana 纯路径风格）→ 探测路由标记（Menu / ItemIsMenu）
+/// → 最小集入册 →（announce）协议面广播 + Added。已存在 → 原地刷新并返回 false（幂等）。
 pub(crate) async fn register_item(
     bus: &BusCenter,
     service_arg: &str,
+    sender: Option<&str>,
     announce: bool,
 ) -> Result<bool, TrayError> {
-    let (service, path) = split_service_arg(service_arg);
+    let Some((service, path)) = split_service_arg(service_arg, sender) else {
+        return Err(TrayError::Protocol(format!(
+            "unusable RegisterStatusNotifierItem argument: {service_arg:?}"
+        )));
+    };
     let unique: String = bus
         .call(
             DBUS_SERVICE,
@@ -83,7 +97,8 @@ pub(crate) async fn register_item(
         menu_only,
     };
     let inserted = bus.tracker.write().unwrap().upsert(entry);
-    if inserted && announce {
+    // 快照栅栏：快照收集前入册的 Item 由快照承载（静默），其后才广播 + 入队 Added
+    if inserted && announce && bus.is_snapshot_done() {
         iface::emit_registered(bus, &service).await;
         bus.events.send(TrayEvent::Added(service));
     }
@@ -111,33 +126,41 @@ async fn discover_existing(bus: &BusCenter) -> Vec<String> {
         candidates.len()
     ));
     for name in candidates {
-        match introspect_has_item_iface(bus, &name).await {
+        match probe_item_iface(bus, &name).await {
             Ok(true) => {
-                let _ = register_item(bus, &name, false).await;
+                let _ = register_item(bus, &name, None, false).await;
             }
             Ok(false) => narrations.push(format!(
                 "discovery skip {name}: no StatusNotifierItem interface at {DEFAULT_ITEM_PATH}"
             )),
-            Err(e) => narrations.push(format!("discovery skip {name}: introspect failed: {e}")),
+            Err(e) => narrations.push(format!("discovery skip {name}: probe failed: {e}")),
         }
     }
     narrations
 }
 
-async fn introspect_has_item_iface(bus: &BusCenter, name: &str) -> Result<bool, TrayError> {
-    let xml: String = bus
-        .call(
+/// 存量 Item 探测：Introspect 接口名确认；不实现 Introspect 的实现
+/// （Electron/Ayatana 等，返回空 XML）回退为直接属性读取确认。
+async fn probe_item_iface(bus: &BusCenter, name: &str) -> Result<bool, TrayError> {
+    if let Ok(xml) = bus
+        .call::<String, _>(
             name,
             DEFAULT_ITEM_PATH,
             INTROSPECTABLE_IFACE,
             "Introspect",
             &(),
         )
-        .await?;
-    Ok(xml.contains(ITEM_IFACE_KDE) || xml.contains(ITEM_IFACE_FD))
+        .await
+    {
+        if xml.contains(ITEM_IFACE_KDE) || xml.contains(ITEM_IFACE_FD) {
+            return Ok(true);
+        }
+    }
+    Ok(props::read_all(bus, name, DEFAULT_ITEM_PATH).await.is_ok())
 }
 
 /// 快照：逐个现场读取全部在册 Item（并发），入队 Snapshot——事件流起点。
+/// 收集完毕置栅栏并冲刷启动期延迟的死亡清理（快照内的死亡才补投 Removed）。
 /// 读取失败的过程叙述以返回值交付（快照先行）。
 async fn queue_snapshot(bus: &BusCenter) -> Vec<String> {
     let entries = bus.tracker.read().unwrap().all();
@@ -160,6 +183,16 @@ async fn queue_snapshot(bus: &BusCenter) -> Vec<String> {
     }
     items.sort_by(|a, b| a.id.cmp(&b.id));
     bus.events.send(TrayEvent::Snapshot { items });
+
+    // 栅栏置位：其后的报到/事件走正常增量路径
+    bus.mark_snapshot_done();
+    // 启动期（发现项）死亡清理冲刷：仅快照内的 id 补投 Removed，其余按从未出现丢弃
+    let snapshot_ids: std::collections::HashSet<String> = bus.tracker.read().unwrap().ids();
+    for id in bus.take_deferred_removed() {
+        if snapshot_ids.contains(&id) {
+            bus.events.send(TrayEvent::Removed(id));
+        }
+    }
     narrations
 }
 
@@ -204,8 +237,8 @@ pub(crate) async fn run(
 }
 
 async fn bootstrap(bus: &BusCenter) -> Result<(), TrayError> {
-    // 登记中心就位：挂载协议面（先）+ 申请名（后，不可被替换）
-    watcher::WatcherService::start(bus).await?;
+    // 挂载协议面（尚不申请名，报到无从发生）
+    watcher::mount_interfaces(bus).await?;
 
     // 全局信号订阅 + 周期任务
     spawn_signal_tasks(bus.clone());
@@ -215,11 +248,14 @@ async fn bootstrap(bus: &BusCenter) -> Result<(), TrayError> {
     // 反向发现存量 Item（静默入册）
     let discovery_notes = discover_existing(bus).await;
 
-    // 快照（首事件），其后补投启动过程叙述
+    // 快照（首事件），其后补投启动过程叙述与延迟的死亡清理
     let snapshot_notes = queue_snapshot(bus).await;
     for note in discovery_notes.into_iter().chain(snapshot_notes) {
         bus.events.send(TrayEvent::Narration(note));
     }
+
+    // 最后申请 Watcher 名：此后报到以增量事件衔接（快照已就位）
+    watcher::WatcherService::start(bus).await?;
     Ok(())
 }
 
@@ -311,7 +347,12 @@ async fn name_owner_changed_task(bus: BusCenter) {
             // 服务名消失（或属主唯一名消失）：死亡清理
             let removed = bus.tracker.write().unwrap().unregister(&name);
             for entry in removed {
-                bus.events.send(TrayEvent::Removed(entry.service.clone()));
+                if bus.is_snapshot_done() {
+                    bus.events.send(TrayEvent::Removed(entry.service.clone()));
+                } else {
+                    // 启动期死亡：快照投递后按快照内容冲刷
+                    bus.defer_removed(entry.service.clone());
+                }
                 let bus2 = bus.clone();
                 let service = entry.service;
                 bus.spawn(async move {
@@ -327,7 +368,7 @@ async fn name_owner_changed_task(bus: BusCenter) {
             let bus2 = bus.clone();
             let name2 = name.clone();
             bus.spawn(async move {
-                let _ = register_item(&bus2, &name2, true).await;
+                let _ = register_item(&bus2, &name2, None, true).await;
             });
         }
     })
@@ -397,6 +438,7 @@ async fn properties_changed_task(bus: BusCenter, iface: &'static str) {
 }
 
 /// dbusmenu LayoutUpdated / ItemsPropertiesUpdated → 仅转发 MenuChanged，不代为重拉。
+/// 快照投递前丢弃（消费方尚无菜单可重取）。
 async fn dbusmenu_signals_task(bus: BusCenter) {
     let rule = MatchRule::builder()
         .msg_type(MessageType::Signal)
@@ -407,6 +449,9 @@ async fn dbusmenu_signals_task(bus: BusCenter) {
         let (Some(sender), Some(path)) = signal_source(&msg) else {
             return;
         };
+        if !bus.is_snapshot_done() {
+            return;
+        }
         if let Some(id) = bus
             .tracker
             .read()
@@ -420,11 +465,15 @@ async fn dbusmenu_signals_task(bus: BusCenter) {
 }
 
 /// 变更通告合并（固定窗口节流）：信号只入待通告集合，节拍到期统一投递。
+/// 快照投递前不冲刷（首事件契约）。
 async fn debounce_task(bus: BusCenter) {
     let period = Duration::from_millis(bus.config.debounce_ms.max(1));
     let mut tick = tokio::time::interval(period);
     loop {
         tick.tick().await;
+        if !bus.is_snapshot_done() {
+            continue;
+        }
         let drained: Vec<crate::TrayItemId> = bus.pending.lock().unwrap().drain().collect();
         for id in drained {
             bus.events.send(TrayEvent::Changed(id));

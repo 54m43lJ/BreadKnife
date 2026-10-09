@@ -9,20 +9,25 @@ use crate::TrayError;
 
 pub(crate) struct WatcherService;
 
-impl WatcherService {
-    /// 申请 Watcher 名（不声明 allow-replacement，持有期不可被替换）并挂载协议面；
-    /// 名字已被他人持有 → NameTaken（多 Watcher 不能共存）。
-    pub(crate) async fn start(bus: &BusCenter) -> Result<Self, TrayError> {
-        // 先挂载协议面，再申请名（避免早到的调用落空）
-        bus.conn
-            .object_server()
-            .at(WATCHER_PATH, WatcherIface { bus: bus.clone() })
-            .await?;
-        bus.conn
-            .object_server()
-            .at(WATCHER_PATH, FreedesktopWatcherIface { bus: bus.clone() })
-            .await?;
+/// 挂载协议面（不申请名）——供 bootstrap 在快照就绪前置位。
+pub(crate) async fn mount_interfaces(bus: &BusCenter) -> Result<(), TrayError> {
+    bus.conn
+        .object_server()
+        .at(WATCHER_PATH, WatcherIface { bus: bus.clone() })
+        .await?;
+    bus.conn
+        .object_server()
+        .at(WATCHER_PATH, FreedesktopWatcherIface { bus: bus.clone() })
+        .await?;
+    Ok(())
+}
 
+impl WatcherService {
+    /// 申请 Watcher 名（不声明 allow-replacement，持有期不可被替换）；
+    /// 名字已被他人持有 → NameTaken（多 Watcher 不能共存）。
+    /// 协议面须已挂载（bootstrap 在快照就绪前完成挂载，名最后申请——
+    /// 申请前置会让 Item 报到与快照收集竞态，破坏"首事件即快照"契约）。
+    pub(crate) async fn start(bus: &BusCenter) -> Result<Self, TrayError> {
         let reply = bus
             .conn
             .request_name_with_flags(WATCHER_NAME, RequestNameFlags::DoNotQueue.into())
