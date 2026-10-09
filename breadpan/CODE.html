@@ -25,7 +25,7 @@
 ├── tracker.rs           # Item 登记簿记（最小集）：报到 / 反向发现 / 死亡清理
 ├── props.rs             # 属性即时读取（zvariant/serde → 原生结构）
 ├── dbus/
-│   ├── mod.rs           # DBus 域出口（内部聚合，不直接对外）
+│   ├── mod.rs           # DBus 域出口（内部聚合）：常量、启动编排、报到受理与反向发现、全局信号订阅
 │   ├── bus.rs           # 会话总线连接（zbus tokio 特性）与库内 tokio 运行时宿主
 │   ├── watcher.rs       # 登记中心服务：名持有（不可替换）、所有权丢失上报、停机
 │   ├── iface.rs         # org.kde.StatusNotifierWatcher 协议面（ARCHITECTURE §3.4）
@@ -87,8 +87,6 @@ pub(crate) struct ItemEntry {
 }
 pub(crate) struct ItemTracker { items: HashMap&lt;TrayItemId, ItemEntry&gt; }
 impl ItemTracker {
-    /// 启动期反向发现：ListNames 命中 org.kde.StatusNotifierItem- 前缀 → Introspect 探测 → 最小集入册
-    pub(crate) fn discover_existing(&amp;mut self) -&gt; Vec&lt;TrayItemId&gt;;
     /// 最小集入册：新服务名插入 → true；已存在原地刷新属主与路由标记 → false（幂等）
     pub(crate) fn upsert(&amp;mut self, entry: ItemEntry) -&gt; bool;
     /// 死亡清理：移除该唯一名全部条目，返回被移除者
@@ -100,9 +98,28 @@ impl ItemTracker {
 }
 
 // ── props.rs：属性即时读取 ──
+/// GetAll（org.kde 前缀优先，失败回退 org.freedesktop 前缀；§3.1.2 双级探测第二级）
+pub(crate) async fn read_all(bus: &amp;BusCenter, service: &amp;str, path: &amp;str)
+    -&gt; Result&lt;HashMap&lt;String, OwnedValue&gt;, TrayError&gt;;
+/// 注册期路由探测：Menu 属性（对象路径）与 ItemIsMenu；读取失败按无菜单/非菜单处理（§3.3.1）
+pub(crate) async fn probe_routing(bus: &amp;BusCenter, service: &amp;str, path: &amp;str)
+    -&gt; (Option&lt;String&gt;, bool);
 /// 现场读取单个 Item 全部官方属性，经 zvariant/serde 反序列化为 TrayItem
 /// （ARCHITECTURE §3.3 字段表）；items()/item()/Snapshot 的统一取数路径
 pub(crate) fn fetch_item(bus: &amp;BusCenter, entry: &amp;ItemEntry) -&gt; Result&lt;TrayItem, TrayError&gt;;
+
+// ── dbus/mod.rs：DBus 域出口——报到受理 / 反向发现 / 启动编排 / 全局信号订阅任务 ──
+/// 报到/发现参数三形态解析："name" / "name/path" / "/path"（Ayatana 纯对象路径）；
+/// 纯路径形态服务名取 sender；不可解析 → None（解析规则见 §3.3.1）
+pub(crate) fn split_service_arg(arg: &amp;str, sender: Option&lt;&amp;str&gt;) -&gt; Option&lt;(String, String)&gt;;
+/// 报到受理：解析 → GetNameOwner 属主解析 → 路由探测 → upsert →（announce）广播+Added；
+/// 解析失败 → TrayError::Protocol；announce=false 供反向发现静默入册（§3.3.1）
+pub(crate) async fn register_item(bus: &amp;BusCenter, service_arg: &amp;str,
+                                  sender: Option&lt;&amp;str&gt;, announce: bool) -&gt; Result&lt;bool, TrayError&gt;;
+/// 启动期反向发现：ListNames 前缀过滤 → 双级探测 → 静默入册；过程叙述以返回值交付（§3.1.2）
+async fn discover_existing(bus: &amp;BusCenter) -&gt; Vec&lt;String&gt;;
+/// 存量 Item 双级探测：Introspect 接口名确认 → 失败则 GetAll 属性读取确认（§3.1.2）
+async fn probe_item_iface(bus: &amp;BusCenter, name: &amp;str) -&gt; Result&lt;bool, TrayError&gt;;
 
 // ── dbus/bus.rs：会话总线连接与 tokio 运行时宿主 ──
 pub(crate) struct BusCenter {
@@ -173,6 +190,8 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
 <h2 id="sec-3">3. 关键流程调用栈（伪码）</h2>
 
 <h3 id="sec-3-1">3.1. 启动（start）</h3>
+
+<h4 id="sec-3-1-1">3.1.1. 总流程（bootstrap）</h4>
 <pre><code>流程 Tray::start(config)
 ├── 连接会话总线
 ├── 启动内部 tokio 运行时（CurrentThread，独占内部线程）
@@ -180,11 +199,23 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
 │    ├── 申请 Watcher 名（不可被替换）
 │    │    └── 已被他人持有 → 返回 NameTaken（多 Watcher 不能共存）
 │    └── 挂载协议面（§2 iface，ARCHITECTURE §3.4）
-├── 反向发现存量 Item（ItemTracker::discover_existing）
-│    └── ListNames 命中官方命名模式 → Introspect 探测 → 最小集入册
+├── 反向发现存量 Item（dbus::discover_existing，§3.1.2）
 ├── 订阅 NameOwnerChanged（死亡清理，§3.3.2）
 ├── 逐个现场读取（fetch_item）→ 事件入队 Snapshot(全部 Item 记录)
 └── 返回 (Handle, 事件通道)</code></pre>
+
+<h4 id="sec-3-1-2">3.1.2. 反向发现（存量 Item 双级探测）</h4>
+<pre><code>内部: dbus::discover_existing(bus) -> Vec&lt;String&gt;（过程叙述，快照投递后以 Narration 交付）
+├── ListNames → 过滤 "org.kde.StatusNotifierItem-" 前缀候选
+├── 逐个 probe_item_iface(bus, name) -> Result&lt;bool, TrayError&gt;：双级确认 SNI 接口在位
+│    ├── 第一级：Introspect(name, /StatusNotifierItem) 应答 XML 含 SNI 接口名
+│    │    （org.kde / org.freedesktop 任一）→ 确认
+│    └── 第二级：props::read_all(name, /StatusNotifierItem) 直接属性读取
+│         （Introspect 失败或应答 XML 无接口名时到达——Electron/CEF 等实现
+│          不响应 Introspect，QQ 音乐实测）；Ok = 确认在位
+├── 确认 → register_item(bus, name, sender=None, announce=false)
+│    （静默入册：不广播、不入队 Added——快照是首事件，§3.3.1）
+└── 未确认 / 探测失败 → 记入过程叙述，不中断发现循环</code></pre>
 
 <h3 id="sec-3-2">3.2. 变更通告合并（固定窗口节流）</h3>
 <pre><code>内部 tokio 运行时: 收到 PropertiesChanged(item)
