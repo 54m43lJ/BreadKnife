@@ -1,7 +1,6 @@
 # Documentation Guidelines
-Each project should contain 4 documents in HTML:
+Each project should contain 3 documents in HTML:
 1. README.html
-2. BUILD.html
 3. ARCHITECTURE.html
 4. CODE.html
 
@@ -19,9 +18,6 @@ Other constraints:
 	2. GOAL: what success looks like
 2. define user interactions
 3. (if applicable) prototype/mock, can be code, can be pictures/videos
-## Build
-- Build from source instructions
-- including dependencies
 ## Architecture
 RULES:
 - **mermaid graph is to be completely avoided. use ASCII graph or actual pictures.**
