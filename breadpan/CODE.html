@@ -131,7 +131,7 @@ impl WatcherService {
 // ── dbus/iface.rs：org.kde.StatusNotifierWatcher 协议面（成员语义见 ARCHITECTURE §3.4）──
 #[interface(name = "org.kde.StatusNotifierWatcher")]
 impl WatcherIface {
-    fn register_status_notifier_item(&amp;self, header, service: &amp;str);   // #[zbus(header)] 取消息头 sender → dbus::register_item（§3.3）
+    fn register_status_notifier_item(&amp;self, header, service: &amp;str);   // #[zbus(header)] 取消息头 sender → dbus::register_item（§3.3.1）
     fn registered_status_notifier_items(&amp;self) -&gt; Vec&lt;String&gt;;  // → 在册清单
     fn register_status_notifier_host(&amp;self, service: String);   // 兼容桩：受理即忘
     fn is_status_notifier_host_registered(&amp;self) -&gt; bool;       // 兼容桩：恒真
@@ -182,7 +182,7 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
 │    └── 挂载协议面（§2 iface，ARCHITECTURE §3.4）
 ├── 反向发现存量 Item（ItemTracker::discover_existing）
 │    └── ListNames 命中官方命名模式 → Introspect 探测 → 最小集入册
-├── 订阅 NameOwnerChanged（死亡清理，§3.3）
+├── 订阅 NameOwnerChanged（死亡清理，§3.3.2）
 ├── 逐个现场读取（fetch_item）→ 事件入队 Snapshot(全部 Item 记录)
 └── 返回 (Handle, 事件通道)</code></pre>
 
@@ -198,6 +198,8 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
 每 Item 至多 1 次/窗口。事实事件幂等，窗口内折叠不丢信息。</p>
 
 <h3 id="sec-3-3">3.3. 报到与死亡清理</h3>
+
+<h4 id="sec-3-3-1">3.3.1. 报到（RegisterStatusNotifierItem 受理）</h4>
 <pre><code>内部: 协议面收到 RegisterStatusNotifierItem(service)
       （org.kde / org.freedesktop 两前缀等价：两接口挂同一路径，§2 iface）
 ├── sender ← 消息头 sender（调用方唯一名，#[zbus(header)] 注入）
@@ -214,14 +216,17 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
           └── 新登记 &amp;&amp; announce → 广播 StatusNotifierItemRegistered + 入队 Added(id)
                （数据由消费方现场读取；announce=false 仅反向发现路径——静默入册，
                 由快照承载，§3.1；变更通告不逐 Item 订阅，经全局信号任务按簿记
-                归属过滤后并入 §3.2 合并窗口）
+                归属过滤后并入 §3.2 合并窗口）</code></pre>
 
-内部: 收到 NameOwnerChanged(唯一名, 旧属主 → "")
+<h4 id="sec-3-3-2">3.3.2. 死亡清理（NameOwnerChanged）</h4>
+<pre><code>内部: 收到 NameOwnerChanged(唯一名, 旧属主 → "")
 ├── ItemTracker::unregister → 被移除条目
 ├── 逐条广播 StatusNotifierItemUnregistered
 └── 逐条入队 Removed</code></pre>
 
 <h3 id="sec-3-4">3.4. 菜单现场读取（Menu 流程，interact 与 menu()/menu_expand() 共用）</h3>
+
+<h4 id="sec-3-4-1">3.4.1. 现场拉取（menu / menu_expand）</h4>
 <pre><code>流程 menu(id) / menu_expand(id, entry_id)
 ├── 校验 Item 在册（否则 ItemNotFound）
 ├── dbusmenu 对象路径取自登记簿记（注册时探测 Menu 属性；None = 无菜单，不可拉取）
@@ -232,9 +237,10 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
 │    ├── 解析助记符 "_" → label
 │    ├── 保留原文 → raw_label
 │    └── 按 visible/enabled/children-display/toggle-type/toggle-state 归一化条目
-└── 返回单层快照（不落任何缓存；深层经 menu_expand 按需展开）
+└── 返回单层快照（不落任何缓存；深层经 menu_expand 按需展开）</code></pre>
 
-内部: 收到 LayoutUpdated / ItemsPropertiesUpdated
+<h4 id="sec-3-4-2">3.4.2. 菜单变更通告（LayoutUpdated / ItemsPropertiesUpdated）</h4>
+<pre><code>内部: 收到 LayoutUpdated / ItemsPropertiesUpdated
 └── 入队 MenuChanged(item)（不代为重拉）</code></pre>
 
 <h3 id="sec-3-5">3.5. 输入路由与回执</h3>
@@ -242,9 +248,9 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
    （每个语义输入一个公开方法；缺省 x/y=(0,0)、steps=1，_at/_by 变体传显式值）
 ├── 校验 Item 在册（否则 ItemNotFound）
 ├── 路由（§2.7 表，依据登记簿记 menu_only / menu，零查询）
-│    ├── left_click → menu_only 且 DBusMenu 在册 → Menu 流程（§3.4）；否则 Activate(x,y)
+│    ├── left_click → menu_only 且 DBusMenu 在册 → Menu 流程（§3.4.1）；否则 Activate(x,y)
 │    ├── middle_click → SecondaryActivate(x,y)
-│    ├── right_click → DBusMenu 在册 → Menu 流程（§3.4）；否则 ContextMenu(x,y)
+│    ├── right_click → DBusMenu 在册 → Menu 流程（§3.4.1）；否则 ContextMenu(x,y)
 │    └── scroll_up/down/left/right → Scroll(∓steps, vertical / horizontal)
 ├── Menu 流程 → 同步返回 InteractionOutcome::Menu(快照)
 ├── VOID 调用（受理即返回）→ 同步返回 InteractionOutcome::Dispatched
@@ -258,13 +264,16 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
 └── 结果仅写入登记簿记，不产生事件——消费方经 is_alive(id)/item(id) 读取</code></pre>
 
 <h3 id="sec-3-7">3.7. 所有权丢失与停机</h3>
+
+<h4 id="sec-3-7-1">3.7.1. 所有权丢失（Displaced）</h4>
 <pre><code>内部: 收到 NameLost（极罕见边缘路径：持有期外部顶替一律失败，
       仅总线层异常——如总线守护重启——可触发）
 ├── 清空 ItemTracker 全部簿记
 ├── 服务转停止形态（不再受理登记）
-└── 入队 Displaced → 停机（终局报错：被其它 Watcher 取代；不重试、不强制夺回）
+└── 入队 Displaced → 停机（终局报错：被其它 Watcher 取代；不重试、不强制夺回）</code></pre>
 
-流程 shutdown()
+<h4 id="sec-3-7-2">3.7.2. 停机（shutdown）</h4>
+<pre><code>流程 shutdown()
 ├── WatcherService::stop（释放 Watcher 名 → 总线上角色下线）
 ├── 清空登记簿记
 ├── 停内部 tokio 运行时
