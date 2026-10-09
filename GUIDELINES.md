@@ -5,6 +5,7 @@ Each project should contain 3 documents in HTML:
 4. CODE.html
 
 And each serves a distinct purpose.
+
 -----
 
 Other constraints:
@@ -23,6 +24,7 @@ RULES:
 - **mermaid graph is to be completely avoided. use ASCII graph or actual pictures.**
 - **Architecture document should be customer-facing. Everything a customer (app that depends on it, user of this application, etc.) would directly interact with should be documented here. The remaining internal structure and mechanisms should be in CODE.html instead.**
 - Optionally, any finer requirement that cannot be described by straightforward mechanisms should be attached to the end of that section as complement. This part should always be the last resort, prefer mechanism over specific constraint whenever possible.
+
 -----
 
 1. TERMS: a table of doamin-specific keywords that should never be synonymized, with their full definition. When these terms are used, no further explaination of the term is allowed.
@@ -42,6 +44,7 @@ RULES:
 RULES:
 - **This document is purely for internal mechanism details. If it is anything relevant to the usage of this project, it should be in the architecture doc instead.**
 - **Does not have to be exhaustive. Focus on key execution paths during startup, key events, and shutdown.**
+
 -----
 
 1. File tree: the general structure of the final code, explains which module serves what purposes
