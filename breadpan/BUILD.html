@@ -11,8 +11,11 @@
 
 <h1>breadpan 构建与开发</h1>
 <blockquote>
-  面向开发者的构建、测试与 CI 说明。项目描述见 <a href="README.html">README.html</a>，
-  实现规格见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> 与 <a href="CODE.html">CODE.html</a>。
+  面向开发者的构建、示例运行与测试说明。项目描述见
+  <a href="README.html">README.html</a>，实现规格见
+  <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> 与
+  <a href="CODE.html">CODE.html</a>，实现过程中的补充记录见
+  <a href="IMPLEMENTATION.md">IMPLEMENTATION.md</a>。
 </blockquote>
 
 <h2>构建依赖</h2>
@@ -20,19 +23,50 @@
   <tr><th>项</th><th>说明</th></tr>
   <tr><td>Rust 工具链</td><td>rustup / cargo</td></tr>
   <tr><td>协议核心依赖白名单</td><td><code>zbus</code>（启用 tokio 特性）、<code>tokio</code>（sync + rt，仅库内部运行时）、<code>zvariant</code> / <code>serde</code>（属性 → 原生结构反序列化）、<code>thiserror</code>、标准库——事件通道为 tokio mpsc</td></tr>
-  <tr><td>GTK 整合层</td><td>gtk4 / glib 开发包（Arch: <code>pacman -S gtk4</code>）</td></tr>
+  <tr><td>GTK 整合层</td><td>gtk4 / glib 开发包（Arch: <code>pacman -S gtk4</code>）；为默认特性 <code>gtk</code>，可关闭</td></tr>
   <tr><td>测试环境</td><td>仅需 DBus session bus；<strong>无需显示服务</strong>（不依赖 Wayland/X11）</td></tr>
 </table>
-<p>本库必须独立编译测试，不要求 workspace 内其他工程存在。</p>
+<p>本库为独立 crate（仓库内路径 <code>breadpan/</code>），必须独立编译测试，不要求 workspace 内其他工程存在。下述命令均在 <code>breadpan/</code> 目录内执行。</p>
 
-<h2>构建与测试</h2>
-<pre><code>cargo build
-cargo test
-cargo run --example minimal   # 运行示例（examples/ 为唯一示例目录，见 README「实例代码」）</code></pre>
+<h2>编译</h2>
+<pre><code>cargo build              # 协议核心 + GTK 整合层（默认特性）
+cargo build --release</code></pre>
+<table>
+  <tr><th>变体</th><th>命令</th><th>说明</th></tr>
+  <tr><td>无 GTK 构建</td><td><code>cargo build --no-default-features</code></td><td>仅协议核心；宿主环境缺 gtk4 开发包、或不需要渲染直出（自绘图标）时使用</td></tr>
+</table>
+
+<h2>运行示例</h2>
+<p>
+  示例清单与演示内容见 <a href="README.html">README.html</a>「实例代码」。
+  运行前提：<strong>DBus session bus 可用，且 Watcher 总线名未被他人持有</strong>——
+  桌面已运行托盘（任务栏 / DE Shell 内置 Watcher）时启动报
+  <code>NameTaken</code> 退出；须先停掉既有 Watcher，或用
+  <code>dbus-run-session</code> 在空总线上演示。
+</p>
+<pre><code>cargo run --example minimal
+cargo run --example interactions</code></pre>
+<table>
+  <tr><th>示例</th><th>运行效果</th></tr>
+  <tr><td><code>minimal</code></td><td>打印快照（含各 Item 的标题/状态）与全部事件流——出现/移除/变更/菜单变更/交互回执/内部叙述；持续消费至 Ctrl-C 或终局事件（Displaced / Fatal）</td></tr>
+  <tr><td><code>interactions</code></td><td>取快照首个 Item 依次演示：左键（Activate 或整项即菜单路由）、滚轮、右键菜单（打印条目、可用性、勾选态）、子层展开、菜单条目点击提交；随后优雅停机并排空剩余事件回执。总线上无 Item 时打印提示后直接退出</td></tr>
+  <tr><td>隔离演示</td><td><code>dbus-run-session -- cargo run --example minimal</code>：空总线验证启动与事件循环（无真实 Item，快照为空）</td></tr>
+</table>
+<p class="diagram-note">真机演示提示：无 Watcher 的裸 Wayland 会话中运行，库会接管登记中心——存量 Item（如残留的托盘应用）经反向发现进入快照，等待 Watcher 出现的应用随后以增量事件报到；此后停掉任一托盘应用可观察 Removed，操作托盘图标可观察 Changed / InteractionResult。</p>
+
+<h2>测试</h2>
+<pre><code>cargo test                              # 单元测试任意环境可跑；生命周期用例需 session bus
+dbus-run-session -- cargo test          # 隔离总线全量运行（推荐）</code></pre>
+<p>
+  生命周期用例内置 mock Item 与 mock dbusmenu，占用 Watcher 总线名：
+  真实桌面上若已有他人 Watcher，该用例自动跳过（输出 <code>SKIPPED</code> 提示），不算失败。
+</p>
 
 <footer>
   文档：<a href="README.html">README</a> ·
-  <a href="ARCHITECTURE.html">ARCHITECTURE</a> · <a href="CODE.html">CODE</a> · BUILD
+  <a href="ARCHITECTURE.html">ARCHITECTURE</a> ·
+  <a href="CODE.html">CODE</a> ·
+  <a href="IMPLEMENTATION.md">IMPLEMENTATION</a> · BUILD
 </footer>
 
 </main>
