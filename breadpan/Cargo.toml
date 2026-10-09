@@ -1,0 +1,16 @@
+[package]
+name = "breadpan"
+version = "0.1.0"
+edition = "2021"
+description = "Self-contained SNI tray protocol stack: built-in watcher, item data, events, interactions, menus and GTK renderables."
+license = "MIT"
+
+[dependencies]
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "time", "macros"] }
+thiserror = "2"
+gtk_crate = { package = "gtk4", version = "0.10", optional = true }
+
+[features]
+default = ["gtk"]
+gtk = ["dep:gtk_crate"]
