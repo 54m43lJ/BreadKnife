@@ -6,17 +6,18 @@ start
 缺省 x/y=(0,0)、steps=1，_at/_by 变体传显式值);
 |breadpan|
 :路由：查登记簿记 menu_only / menu（零查询）;
-if (Menu 命中？\nright_click 有菜单 / left_click 仅 menu_only) then (是)
-  :Menu 流程（§2.6）
-  AboutToShow → GetLayout;
+if (Menu 命中？\nright_click：DBusMenu 在册\nleft_click：menu_only 且 DBusMenu 在册) then (是)
+  :Menu 流程（§2.6，含 AboutToShow / GetLayout）;
   |消费方|
   :Outcome::Menu → 渲染弹出
   条目点击 → menu_activate；子层展开 → menu_expand;
   stop
 else (否)
-  |breadpan|
   if (left_click？) then (是：独走同步路径)
-    :Activate(x,y) 就地等待往返;
+    |Item|
+    :Activate(x,y);
+    |breadpan|
+    :应答（就地等待往返）;
     if (成功？) then (是)
       :InteractionResult{成功} 入队;
       |消费方|
@@ -47,16 +48,19 @@ else (否)
         endif
       endif
     endif
-  else (否：受理即返回)
-    :SecondaryActivate(x,y) / ContextMenu(x,y)
-    / Scroll(∓steps, orient);
-    note right
-      invoke_xy / invoke_scroll：org.kde 前缀优先，
-      非超时失败回退 org.freedesktop；双前缀俱败
-      合并上报两侧错误；任一侧超时 → 立即报错
-    end note
+  else (否：VOID 受理即返回)
+    |breadpan|
+    :受理即返回（调用在后台执行）
+    ── invoke_xy / invoke_scroll：org.kde 前缀优先，
+    非超时失败回退 org.freedesktop；双前缀俱败
+    合并上报两侧错误；任一侧超时 → 立即报错;
     |消费方|
     :Outcome::Dispatched;
+    |Item|
+    :SecondaryActivate(x,y)（中键）
+    ContextMenu(x,y)（右键无菜单——SNI 原生 fallback：
+    Item 自绘弹出，宿主不参与渲染，非常规路径）
+    Scroll(∓steps, orient)（四向滚轮）;
     |breadpan|
     :调用结果回内部线程
     入队 InteractionResult{op, 成功/失败};

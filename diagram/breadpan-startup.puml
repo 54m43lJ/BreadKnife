@@ -13,9 +13,9 @@ note right of 会话总线
 end note
 会话总线 --> bp: 名字在位
 bp -> item: 反向发现：ListNames 扫描 + 探测
-bp -> bp: == 登记最小集入册（唯一名 + 对象路径）==
+bp -> bp: 登记最小集入册（唯一名 + 对象路径）
 bp -> 会话总线: 订阅变更 / 死亡清理信号
-bp -> bp: == 逐个现场读取 → 入队 Snapshot（全部 Item）==
+bp -> bp: 逐个现场读取 → 入队 Snapshot（全部 Item）
 消费方 <-- bp: (Handle, 事件通道)
 note over 消费方
   recv().await：Snapshot → 增量事件流

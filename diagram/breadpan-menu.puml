@@ -22,7 +22,7 @@ note right of item
 end note
 breadpan -> item: GetGroupProperties
 item --> breadpan: 布局 + 属性
-breadpan -> breadpan: == 组装该层快照（助记符解析 + raw 逃生门）==
+breadpan -> breadpan: 组装该层快照（助记符解析 + raw 逃生门）
 breadpan --> 消费方: Outcome::Menu
 note over 消费方
   子层展开 → menu_expand(id, entry_id)，

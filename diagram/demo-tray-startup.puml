@@ -10,6 +10,6 @@ note right of breadpan
   存量 Item 反向发现）
 end note
 breadpan --> dt: (Handle, 通道)
-dt -> dt: == 首事件 Snapshot → 卡片流 + 日志 ==
+dt -> dt: 首事件 Snapshot → 卡片流 + 日志
 dt -> breadpan: 注册演示 Item（测试台）
 @enduml

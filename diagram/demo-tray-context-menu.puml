@@ -12,7 +12,7 @@ item --> breadpan: 需要更新?
 breadpan -> item: GetLayout
 ui <-- breadpan: 全量快照
 item --> breadpan: 布局 + 属性
-ui -> ui: == 渲染弹出 ==
+ui -> ui: 渲染弹出
 用户 -> ui: 点条目
 ui -> breadpan: menu_activate
 breadpan -> item: Event
