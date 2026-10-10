@@ -241,13 +241,21 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
      │    └── "/path"（Ayatana 风格纯对象路径）→ (sender, path)：服务名取注册方唯一名
      │         └── 无 sender（或 service 为空）→ None → TrayError::Protocol 拒绝受理
      │              （以 Narration 事件交付，不影响服务运行）
-     ├── GetNameOwner(service) → 属主唯一名（失败回退 service 本身；唯一名注册对自身解析成功）
+     ├── GetNameOwner(service) → 属主唯一名（失败回退 service 本身）
      ├── props::probe_routing(service, path) → (menu, menu_only)（路由标记注册时探测）
      └── ItemTracker::upsert(ItemEntry) → bool（幂等：已存在原地刷新属主与路由标记 → false）
           └── 新登记 &amp;&amp; announce → 广播 StatusNotifierItemRegistered + 入队 Added(id)
                （数据由消费方现场读取；announce=false 仅反向发现路径——静默入册，
-                由快照承载，§3.1；变更通告不逐 Item 订阅，经全局信号任务按簿记
-                归属过滤后并入 §3.2 合并窗口）</code></pre>
+                由快照承载，§3.1）</code></pre>
+
+<p>注册参数 service 与信号发送者分属两个命名体系：service 既可以是 well-known 名（规范服务名），
+也可以是唯一名——无 well-known 名的 Item 以 <code>:1.22</code> 形态直接报到（clash-verge 实测）。
+两种形态同等入册，service 即 TrayItemId，簿记不区分。而 SNI 与 dbusmenu 信号的发送者一律是
+唯一名，与注册名可能不一致：注册时经 <code>GetNameOwner</code>（<code>org.freedesktop.DBus</code>
+接口的标准方法，由总线守护进程实现，本库为调用方）把注册名解析为属主唯一名，存入簿记
+unique 字段；对唯一名查询返回其自身，故全部注册形态走同一代码路径。解析失败（名字无属主）
+回退以 service 本身充当，不阻塞报到。该字段有两个消费点：信号归属匹配（§3.2，按发送者
+唯一名 + 对象路径定位 id）与死亡清理（§3.3.2，按服务名或属主唯一名双条件命中）。</p>
 
 <h4 id="sec-3-3-2">3.3.2. 死亡清理（NameOwnerChanged）</h4>
 <pre><code>内部: 收到 NameOwnerChanged(唯一名, 旧属主 → "")
