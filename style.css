@@ -126,7 +126,17 @@ footer {
 }
 
 /* ── 嵌入图（PlantUML 导出 SVG）── 按原始尺寸渲染，不随容器缩放；
-   仅过宽的图在图区域内横向滚动（滚动不外链），页面本身不横向平移 */
+   图容器限高（同 pre 的内容窗形态）：滚动条内嵌于元素边缘，
+   高图在窗口内双向滚动，页面本身不横向平移 */
 html, body { overflow-x: clip; }
-figure.diagram { margin: 1rem 0; overflow-x: auto; overscroll-behavior-x: contain; }
+figure.diagram {
+  margin: 1rem 0;
+  overflow: auto;
+  max-height: 85vh;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .5rem;
+  background: #fff;
+}
 figure.diagram img { max-width: none; display: block; }
