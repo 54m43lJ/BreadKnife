@@ -191,6 +191,9 @@ pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
     Changed(TrayItemId),
     /// dbusmenu 布局/属性变更信号到达；不代为重拉，是否重取由消费方决定
     MenuChanged(TrayItemId),
+    /// 双注册并入：临时唯一名 id 升级为 Bus Name id——同一对象 id 重键，
+    /// 对象生死不变（旧 id 不发 Removed）；是否重载数据由消费方裁断
+    NameChanged { old: TrayItemId, new: TrayItemId },
     /// 交互调用的异步回执
     InteractionResult { id: TrayItemId, op: InteractionOp, result: Result&lt;(), String&gt; },
     /// 登记中心所有权丢失（被其它 Watcher 取代，§2.8）：极罕见边缘路径（持有期不可被替换，
@@ -214,6 +217,7 @@ pub enum InteractionOp { Activate, SecondaryActivate, ContextMenu, Scroll, MenuA
   <tr><td>Added / Removed</td><td>运行期 Item 出现 / 服务名消失（映射 Watcher 信号 <code>StatusNotifierItemRegistered</code> / <code>StatusNotifierItemUnregistered</code>，SNI §4.3）；事件只报事实，数据现场读取</td><td>Added → <code>item(id)</code> 取数建卡；Removed → 删卡</td></tr>
   <tr><td>Changed</td><td>变更通告（窗口合并，不携带数据——零详情缓存）</td><td>重读 <code>item()/items()</code> 后更新卡片</td></tr>
   <tr><td>MenuChanged</td><td>dbusmenu 布局/属性变更信号到达（<code>LayoutUpdated</code> / <code>ItemsPropertiesUpdated</code>，<a href="reference/com.canonical.dbusmenu.xml">接口定义原文</a>；AboutToShow 是宿主→Item 的方法，见 <a href="#sec-2-6">§2.6</a>）</td><td>决定何时重新 <code>menu()</code></td></tr>
+  <tr><td>NameChanged</td><td>同一对象的登记 id 变更：临时唯一名 id 在 Bus Name 报到到达时升级（双注册按字段匹配并入，<a href="#sec-3-3">§3.3</a> TrayItemId）；对象生死不变——旧 id 不发 Removed</td><td>以 new 重建 id 映射；是否重读数据由消费方裁断（对象未变）</td></tr>
   <tr><td>Displaced</td><td>极罕见边缘路径：持有期不可被替换，所有权丢失仅由总线层异常触发（如总线守护重启），发生即被其它 Watcher 取代；不重试、不夺回（时序 <a href="#sec-2-8">§2.8</a>）</td><td>提示用户已被取代；整体退出或隐藏托盘功能，重建由消费方决定</td></tr>
   <tr><td>InteractionResult</td><td>交互调用的异步回执</td><td>提示或日志</td></tr>
   <tr><td>Narration</td><td>内部过程性说明（反向发现、重扫描等）</td><td>日志/调试</td></tr>
@@ -319,7 +323,7 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
 <h4>TrayItemId / TrayItem 字段定义</h4>
 <table>
   <tr><th>字段</th><th>含义</th><th>规范依据</th></tr>
-  <tr><td>id</td><td>唯一键：Item 注册到 Watcher 的服务名（TrayItemId 即 String，值 = 服务名）。事实命名 <code>org.kde.StatusNotifierItem-PID-ID</code>（PID=进程号，ID=同进程实例序号）；对象路径不参与标识：服务名消失 → Removed，同名重现（应用重启）→ 视为新 Item（Added）；pid 仅能从服务名 PID 段解析。同一对象以不同注册形态（规范名 / 唯一名纯路径）重复报到时按 (唯一名, 对象路径) 并入既有 id（自愈，不产生第二 id）；变更/菜单通告按 (唯一名, 对象路径) 唯一命中，落点确定</td><td>SNI §3；总线名构成见 <a href="https://dbus.freedesktop.org/doc/dbus-specification.html">D-Bus 规范 · Bus Names</a></td></tr>
+  <tr><td>id</td><td>唯一键：Item 注册到 Watcher 的服务名（TrayItemId 即 String，值 = 服务名）。事实命名 <code>org.kde.StatusNotifierItem-PID-ID</code>（PID=进程号，ID=同进程实例序号）；对象路径不参与标识：服务名消失 → Removed，同名重现（应用重启）→ 视为新 Item（Added）；pid 仅能从服务名 PID 段解析。不同注册形态（规范名 / 唯一名 / 纯路径）重复报到按字段匹配（注册名 ↔ 服务名、发送者唯一名 ↔ 属主唯一名）两轮 lookup 并入同一条目（不产生第二 id）；临时唯一名 id 在 Bus Name 报到时升级 → <code>NameChanged{old, new}</code>（旧 id 不发 Removed）；变更/菜单通告按 (唯一名, 对象路径) 唯一命中，落点确定</td><td>SNI §3；总线名构成见 <a href="https://dbus.freedesktop.org/doc/dbus-specification.html">D-Bus 规范 · Bus Names</a></td></tr>
   <tr><td>category</td><td>ApplicationStatus / Communications / SystemServices / Hardware</td><td>SNI §3.1 Category</td></tr>
   <tr><td>status</td><td>Passive 可隐藏 / Active 应展示 / NeedsAttention 应强调</td><td>SNI §3.1 Status</td></tr>
   <tr><td>alive</td><td>最近一次存活探测结论：true = 探测成功，false = 超时/失败；由库内周期探测维护（非 SNI 字段），随任意现场读取交付</td><td>—（本库存活机制）</td></tr>
@@ -380,7 +384,7 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
 </p>
 <table>
   <tr><th>DBus 成员</th><th>类型</th><th>语义</th></tr>
-  <tr><td><code>RegisterStatusNotifierItem</code></td><td>方法</td><td>Item 报到：登记总线唯一名 + 对象路径；报到即拉取跟踪（<a href="#sec-2-5">§2.5</a>）；同名重复报到幂等；不同注册形态按 (唯一名, 对象路径) 查重并入——同一对象恒为单一 id，双重注册自愈（<a href="#sec-3-3">§3.3</a> id）</td></tr>
+  <tr><td><code>RegisterStatusNotifierItem</code></td><td>方法</td><td>Item 报到：登记总线唯一名 + 对象路径；报到即拉取跟踪（<a href="#sec-2-5">§2.5</a>）；同连接重复报到幂等；不同注册形态按字段匹配（Bus Name ↔ service、唯一名 ↔ unique）两轮 lookup 并入同一条目——同一对象恒为单一 id；临时唯一名 id 在 Bus Name 报到时经 <code>NameChanged</code> 升级（<a href="#sec-3-3">§3.3</a> id）</td></tr>
   <tr><td><code>RegisteredStatusNotifierItems</code></td><td>方法</td><td>查询：当前在册 Item 清单</td></tr>
   <tr><td><code>RegisterStatusNotifierHost</code></td><td>方法</td><td>兼容桩：受理即忘——自包含设计不对进程外 Host 负责（<a href="#sec-1">§1 术语 Host</a>）</td></tr>
   <tr><td><code>IsStatusNotifierHostRegistered</code></td><td>方法</td><td>兼容桩：恒真——逻辑 Host 进程内在位；个别 Item 探测此接口后才报到</td></tr>

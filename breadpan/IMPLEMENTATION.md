@@ -16,7 +16,7 @@
 | 2 | 存量 Item 可能**不实现 Introspect**（返回空 XML） | QQ 音乐（Electron/CEF 内核） | 反向发现探测双级：Introspect 接口名确认 → 失败则 `Properties.GetAll` 直接属性读取确认 |
 | 3 | Item 可能以**唯一名**注册（无 well-known 名） | clash-verge（`:1.22`） | 唯一名即 TrayItemId；`GetNameOwner` 解析属主（唯一名对自身解析成功） |
 | 4 | `IconName` 可能是**文件路径**而非主题图标名 | clash-verge（`/run/user/1000/tray-icon/*.png`） | `IconName` 以 `/` 开头识别为 `IconSource::Path`（字面识别，不做语义猜测）；渲染直出加载文件位图，失败回退 `image-missing` |
-| 5 | 同一对象可能**双重注册**（规范名 + 唯一名/路径形态各一次） | 确定性复现仅 mock。真实侧一例**疑似**：QQ 音乐（CEF）存量项以规范名在册的同时，出现另一条唯一名注册（未验证归属，应用退出后无法复查）。clash-verge 抓包实测**单次**注册（路径形态，且直发 Watcher 唯一名而非总线名） | 设计为自愈：注册按 (唯一名, 对象路径) 查重，命中即并入现存条目（id 保持不变、不重复 Added）——同一对象恒为单一 id；仅未见过的 (唯一名, 路径) 组合才注册新条目（CODE §3.3.1） |
+| 5 | 同一对象可能**双重注册**（规范名 + 唯一名/路径形态各一次） | 确定性复现仅 mock。真实侧一例**疑似**：QQ 音乐（CEF）存量项以规范名在册的同时，出现另一条唯一名注册（未验证归属，应用退出后无法复查）。clash-verge 抓包实测**单次**注册（路径形态，且直发 Watcher 唯一名而非总线名） | 设计为自愈：注册按字段匹配两轮 lookup（注册名 ↔ service、发送者唯一名 ↔ unique），命中原地更新——临时唯一名 id 在 Bus Name 报到时升级并发 NameChanged{old, new}（是否重载由消费方裁断）；两轮均未命中才新建条目（CODE §3.3.1） |
 | 6 | `RegisterStatusNotifierHost` 兼容桩被真实 Host 调用 | vicinae-server（面板）在 Watcher 名出现时即调桩注册（本次抓包仅见调用，未捕获其是否读 `IsStatusNotifierHostRegistered`） | 桩语义按 §3.4：受理即忘、不簿记、不产生事件 |
 | 7 | Item 可能**声明 Activate 却不实现**（libappindicator 系：XML 静态声明、分发 catch-all） | clash-verge（`No handler for Activate`，Context 连声明都没有） | 左键 Activate 非超时失败且 DBusMenu 在册 → 回退 Menu 流程（左键出菜单是宿主侧策略，菜单由宿主经 dbusmenu 渲染）；超时不回退（menu 与 Activate 同一主循环分发，同样不可读） |
 
@@ -117,8 +117,10 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   Watcher 时生命周期用例**跳过**（不误报）；单元测试均为纯函数，任意环境可跑。
 - **真实总线容忍**：真实会话上快照可能含其他真实 Item——断言一律按 id 过滤，
   不假设快照为空；fire-and-forget 回执以轮询等待（`wait_until`/`recv_matching`）。
-- **双注册并入**：同一对象重复注册按 (唯一名, 路径) 并入既有 id（自愈，
-  CODE §3.3.1）——断言同一对象恒为单一 id，Changed/MenuChanged 落点确定。
+- **双注册并入**：同一对象重复注册按字段匹配两轮 lookup（注册名 ↔ service、
+  发送者唯一名 ↔ unique）命中原地更新（CODE §3.3.1）——断言同一对象恒为
+  单一 id；临时唯一名 → Bus Name 升级断言 NameChanged{old, new}，
+  Changed/MenuChanged 落点确定。
 
 ## 6. 已知限制与后续方向
 - **总线守护重启的 Displaced**：依赖 NOC/心跳检测，未在实测中复现（需杀
