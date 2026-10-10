@@ -15,8 +15,9 @@
 | 1 | `RegisterStatusNotifierItem` 参数存在**三种形态**：规范服务名；`"name/path"` 混串；Ayatana 风格**纯对象路径** | clash-verge 传 `/org/ayatana/NotificationItem/...` | 前两种就地解析；纯路径形态取**调用方唯一名**作服务名（经消息头 sender 提取，KDE Watcher 的既定语义）；无 sender 或空串 → 拒绝受理（Protocol） |
 | 2 | 存量 Item 可能**不实现 Introspect**（返回空 XML） | QQ 音乐（Electron/CEF 内核） | 反向发现探测双级：Introspect 接口名确认 → 失败则 `Properties.GetAll` 直接属性读取确认 |
 | 3 | Item 可能以**唯一名**注册（无 well-known 名） | clash-verge（`:1.22`） | 唯一名即 TrayItemId；`GetNameOwner` 解析属主（唯一名对自身解析成功） |
-| 4 | `IconName` 可能是**文件路径**而非主题图标名 | clash-verge（`/run/user/1000/tray-icon/*.png`） | `IconSource::Name` 忠实透传；渲染直出层主题查不到该"名"→ 回退 `image-missing`（不加载文件，见 §6） |
+| 4 | `IconName` 可能是**文件路径**而非主题图标名 | clash-verge（`/run/user/1000/tray-icon/*.png`） | `IconName` 以 `/` 开头识别为 `IconSource::Path`（字面识别，不做语义猜测）；渲染直出加载文件位图，失败回退 `image-missing` |
 | 5 | 同一对象可能**双重注册**（规范名 + 路径形态各一次） | mock 复现（真实应用为降级重试） | 按 Watcher 事实行为入两册、两个 id 各自独立；信号落点（Changed/MenuChanged/路由更新）匹配首个命中条目，属主消失时一并移除 |
+| 6 | Item 可能**声明 Activate 却不实现**（libappindicator 系：XML 静态声明、分发 catch-all） | clash-verge（`No handler for Activate`，Context 连声明都没有） | 左键 Activate 非超时失败且 DBusMenu 在册 → 回退 Menu 流程（左键出菜单是宿主侧策略，菜单由宿主经 dbusmenu 渲染）；超时不回退（menu 与 Activate 同一主循环分发，同样不可读） |
 
 ## 2. 文档契约缺口的补全决策
 
@@ -63,7 +64,9 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   dbusmenu。按 (sender 唯一名, path) 对照簿记过滤。免去逐 Item 加/删规则的
   簿记与竞态；代价是总线上未跟踪对象的信号被空过滤（可忽略）。
 - **逐调用前缀回退**：属性读取（GetAll）与交互调用（Activate/Scroll 等）先
-  `org.kde` 失败再 `org.freedesktop`——兼容只导出规范原文拼写的少数实现。
+  `org.kde` 失败再 `org.freedesktop`——兼容只导出规范原文拼写的少数实现；
+  超时即止不重试（对端失联时另一前缀注定同耗）；双前缀俱败合并上报两侧
+  错误，避免只报末次掩盖首侧真因。
 - **菜单属性合并**：GetLayout 的布局内嵌属性为底，GetGroupProperties 的组属性
   覆盖之（专属性查询为权威来源）。
 - **VOID 交互仍等待回执**：VOID 指无返回值，不指无应答——受理即返回
@@ -118,9 +121,6 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
 
 ## 6. 已知限制与后续方向
 
-- **文件路径图标**：`IconName` 为文件路径时（Ayatana 生态）渲染直出回退
-  `image-missing`；如需支持可在此路径加载文件位图（属渲染层增强，协议层已
-  忠实透传）。
 - **双注册双 id**：与真实 Watcher 行为一致，但消费方会看到两张卡片指向同一
   对象；如需合并可在登记层按 (属主唯一名, 对象路径) 去重（语义取舍待定）。
 - **总线守护重启的 Displaced**：依赖 NOC/心跳检测，未在实测中复现（需杀

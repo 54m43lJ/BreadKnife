@@ -34,7 +34,7 @@
 │   └── interact.rs      # 语义输入路由（ARCHITECTURE §2.7）+ InteractionResult 回执
 └── gtk/
     ├── mod.rs           # 整合层出口（渲染直出；主线程约束说明）
-    └── paintable.rs     # 渲染直出：主题命中 → 主题图标；未命中 → 位图纹理
+    └── paintable.rs     # 渲染直出：主题命中 → 主题图标；路径 → 文件纹理；未命中 → 位图纹理
 
 examples/                # 唯一示例目录：可运行的用法实例（README「实例代码」表）
 ├── minimal.rs           # 最小消费方：start → 消费事件流 → 打印快照与事件
@@ -176,14 +176,22 @@ impl MenuReader {
 }
 
 // ── dbus/interact.rs：语义输入路由（ARCHITECTURE §2.7）+ 回执 ──
-/// 按路由表分发（依据 tracker 的 menu_only / menu）；Menu 流程现场取数返回快照，VOID 调用受理即返回
-pub(crate) fn route(bus: &amp;BusCenter, tracker: &amp;ItemTracker, id: &amp;TrayItemId,
-                    input: Input) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
-pub(crate) fn invoke(bus: &amp;BusCenter, entry: &amp;ItemEntry, op: InteractionOp,
-                     args: &amp;[i32]) -&gt; Result&lt;(), TrayError&gt;;   // 受理即返回；结果经 EventQueue 入队 InteractionResult
+/// 按路由表分发（依据登记簿记 menu_only / menu）；左键独走同步路径——Activate
+/// 失败（非超时）且有菜单时回退 Menu 流程（§3.5.1）；Menu 流程现场取数返回快照，
+/// 其余 VOID 调用受理即返回（§3.5.2）
+pub(crate) async fn route(bus: &amp;BusCenter, id: &amp;str,
+                          input: Input) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
+/// SNI 定位方法调用（Activate/SecondaryActivate/ContextMenu）：org.kde 前缀优先，
+/// 非超时失败回退 org.freedesktop；任一侧超时立即报错；双前缀俱败合并上报两侧错误
+async fn invoke_xy(bus: &amp;BusCenter, entry: &amp;ItemEntry, method: &amp;str, x: i32, y: i32) -&gt; Result&lt;(), TrayError&gt;;
+/// Scroll(delta, orientation)：同前缀回退
+async fn invoke_scroll(bus: &amp;BusCenter, entry: &amp;ItemEntry, delta: i32, orient: &amp;str) -&gt; Result&lt;(), TrayError&gt;;
 
 // ── gtk/paintable.rs：渲染直出（GTK 主线程）──
+/// 统一出口 icon_paintable（公开面，定义见 ARCHITECTURE §3）：Name → 主题查找；
+/// Path → Texture::from_filename（失败回退 image-missing）；Pixmap → 内存纹理
 pub(crate) fn lookup_theme_icon(name: &amp;str) -&gt; Option&lt;gdk::Paintable&gt;;   // Icon Theme Spec 命中判定
+pub(crate) fn missing_icon() -&gt; gdk::Paintable;                          // image-missing 占位（规范保留名，保证存在）
 pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 → 纹理的色彩处理在此完成
 </code></pre>
 
@@ -283,16 +291,36 @@ unique 字段；对唯一名查询返回其自身，故全部注册形态走同�
 └── 入队 MenuChanged(item)（不代为重拉）</code></pre>
 
 <h3 id="sec-3-5">3.5. 输入路由与回执</h3>
-<pre><code>流程 left_click(id) / middle_click(id) / right_click(id) / scroll_up(id) 等
-   （每个语义输入一个公开方法；缺省 x/y=(0,0)、steps=1，_at/_by 变体传显式值）
+
+<h4 id="sec-3-5-1">3.5.1. 左键（同步路径与 Menu 回退）</h4>
+<pre><code>流程 left_click(id) / left_click_at(id, x, y)
+   （独走同步路径：回退决策需就地知晓 Activate 成败；缺省 x/y=(0,0)）
 ├── 校验 Item 在册（否则 ItemNotFound）
-├── 路由（§2.7 表，依据登记簿记 menu_only / menu，零查询）
-│    ├── left_click → menu_only 且 DBusMenu 在册 → Menu 流程（§3.4.1）；否则 Activate(x,y)
+├── menu_only 且 DBusMenu 在册 → Menu 流程（§3.4.1）→ 同步返回 Outcome::Menu
+└── Activate(x,y)（就地等待往返）
+     ├── 成功 → 入队 InteractionResult{Activate, 成功} → 返回 Outcome::Dispatched
+     ├── 超时 → 直接报错（对端主循环失联；menu 与 Activate 同一主循环分发，
+     │         菜单亦不可读——不跨前缀重试、不回退）
+     ├── 失败且 DBusMenu 在册 → Menu 流程（§3.4.1）→ 返回 Outcome::Menu（无回执事件）
+     │    └── 回退动机：libappindicator 系 Item 的 Activate 无处理器——XML 静态声明
+     │         但分发 catch-all；不可预先探测（Introspect 说谎、探测调用会误触
+     │         激活）。左键出菜单是宿主侧既定策略：菜单由宿主经 dbusmenu 渲染，
+     │         不依赖 item 端激活。失败形态为同步快失败，与超时无关
+     └── 失败且无菜单 → 如实报错</code></pre>
+
+<h4 id="sec-3-5-2">3.5.2. 其余语义输入（受理即返回）</h4>
+<pre><code>流程 middle_click(id) / right_click(id) / scroll_up(id) 等
+   （缺省 x/y=(0,0)、steps=1，_at/_by 变体传显式值）
+├── 校验 Item 在册（否则 ItemNotFound）
+├── 路由（依据登记簿记 menu / menu_only，零查询）
+│    ├── right_click → DBusMenu 在册 → Menu 流程（§3.4.1）→ Outcome::Menu
+│    │                 └── 否则 ContextMenu(x,y)（SNI 原生 fallback）
 │    ├── middle_click → SecondaryActivate(x,y)
-│    ├── right_click → DBusMenu 在册 → Menu 流程（§3.4.1）；否则 ContextMenu(x,y)
 │    └── scroll_up/down/left/right → Scroll(∓steps, vertical / horizontal)
-├── Menu 流程 → 同步返回 InteractionOutcome::Menu(快照)
-├── VOID 调用（受理即返回）→ 同步返回 InteractionOutcome::Dispatched
+├── 调用（invoke_xy / invoke_scroll：org.kde 前缀优先，非超时失败回退
+│    org.freedesktop——兼容只导出规范原文拼写的少数实现；任一侧超时 →
+│    立即报错；双前缀俱败 → 合并上报两侧错误，避免掩盖首侧真因）
+├── Menu 流程 → 同步返回 Outcome::Menu；VOID 调用（受理即返回）→ 返回 Outcome::Dispatched
 └── 调用结果回内部线程
      └── 入队 InteractionResult{op, 成功/失败}</code></pre>
 

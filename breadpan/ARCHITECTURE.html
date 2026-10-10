@@ -141,11 +141,20 @@
     |                      |== 路由：查登记簿记 menu_only / menu（零查询）==
     |                      |                            |
     |   [Menu 命中]        |→ Menu 流程（时序 §2.6）      |
+    |   （right_click / left_click(menu_only)）          |
     |<-- Outcome::Menu ----|   AboutToShow → GetLayout   |
     |== 渲染弹出；条目点击 → menu_activate；子层展开 → menu_expand ==|
     |                      |                            |
-    |   [VOID 路由]        |                            |
-    |                      |-- Activate / SecondaryActivate(x,y)
+    |   [left_click]       |                            |
+    |                      |-- Activate(x,y) 就地等待往返-->|
+    |                      |<-- 应答 --------------------|
+    |   [Activate 成功]    |== InteractionResult{成功} 入队 ==|
+    |<-- Outcome::Dispatched                            |
+    |   [失败·非超时·有菜单]|→ Menu 流程（§2.6）→ Outcome::Menu
+    |   [失败无菜单 / 超时] |→ Err（超时不回退：menu 同主循环同样不可读）
+    |                      |                            |
+    |   [其余 VOID 路由]   |                            |
+    |                      |-- SecondaryActivate(x,y)
     |                      |   / ContextMenu(x,y) / Scroll(∓steps,orient)
     |                      |-------------------------->|
     |<-- Outcome::Dispatched                            |
@@ -155,14 +164,17 @@
 <p>方法 → 路由对照（辅助表；路由依据登记簿记 menu_only / menu，零查询）：</p>
 <table>
   <tr><th>方法</th><th>路由</th></tr>
-  <tr><td><code>left_click(id)</code> / <code>left_click_at(id, x, y)</code></td><td><code>menu_only</code> 且 DBusMenu 在册 → Menu 流程（<a href="#sec-2-6">§2.6</a>）；否则 Activate(x,y)</td></tr>
+  <tr><td><code>left_click(id)</code> / <code>left_click_at(id, x, y)</code></td><td><code>menu_only</code> 且 DBusMenu 在册 → Menu 流程（<a href="#sec-2-6">§2.6</a>）；否则 Activate(x,y)——Activate 失败（非超时）且 DBusMenu 在册 → 回退 Menu 流程（libappindicator 系 Item 的 Activate 无处理器，左键出菜单是宿主侧既定策略）；超时 → 直接报错</td></tr>
   <tr><td><code>middle_click(id)</code> / <code>middle_click_at(id, x, y)</code></td><td>SecondaryActivate(x,y)</td></tr>
   <tr><td><code>right_click(id)</code> / <code>right_click_at(id, x, y)</code></td><td>DBusMenu 在册 → Menu 流程（<a href="#sec-2-6">§2.6</a>）；否则 ContextMenu(x,y)——<strong>fallback</strong>：SNI 原生方式，Item 自绘弹出，宿主不参与渲染，非常规路径</td></tr>
   <tr><td><code>scroll_up(id)</code> / <code>scroll_up_by(id, steps)</code>（四向各一对）</td><td>Scroll(∓steps, vertical / horizontal)；steps 缺省 1</td></tr>
 </table>
 <p>
-  返回：Menu 流程 → <code>Outcome::Menu(快照)</code>（消费方渲染弹出）；其余 →
-  <code>Outcome::Dispatched</code>（回执经 InteractionResult 事件交付）。SNI §3.2 的四种交互方法（ContextMenu /
+  返回：Menu 流程 → <code>Outcome::Menu(快照)</code>（消费方渲染弹出）；成功路由的 VOID 调用 →
+  <code>Outcome::Dispatched</code>（回执经 InteractionResult 事件交付）。left_click 为就地知晓 Activate
+  成败（回退决策的前提）独走同步路径：成功 → <code>Dispatched</code> + 回执事件；失败且 DBusMenu 在册 →
+  回退 Menu 流程（<code>Menu</code>，无回执事件——交付形态与 menu_only 左键一致）；失败无菜单或超时 →
+  <code>Err</code>。SNI §3.2 的四种交互方法（ContextMenu /
   Activate / SecondaryActivate / Scroll）由此全部可达。DBusMenu / ContextMenu 的选择完全内置于
   <code>right_click()</code> / <code>left_click()</code> 的路由——消费方无对应方法、无路由职责。
 </p>
@@ -215,7 +227,8 @@ impl TrayHandle {
 
     // ── 交互：每个语义输入一个方法；缺省 x/y=(0,0)、steps=1，_at/_by 变体传显式值
     // （x/y 为 Item 侧落点提示，Wayland 下由消费方尽力推算，规范定位为 hint）──
-    /// 左键："整项即菜单"（is_menu_only）的 Item 自动转入 Menu 流程，否则 Activate
+    /// 左键："整项即菜单"（is_menu_only）的 Item 自动转入 Menu 流程，否则 Activate——
+    /// Activate 失败（非超时）且 DBusMenu 在册时自动回退 Menu 流程；超时或无菜单则报错
     pub fn left_click(&amp;self, id: &amp;TrayItemId) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
     pub fn left_click_at(&amp;self, id: &amp;TrayItemId, x: i32, y: i32) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
     /// 中键：SecondaryActivate
@@ -245,7 +258,8 @@ impl TrayHandle {
 pub enum InteractionOutcome { Dispatched, Menu(MenuSnapshot) }   // Dispatched：已路由为 Item 的 VOID 调用
 
 // ── GTK 整合层（渲染直出；事件消费模式见 §2.2，桥接代码归消费方）──
-/// 主题命中 → 主题图标；未命中 → 位图纹理。须在 GTK 主线程调用
+/// 三类来源统一出口：主题名 → 主题图标；文件路径 → 文件纹理（加载失败回退 image-missing）；
+/// 位图 → 内存纹理。须在 GTK 主线程调用
 pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
 </code></pre>
 <p class="diagram-note">补全（机制不覆盖的细则）：公开面无 async fn——异步收敛在事件通道消费端（tokio mpsc 的 <code>recv().await</code>，由消费方经 <code>glib::spawn_future_local</code> 驱动），入口与交互方法均为同步签名；tokio 运行时为库内私有，不要求消费方装配；不拥有 UI 等能力级边界以 <a href="README.html">README.html</a> 为权威；Watcher 总线名全总线唯一——启动期已被持有 → <code>NameTaken</code>（多 Watcher 不能共存），持有期不可被替换，所有权异常丢失 → <code>Displaced</code>（<a href="#sec-2-8">§2.8</a>，极罕见边缘路径，仅总线层异常可触发），本库不做外部 Watcher 客户端模式。</p>
@@ -358,7 +372,7 @@ pub enum TrayStatus { Passive, Active, NeedsAttention }
 
 pub struct ToolTip { pub icon: Option&lt;IconSource&gt;, pub title: String, pub description: String }
 
-pub enum IconSource { Name(String), Pixmap(Pixmap) }
+pub enum IconSource { Name(String), Path(String), Pixmap(Pixmap) }
 
 pub struct Pixmap { pub width: u32, pub height: u32, pub argb: Vec&lt;u8&gt; }
 
@@ -408,7 +422,8 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
   <tr><th>字段</th><th>含义</th><th>规范依据</th></tr>
   <tr><td>ToolTip.icon / title / description</td><td>官方四元组 (STRING, a(iiay), STRING, STRING) 的映射：图标来源 + 标题 + 描述</td><td>SNI §3.1 ToolTip</td></tr>
   <tr><td>IconSource::Name</td><td>Freedesktop 图标名；渲染直出时按主题规范查主题</td><td><a href="https://specifications.freedesktop.org/icon-naming-spec/latest/">Icon Naming Spec</a> · <a href="https://specifications.freedesktop.org/icon-theme-spec/latest/">Icon Theme Spec</a></td></tr>
-  <tr><td>IconSource::Pixmap</td><td>主题名缺失时交付的位图；转纹理的色彩处理在渲染直出路径内完成</td><td>SNI §3.1.6：官方建议名优先于位图（二选一规则固定：Name 非空 → Name，否则 → Pixmap）</td></tr>
+  <tr><td>IconSource::Path</td><td>文件路径图标：渲染直出时加载文件位图，文件不存在或解码失败回退 image-missing（与主题未命中同回退）</td><td>SNI 规范外：IconName 为绝对路径（"/" 开头）时按字面识别，不做语义猜测；Ayatana 生态事实扩展（clash-verge 实测交付形态）</td></tr>
+  <tr><td>IconSource::Pixmap</td><td>主题名缺失时交付的位图；转纹理的色彩处理在渲染直出路径内完成</td><td>SNI §3.1.6：官方建议名优先于位图（二选一规则固定：Name 非空 → Name/Path（"/" 开头为 Path），否则 → Pixmap）</td></tr>
   <tr><td>Pixmap.width / height / argb</td><td>位图尺寸与像素数据：ARGB32、网络字节序、行跨度 = width × 4</td><td>SNI §6（签名 a(iiay)）</td></tr>
 </table>
 
@@ -436,7 +451,7 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
   <tr><th>输入</th><th>转换</th><th>输出</th></tr>
   <tr><td>报到受理 / 反向发现 / 变更信号 → 各 Item 的 DBus 属性集</td><td>拉取 + 窗口合并</td><td>TrayItem；TrayEvent::Snapshot / Added / Changed</td></tr>
   <tr><td>dbusmenu AboutToShow + GetLayout(单层) + GetGroupProperties</td><td>前置通知 + 单层组装 + 助记符解析</td><td>MenuSnapshot（<code>menu()</code> / <code>menu_expand()</code> 返回值，非缓存）</td></tr>
-  <tr><td>IconSource</td><td>主题命中判定（Icon Theme Spec）</td><td>gdk::Paintable（主题图标 / 位图纹理）</td></tr>
+  <tr><td>IconSource</td><td>主题命中判定（Icon Theme Spec）；文件位图加载与解码</td><td>gdk::Paintable（主题图标 / 文件纹理 / 位图纹理；失败统一回退 image-missing）</td></tr>
   <tr><td>DBus 交互调用回执</td><td>归一化</td><td>TrayEvent::InteractionResult</td></tr>
 </table>
 <p class="diagram-note">TrayItem / MenuSnapshot 均为<strong>现场读取的即时投影</strong>：本库不保存其内容——登记簿记仅存唯一名 + 对象路径 + 存活字段（alive）+ DBusMenu 支持/路径 + 整项即菜单标记，其余信息在每次调用时经 zbus 即时读取、以 zvariant/serde 反序列化为原生结构交付。开销换简单：不维护过期数据，也就没有失效逻辑。</p>
