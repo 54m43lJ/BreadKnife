@@ -346,6 +346,31 @@ unique 字段；对唯一名查询返回其自身，故全部注册形态走同�
 ├── 停内部 tokio 运行时
 └── 置 Stopped（幂等：重复调用直接返回；最后一个 Handle 实例 drop 自动触发）</code></pre>
 
+<h3 id="sec-3-8">3.8. 渲染直出（icon_paintable）</h3>
+<pre><code>流程 icon_paintable(&amp;IconSource) -&gt; gdk::Paintable
+   （GTK 主线程调用；三类失败统一回退 image-missing / 空纹理，不 panic）
+├── Name(name)（主题图标名）
+│    └── lookup_theme_icon(name)
+│         ├── gdk::Display::default()? → IconTheme::for_display（逐显示连接取用）
+│         ├── has_icon(name)（Icon Theme Spec 命中判定，含继承主题链）
+│         │    ├── 否 → None → missing_icon()（image-missing 占位，
+│         │    │         Icon Naming Spec 保留名，主题规范保证存在）
+│         │    └── 是 → lookup_icon(name, [], LOOKUP_SIZE=48, scale=1, Ltr)
+│         │              → 主题 Paintable
+├── Path(path)（文件路径图标，Ayatana 生态事实扩展）
+│    └── gdk::Texture::from_filename(path)
+│         ├── Ok(texture) → 文件纹理
+│         └── Err（文件不存在 / 读取失败 / 解码失败）→ missing_icon()
+│              （与主题未命中同回退；文件为外部状态，不落任何缓存）
+└── Pixmap(p)（裸位图，自带数据——DBus 读取时已拷贝入 TrayItem）
+     └── pixmap_to_paintable(p)
+          ├── 完整性检查：w,h &gt; 0 且 argb.len() ≥ (w×4) × h？
+          │    └── 否 → 1×1 全透明 A8r8g8b8 纹理（渲染为空，不 panic）
+          └── MemoryTexture::new(w, h, A8r8g8b8, bytes, stride = w×4)
+               └── 色彩对齐：SNI ARGB32 网络字节序 [A,R,G,B]、未预乘
+                    ↔ gdk 非预乘 A8r8g8b8 内存格式——字节序天然对齐、
+                    无需换序；预乘合成由渲染器负责</code></pre>
+
 </main>
 </body>
 </html>
