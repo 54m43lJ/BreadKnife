@@ -12,7 +12,8 @@ if (left_click？) then (是)
     :Menu 流程（§2.6，含 AboutToShow / GetLayout）;
     |消费方|
     :Outcome::Menu → 渲染弹出
-    条目点击 → menu_activate；子层展开 → menu_expand;
+    （menu_only 直入；条目点击 → menu_activate，
+    子层展开 → menu_expand）;
     stop
   endif
   |Item|
@@ -20,9 +21,10 @@ if (left_click？) then (是)
   |breadpan|
   :应答（就地等待往返）;
   if (成功？) then (是)
-    :InteractionResult{成功} 入队;
+    :InteractionResult{Activate, 成功} 入队;
     |消费方|
-    :Outcome::Dispatched;
+    :Outcome::Dispatched
+    （Item 侧 Activate 已同步完成）;
     stop
   endif
   if (超时？) then (是)
@@ -50,7 +52,7 @@ endif
 if (right_click 且 DBusMenu 在册？) then (是)
   :Menu 流程（§2.6）;
   |消费方|
-  :Outcome::Menu → 渲染弹出;
+  :Outcome::Menu → 渲染弹出（右键命中）;
   stop
 endif
 |breadpan|
@@ -66,7 +68,8 @@ note right
   DBusMenu 未命中（无菜单）时经此
 end note
 |消费方|
-:Outcome::Dispatched;
+:Outcome::Dispatched
+（受理即返回：Item 侧调用在后台执行中）;
 |Item|
 :执行 VOID 调用;
 |breadpan|
