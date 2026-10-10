@@ -66,11 +66,15 @@ pub struct ToolTip {
     pub description: String,
 }
 
-/// 图标来源：Name 非空 → Name，否则 → Pixmap（二选一规则固定，SNI §3.1.6）。
+/// 图标来源：Name 非空 → Name/Path，否则 → Pixmap（二选一规则固定，SNI §3.1.6）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IconSource {
     /// Freedesktop 图标名；渲染直出时按主题规范查主题。
     Name(String),
+    /// 文件路径图标（规范外输入，Ayatana 生态事实扩展，clash-verge 实测）：
+    /// `IconName` 为绝对路径时按字面识别；渲染直出时加载文件位图，
+    /// 文件不存在或解码失败回退 image-missing。
+    Path(String),
     /// 主题名缺失时交付的位图；转纹理的色彩处理在渲染直出路径内完成。
     Pixmap(Pixmap),
 }

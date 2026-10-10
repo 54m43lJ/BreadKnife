@@ -159,6 +159,16 @@ fn icon_source_selection() {
         icon_source(Some("edit-copy"), Some(&big)),
         IconSource::Name("edit-copy".into())
     );
+    // Name 以 "/" 开头 → Path（文件路径形态，Ayatana 生态事实扩展）
+    assert_eq!(
+        icon_source(Some("/run/user/1000/tray-icon/a.png"), Some(&big)),
+        IconSource::Path("/run/user/1000/tray-icon/a.png".into())
+    );
+    // Name 非空但无前导 "/" → 仍为 Name（相对路径不做路径猜测）
+    assert_eq!(
+        icon_source(Some("tray-icon/a.png"), None),
+        IconSource::Name("tray-icon/a.png".into())
+    );
     // Name 空且有位图 → 最大位图
     match icon_source(None, Some(&big)) {
         IconSource::Pixmap(p) => assert_eq!((p.width, p.height), (32, 32)),

@@ -320,6 +320,7 @@ fn list_items(cards: &Cards) {
 fn icon_desc(icon: &breadpan::IconSource) -> String {
     match icon {
         breadpan::IconSource::Name(n) => format!("Name({n})"),
+        breadpan::IconSource::Path(p) => format!("Path({p})"),
         breadpan::IconSource::Pixmap(p) => format!("Pixmap({}x{})", p.width, p.height),
     }
 }

@@ -1,4 +1,4 @@
-//! 渲染直出：主题命中 → 主题图标；未命中 → 位图纹理。
+//! 渲染直出：主题命中 → 主题图标；路径 → 文件纹理；未命中 → 位图纹理。
 //!
 //! 须在 GTK 主线程调用（IconTheme 按显示连接取用）。
 
@@ -14,16 +14,26 @@ const LOOKUP_SIZE: i32 = 48;
 /// 主题未命中时的占位图标（Icon Naming Spec 保留名）。
 const MISSING_ICON: &str = "image-missing";
 
-/// 打包生成可渲染的 GTK 对象：主题命中 → 主题图标；未命中 → 位图纹理。
+/// 打包生成可渲染的 GTK 对象：主题命中 → 主题图标；路径 → 文件纹理；
+/// 未命中 → 位图纹理。三类失败统一回退 image-missing / 空纹理，不 panic。
 pub fn icon_paintable(icon: &IconSource) -> gdk::Paintable {
     match icon {
         IconSource::Name(name) => match lookup_theme_icon(name) {
             Some(paintable) => paintable,
-            None => lookup_theme_icon(MISSING_ICON)
-                .expect("image-missing is guaranteed by the icon theme spec"),
+            None => missing_icon(),
+        },
+        IconSource::Path(path) => match gdk::Texture::from_filename(path) {
+            Ok(texture) => texture.upcast(),
+            // 文件不存在 / 读取失败 / 解码失败：与主题未命中同回退，不 panic
+            Err(_) => missing_icon(),
         },
         IconSource::Pixmap(pixmap) => pixmap_to_paintable(pixmap),
     }
+}
+
+/// 占位图标：image-missing（Icon Naming Spec 保留名，主题规范保证存在）。
+fn missing_icon() -> gdk::Paintable {
+    lookup_theme_icon(MISSING_ICON).expect("image-missing is guaranteed by the icon theme spec")
 }
 
 /// Icon Theme Spec 命中判定（含继承主题链）。

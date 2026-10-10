@@ -133,11 +133,17 @@ fn status_from(s: &str) -> Option<TrayStatus> {
     }
 }
 
-/// 二选一规则固定（SNI §3.1.6）：Name 非空 → Name，否则 → Pixmap（双空 → 空位图）。
+/// 二选一规则固定（SNI §3.1.6）：Name 非空 → Name/Path，否则 → Pixmap（双空 → 空位图）。
+/// Name 以 "/" 开头为文件路径形态（规范外输入，Ayatana 生态事实扩展）→ Path，
+/// 按字面识别、不做语义猜测；其余一律视为主题名。
 pub(crate) fn icon_source(name: Option<&str>, pixmaps: Option<&[PixmapTuple]>) -> IconSource {
     if let Some(name) = name {
         if !name.is_empty() {
-            return IconSource::Name(name.to_string());
+            return if name.starts_with('/') {
+                IconSource::Path(name.to_string())
+            } else {
+                IconSource::Name(name.to_string())
+            };
         }
     }
     IconSource::Pixmap(pick_pixmap(pixmaps))
