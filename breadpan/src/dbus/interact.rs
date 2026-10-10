@@ -124,7 +124,8 @@ where
 }
 
 /// SNI 定位方法（Activate / SecondaryActivate / ContextMenu）：org.kde 前缀优先，
-/// 失败回退 org.freedesktop 前缀。
+/// 失败回退 org.freedesktop 前缀；双前缀俱败时合并上报两侧错误
+/// （只报末次会掩盖 kde 侧真因——如 item 端 Activate 无处理器）。
 async fn invoke_xy(
     bus: &BusCenter,
     entry: &ItemEntry,
@@ -137,10 +138,15 @@ async fn invoke_xy(
         .await
     {
         Ok(()) => Ok(()),
-        Err(_) => {
-            bus.call::<(), _>(&entry.service, &entry.path, ITEM_IFACE_FD, method, &(x, y))
-                .await
-        }
+        Err(kde) => match bus
+            .call::<(), _>(&entry.service, &entry.path, ITEM_IFACE_FD, method, &(x, y))
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(fd) => Err(TrayError::Protocol(format!(
+                "{method} failed on both prefixes: org.kde: {kde}; org.freedesktop: {fd}"
+            ))),
+        },
     }
 }
 
@@ -162,8 +168,8 @@ async fn invoke_scroll(
         .await
     {
         Ok(()) => Ok(()),
-        Err(_) => {
-            bus.call::<(), _>(
+        Err(kde) => match bus
+            .call::<(), _>(
                 &entry.service,
                 &entry.path,
                 ITEM_IFACE_FD,
@@ -171,6 +177,11 @@ async fn invoke_scroll(
                 &(delta, orient),
             )
             .await
-        }
+        {
+            Ok(()) => Ok(()),
+            Err(fd) => Err(TrayError::Protocol(format!(
+                "Scroll failed on both prefixes: org.kde: {kde}; org.freedesktop: {fd}"
+            ))),
+        },
     }
 }
