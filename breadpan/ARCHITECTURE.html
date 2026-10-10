@@ -319,7 +319,7 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
 <h4>TrayItemId / TrayItem 字段定义</h4>
 <table>
   <tr><th>字段</th><th>含义</th><th>规范依据</th></tr>
-  <tr><td>id</td><td>唯一键：Item 注册到 Watcher 的服务名（TrayItemId 即 String，值 = 服务名）。事实命名 <code>org.kde.StatusNotifierItem-PID-ID</code>（PID=进程号，ID=同进程实例序号）；对象路径不参与标识：服务名消失 → Removed，同名重现（应用重启）→ 视为新 Item（Added）；pid 仅能从服务名 PID 段解析</td><td>SNI §3；总线名构成见 <a href="https://dbus.freedesktop.org/doc/dbus-specification.html">D-Bus 规范 · Bus Names</a></td></tr>
+  <tr><td>id</td><td>唯一键：Item 注册到 Watcher 的服务名（TrayItemId 即 String，值 = 服务名）。事实命名 <code>org.kde.StatusNotifierItem-PID-ID</code>（PID=进程号，ID=同进程实例序号）；对象路径不参与标识：服务名消失 → Removed，同名重现（应用重启）→ 视为新 Item（Added）；pid 仅能从服务名 PID 段解析。同一对象以不同注册形态（规范名 / 唯一名纯路径）重复报到时按 (唯一名, 对象路径) 并入既有 id（自愈，不产生第二 id）；变更/菜单通告按 (唯一名, 对象路径) 唯一命中，落点确定</td><td>SNI §3；总线名构成见 <a href="https://dbus.freedesktop.org/doc/dbus-specification.html">D-Bus 规范 · Bus Names</a></td></tr>
   <tr><td>category</td><td>ApplicationStatus / Communications / SystemServices / Hardware</td><td>SNI §3.1 Category</td></tr>
   <tr><td>status</td><td>Passive 可隐藏 / Active 应展示 / NeedsAttention 应强调</td><td>SNI §3.1 Status</td></tr>
   <tr><td>alive</td><td>最近一次存活探测结论：true = 探测成功，false = 超时/失败；由库内周期探测维护（非 SNI 字段），随任意现场读取交付</td><td>—（本库存活机制）</td></tr>
@@ -380,7 +380,7 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
 </p>
 <table>
   <tr><th>DBus 成员</th><th>类型</th><th>语义</th></tr>
-  <tr><td><code>RegisterStatusNotifierItem</code></td><td>方法</td><td>Item 报到：登记总线唯一名 + 对象路径；报到即拉取跟踪（<a href="#sec-2-5">§2.5</a>）；重复报到幂等</td></tr>
+  <tr><td><code>RegisterStatusNotifierItem</code></td><td>方法</td><td>Item 报到：登记总线唯一名 + 对象路径；报到即拉取跟踪（<a href="#sec-2-5">§2.5</a>）；同名重复报到幂等；不同注册形态按 (唯一名, 对象路径) 查重并入——同一对象恒为单一 id，双重注册自愈（<a href="#sec-3-3">§3.3</a> id）</td></tr>
   <tr><td><code>RegisteredStatusNotifierItems</code></td><td>方法</td><td>查询：当前在册 Item 清单</td></tr>
   <tr><td><code>RegisterStatusNotifierHost</code></td><td>方法</td><td>兼容桩：受理即忘——自包含设计不对进程外 Host 负责（<a href="#sec-1">§1 术语 Host</a>）</td></tr>
   <tr><td><code>IsStatusNotifierHostRegistered</code></td><td>方法</td><td>兼容桩：恒真——逻辑 Host 进程内在位；个别 Item 探测此接口后才报到</td></tr>
