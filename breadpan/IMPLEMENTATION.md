@@ -16,8 +16,9 @@
 | 2 | 存量 Item 可能**不实现 Introspect**（返回空 XML） | QQ 音乐（Electron/CEF 内核） | 反向发现探测双级：Introspect 接口名确认 → 失败则 `Properties.GetAll` 直接属性读取确认 |
 | 3 | Item 可能以**唯一名**注册（无 well-known 名） | clash-verge（`:1.22`） | 唯一名即 TrayItemId；`GetNameOwner` 解析属主（唯一名对自身解析成功） |
 | 4 | `IconName` 可能是**文件路径**而非主题图标名 | clash-verge（`/run/user/1000/tray-icon/*.png`） | `IconName` 以 `/` 开头识别为 `IconSource::Path`（字面识别，不做语义猜测）；渲染直出加载文件位图，失败回退 `image-missing` |
-| 5 | 同一对象可能**双重注册**（规范名 + 路径形态各一次） | mock 复现（真实应用为降级重试） | 按 Watcher 事实行为入两册、两个 id 各自独立；信号落点（Changed/MenuChanged/路由更新）匹配首个命中条目，属主消失时一并移除 |
-| 6 | Item 可能**声明 Activate 却不实现**（libappindicator 系：XML 静态声明、分发 catch-all） | clash-verge（`No handler for Activate`，Context 连声明都没有） | 左键 Activate 非超时失败且 DBusMenu 在册 → 回退 Menu 流程（左键出菜单是宿主侧策略，菜单由宿主经 dbusmenu 渲染）；超时不回退（menu 与 Activate 同一主循环分发，同样不可读） |
+| 5 | 同一对象可能**双重注册**（规范名 + 唯一名/路径形态各一次） | 确定性复现仅 mock。真实侧一例**疑似**：QQ 音乐（CEF）存量项以规范名在册的同时，出现另一条唯一名注册（未验证归属，应用退出后无法复查）。clash-verge 抓包实测**单次**注册（路径形态，且直发 Watcher 唯一名而非总线名） | 按 Watcher 事实行为入两册、两个 id 各自独立；信号落点（Changed/MenuChanged/路由更新）匹配首个命中条目，属主消失时一并移除 |
+| 6 | `RegisterStatusNotifierHost` 兼容桩被真实 Host 调用 | vicinae-server（面板）在 Watcher 名出现时即调桩注册（本次抓包仅见调用，未捕获其是否读 `IsStatusNotifierHostRegistered`） | 桩语义按 §3.4：受理即忘、不簿记、不产生事件 |
+| 7 | Item 可能**声明 Activate 却不实现**（libappindicator 系：XML 静态声明、分发 catch-all） | clash-verge（`No handler for Activate`，Context 连声明都没有） | 左键 Activate 非超时失败且 DBusMenu 在册 → 回退 Menu 流程（左键出菜单是宿主侧策略，菜单由宿主经 dbusmenu 渲染）；超时不回退（menu 与 Activate 同一主循环分发，同样不可读） |
 
 ## 2. 文档契约缺口的补全决策
 
