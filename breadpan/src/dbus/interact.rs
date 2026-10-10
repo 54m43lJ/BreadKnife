@@ -23,7 +23,11 @@ pub(crate) enum Input {
 }
 
 /// 按路由表分发（依据登记簿记 menu_only / menu，零查询）：
-/// - left_click：`menu_only` 且 DBusMenu 在册 → Menu 流程；否则 Activate(x,y)
+/// - left_click：`menu_only` 且 DBusMenu 在册 → Menu 流程；否则 Activate(x,y)——
+///   Activate 双前缀俱败且 DBusMenu 在册时自动回退 Menu 流程（libappindicator 系
+///   item 的 Activate 无处理器：XML 声明但分发 catch-all，且不可预先探测——
+///   Introspect 说谎、探测调用会误触激活；左键出菜单是宿主侧既定策略，
+///   菜单由宿主经 dbusmenu 渲染，不依赖 item 端激活）
 /// - middle_click：SecondaryActivate(x,y)
 /// - right_click：DBusMenu 在册 → Menu 流程；否则 ContextMenu(x,y)（SNI 原生 fallback）
 /// - scroll_*：Scroll(∓steps, vertical / horizontal)，符号约定 up/left 为负
@@ -36,24 +40,44 @@ pub(crate) async fn route(
 ) -> Result<InteractionOutcome, TrayError> {
     let entry = bus.entry_of(&id.to_string())?;
 
-    let menu_hit = match input {
-        Input::Left(..) => entry.menu_only && entry.menu.is_some(),
-        Input::Right(..) => entry.menu.is_some(),
-        _ => false,
-    };
+    // 左键独走同步路径：Activate 需就地知晓成败以决定是否回退 Menu 流程
+    if let Input::Left(x, y) = input {
+        if entry.menu_only && entry.menu.is_some() {
+            let snapshot = menu::read_layer(bus, &entry, 0).await?;
+            return Ok(InteractionOutcome::Menu(snapshot));
+        }
+        return match invoke_xy(bus, &entry, "Activate", x, y).await {
+            Ok(()) => {
+                bus.events.send(TrayEvent::InteractionResult {
+                    id: id.to_string(),
+                    op: InteractionOp::Activate,
+                    result: Ok(()),
+                });
+                Ok(InteractionOutcome::Dispatched)
+            }
+            // 回退 Menu 流程：交付形态与 menu_only 左键一致（Outcome::Menu，无回执事件）
+            Err(_) if entry.menu.is_some() => {
+                let snapshot = menu::read_layer(bus, &entry, 0).await?;
+                Ok(InteractionOutcome::Menu(snapshot))
+            }
+            Err(e) => Err(e),
+        };
+    }
+
+    let menu_hit = matches!(input, Input::Right(..)) && entry.menu.is_some();
     if menu_hit {
         let snapshot = menu::read_layer(bus, &entry, 0).await?;
         return Ok(InteractionOutcome::Menu(snapshot));
     }
 
     let op = match input {
-        Input::Left(..) => InteractionOp::Activate,
         Input::Middle(..) => InteractionOp::SecondaryActivate,
         Input::Right(..) => InteractionOp::ContextMenu,
         Input::ScrollUp(..)
         | Input::ScrollDown(..)
         | Input::ScrollLeft(..)
         | Input::ScrollRight(..) => InteractionOp::Scroll,
+        Input::Left(..) => unreachable!("left handled above"),
     };
     dispatch_void(
         bus,
@@ -62,7 +86,7 @@ pub(crate) async fn route(
         op,
         move |bus, entry| async move {
             match input {
-                Input::Left(x, y) => invoke_xy(&bus, &entry, "Activate", x, y).await,
+                Input::Left(..) => unreachable!("left handled synchronously above"),
                 Input::Middle(x, y) => invoke_xy(&bus, &entry, "SecondaryActivate", x, y).await,
                 Input::Right(x, y) => invoke_xy(&bus, &entry, "ContextMenu", x, y).await,
                 Input::ScrollUp(n) => invoke_scroll(&bus, &entry, -n, "vertical").await,
