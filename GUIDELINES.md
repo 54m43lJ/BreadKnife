@@ -21,7 +21,7 @@ Other constraints:
 3. (if applicable) prototype/mock, can be code, can be pictures/videos
 ## Architecture
 RULES:
-- **mermaid graph is to be completely avoided. use the borderless-table form for sequence diagrams (see "Sequence diagrams" below), ASCII graph or actual pictures for everything else.**
+- **mermaid graph is to be completely avoided. sequence and activity diagrams are drawn with PlantUML (see "Diagrams: PlantUML" below); ASCII graph or actual pictures for everything else.**
 - **Architecture document should be customer-facing. Everything a customer (app that depends on it, user of this application, etc.) would directly interact with should be documented here. The remaining internal structure and mechanisms should be in CODE.html instead.**
 - Optionally, any finer requirement that cannot be described by straightforward mechanisms should be attached to the end of that section as complement. This part should always be the last resort, prefer mechanism over specific constraint whenever possible.
 
@@ -30,7 +30,7 @@ RULES:
 1. TERMS: a table of doamin-specific keywords that should never be synonymized, with their full definition. When these terms are used, no further explaination of the term is allowed.
 2. DIAGRAMS: document all relevant architecture as mechanisms, which is the preferred method.
    1. General architecture (how the application interact with others)
-   2. Sequence diagrams (how the business logic flows)
+   2. Sequence diagrams (how the program logic flows, in business language only, minimal amount of terms and API usage is allowed when referring to well-known standards)
 3. INTERFACES:
    1. all exposed API specifications written in code, or pseudocode if it supports multiple languages
    2. if applicable, all message types, including errors
@@ -41,19 +41,13 @@ RULES:
       2. Field definition table explaining the meaning of each field, with reference to external specifications when applicable
       3. Data transformations (referencing exact data object name, which may include specification by external standards)
 
-### Sequence diagrams: borderless table (`table.seq`)
+### Diagrams: PlantUML (`diagram/`)
 
-Sequence diagrams are never drawn in ASCII. Render each of them as a borderless table (`<table class="seq">`; styles live in the root `style.css`) so the vertical lifelines stay aligned regardless of script or font width. Rules:
+Sequence diagrams and activity diagrams are drawn with PlantUML — never hand-drawn in ASCII or HTML tables. Sources (`*.puml`) and exported images (`*.svg`) live in the `diagram/` folder at the project root; the exported SVG is embedded into the HTML via `<img>` with a relative path (`../diagram/…`). The `.puml` source is authoritative: edit the source, re-export, and commit both together (`plantuml -tsvg diagram/*.puml`).
 
-1. Columns are the regions between adjacent lifelines. Border classes draw the lifelines: first column `lf` (border-left + border-right), middle columns `mid` (border-right), last column `lbl` (border-left).
-2. First row is the participant header. Participant names are left-aligned so each label sits on its own lifeline; the row is bold and has no separator line.
-3. A cell is empty unless something happens in that region at that step. A light dashed separator is drawn under cells with content only (`td:not(:empty)`), never under empty cells.
-4. Alignment semantics — flows hug their origin:
-   - rightward message `text ──→`: left-aligned (`class="l"`)
-   - leftward message `←── text`: right-aligned (`class="r"`)
-   - everything else (conditions, internal actions, annotations): centered (default)
-5. Cross-region messages (origin and destination are not adjacent lifelines): `colspan` from the origin's region through the destination's, aligned to the origin side so the flow starts at the origin lifeline and its arrowhead ends at the destination. Lifelines crossed along the way are covered on that row — an accepted side effect. Multi-line content stays readable thanks to the per-content dashed separators.
-6. Annotations spanning several parties may use `colspan` across the affected regions. This interrupts the lifelines for that row and is acceptable for notes, never for messages.
+1. Choose the form by complexity: flows with at most one branch decision (fewer than 2 nesting levels) are sequence diagrams; anything with more branching is a UML activity diagram with one swimlane per participant.
+2. Labels are written in the documentation language; keep messages short and push details into notes.
+3. Do not edit the exported image by hand; do not let the source and the image diverge.
 
 ## Code
 RULES:

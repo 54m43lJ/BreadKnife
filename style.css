@@ -125,28 +125,5 @@ footer {
   main { max-width: 100%; padding: 0; }
 }
 
-/* ── 时序图（无边框表格）── 竖线为单元格边框；行间虚线分隔；
-   对齐语义：流动贴近出发点——向右的箭头左对齐、向左的箭头右对齐、其余居中 */
-table.seq {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 1rem 0;
-  background: transparent;
-  font-size: .9rem;
-}
-table.seq th, table.seq td {
-  border: none;
-  background: transparent;
-  padding: .3rem .6rem;
-  text-align: center;
-  vertical-align: top;
-  font-weight: normal;
-  white-space: normal;
-}
-table.seq td:not(:empty) { border-bottom: 1px dashed var(--border); }  /* 仅有文字的单元下加分隔线 */
-table.seq th { color: var(--accent); text-align: left; font-weight: 600; }  /* 参与者标签贴自身生命线 */
-table.seq td.lf, table.seq th.lf { border-left: 1px solid var(--muted); border-right: 1px solid var(--muted); }
-table.seq td.mid, table.seq th.mid { border-right: 1px solid var(--muted); }
-table.seq td.lbl, table.seq th.lbl { border-left: 1px solid var(--muted); }
-table.seq td.l { text-align: left; }   /* 向右的流动 */
-table.seq td.r { text-align: right; }  /* 向左的流动 */
+/* ── 嵌入图（PlantUML 导出 SVG）── */
+main img { max-width: 100%; height: auto; }

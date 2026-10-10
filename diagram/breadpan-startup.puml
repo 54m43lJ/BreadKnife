@@ -1,0 +1,24 @@
+@startuml breadpan-startup
+participant 消费方
+participant "breadpan（watcher 模块）" as bp
+participant 会话总线
+participant "存量 Item" as item
+
+消费方 -> bp: start()
+bp -> 会话总线: 连接会话总线
+bp -> 会话总线: 申请 Watcher 名
+note right of 会话总线
+  已被持有 → NameTaken
+  （多 Watcher 不能共存）
+end note
+会话总线 --> bp: 名字在位
+bp -> item: 反向发现：ListNames 扫描 + 探测
+bp -> bp: == 登记最小集入册（唯一名 + 对象路径）==
+bp -> 会话总线: 订阅变更 / 死亡清理信号
+bp -> bp: == 逐个现场读取 → 入队 Snapshot（全部 Item）==
+消费方 <-- bp: (Handle, 事件通道)
+note over 消费方
+  recv().await：Snapshot → 增量事件流
+  （原子衔接，无重叠无缺口）
+end note
+@enduml
