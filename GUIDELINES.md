@@ -12,6 +12,7 @@ Other constraints:
 - Optinally, `reference/` directory can store any official documentation downloaded from internet as a authoritative source of truth.
 - Adhere to the single source of truth rule. Any definition should only appear once across the entire project in the most appropriate position, and other appearances should always come in the form of hyperlinks.
 - Do not keep any record of amendments to previous versions because it only add confusion to the context.
+- Escape `&`, `<` and `>` as `&amp;`, `&lt;` and `&gt;` wherever they are content rather than markup — code blocks (`<pre>/<code>`) especially. Browsers parse unescaped angle brackets as tags and silently delete them (generics like `Result<T, E>` lose everything from `<` on; ASCII-diagram arrows like `<--` vanish too). Only real HTML tags stay unescaped.
 
 ## Readme
 1. WHAT & WHY
@@ -55,7 +56,9 @@ Sequence diagrams and activity diagrams are drawn with PlantUML — never hand-d
 RULES:
 - **This document is purely for internal mechanism details. If it is anything relevant to the usage of this project, it should be in the architecture doc instead.**
 - **Does not have to be exhaustive. Focus on key execution paths during startup, key events, and shutdown.**
-- **Symbols already defined in the architecture document are referenced in CODE.html in the unified one-line form `pub <type> <name> //见 ARCHITECTURE §xx.xx` — no body, no redefinition. Everything else in CODE.html must be syntactically valid Rust.**
+- **Symbols already defined in the architecture document are referenced in CODE.html in the unified one-line form `pub <type> <name>; //见 ARCHITECTURE §xx.xx` — no body, no redefinition. Everything else in CODE.html must be syntactically valid Rust.**
+- **No constant definitions. Literal values (bus names, periods, capacities, …) are tuned against the real system during development and go stale in docs — they live in the code alone, with the trade-off recorded in the project's implementation notes when it matters. A literal may appear only inline in a call stack, where that flow depends on it.**
+- **Signatures carry no internals. An entry in the internal types & signatures section is a signature plus at most a one-line purpose note. The internal structure of a method (call chains, branching, fallbacks, ordering) is not the signature's responsibility — if it is worth documenting, it belongs to the call-stack section.**
 
 -----
 

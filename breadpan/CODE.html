@@ -19,7 +19,7 @@
 ├── <a href="#sec-2-tracker">tracker.rs</a>           # Item 登记簿记（最小集）：报到 / 反向发现 / 死亡清理
 ├── <a href="#sec-2-props">props.rs</a>             # 属性即时读取（zvariant/serde → 原生结构）
 ├── dbus/
-│   ├── <a href="#sec-2-dbus-mod">mod.rs</a>           # DBus 域出口（内部聚合）：常量、启动编排、报到受理与反向发现、全局信号订阅
+│   ├── <a href="#sec-2-dbus-mod">mod.rs</a>           # DBus 域出口（内部聚合）：启动编排、报到受理与反向发现、全局信号订阅
 │   ├── <a href="#sec-2-dbus-bus">bus.rs</a>           # 会话总线连接（zbus tokio 特性）与库内 tokio 运行时宿主
 │   ├── <a href="#sec-2-dbus-watcher">watcher.rs</a>       # 登记中心服务：名持有（不可替换）、所有权丢失上报、停机
 │   ├── <a href="#sec-2-dbus-iface">iface.rs</a>         # org.kde.StatusNotifierWatcher 协议面（ARCHITECTURE §3.4）
@@ -42,210 +42,187 @@ handle/events 为公开前端。</p>
 库不创建 GLib 上下文。</p>
 
 <h2 id="sec-2">2. 内部类型与方法签名</h2>
-<p>按 src/ 文件树组织的内部类型与方法签名摘要，与实现一致。标注
-<code>//见 ARCHITECTURE …</code> 的条目为架构文档已定义符号的统一引用格式。
+<p>按 src/ 文件树组织的内部类型与方法签名摘要。标注 <code>//见 ARCHITECTURE …</code>
+的条目为架构文档已定义符号的统一引用格式。收录标准：只列 §3 调用栈引用到的核心类型与方法；
+条目只承载签名与一行用途——<code>const</code> 定义不收录（字面取值随实现调试浮动，
+取舍记录见 IMPLEMENTATION.md），方法内部步骤一律归 §3 调用栈，未列出者皆为局部实现细节。<br>
 <strong>注意</strong>：登记合并（Upsert::Renamed / NameChanged，§3.3.1）为
-<strong>先行设计</strong>——dev 代码尚未实现，对齐代码时以本文为准、不得回退旧实现。<br>
+IMPLEMENTATION.md §1#5 / §5 记录的在册自愈设计——dev 分支代码滞后于该记录，
+此处以 IMPLEMENTATION.md 为准，不随源码回退。<br>
 公开类型与签名（Tray / TrayHandle / TrayEvent / 数据模型 / TrayError / gtk）见
 <a href="ARCHITECTURE.html#sec-3">ARCHITECTURE.html §3</a>，此处不重复。</p>
 
 <h3 id="sec-2-lib">2.1. lib.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct TrayItem          //见 ARCHITECTURE §3.3
-pub enum TrayCategory        //见 ARCHITECTURE §3.3
-pub enum TrayStatus          //见 ARCHITECTURE §3.3
-pub struct ToolTip           //见 ARCHITECTURE §3.3
-pub enum IconSource          //见 ARCHITECTURE §3.3
-pub struct Pixmap            //见 ARCHITECTURE §3.3
-pub struct MenuSnapshot      //见 ARCHITECTURE §3.3
-pub struct MenuItem          //见 ARCHITECTURE §3.3
-pub enum InteractionOutcome  //见 ARCHITECTURE §3.1
-pub enum TrayError           //见 ARCHITECTURE §3.1
-pub mod events               // TrayEvent / InteractionOp（§3.1）/ EventQueue（本文件 2.3）
-pub mod gtk                  // 渲染直出整合层（icon_paintable，§3.1）
+<pre><code>pub type TrayItemId;         //见 ARCHITECTURE §3.3
+pub struct TrayItem;         //见 ARCHITECTURE §3.3
+pub enum TrayCategory;       //见 ARCHITECTURE §3.3
+pub enum TrayStatus;         //见 ARCHITECTURE §3.3
+pub struct ToolTip;          //见 ARCHITECTURE §3.3
+pub enum IconSource;         //见 ARCHITECTURE §3.3
+pub struct Pixmap;           //见 ARCHITECTURE §3.3
+pub struct MenuSnapshot;     //见 ARCHITECTURE §3.3
+pub struct MenuItem;         //见 ARCHITECTURE §3.3
+pub enum InteractionOutcome; //见 ARCHITECTURE §3.1
+pub enum TrayError;          //见 ARCHITECTURE §3.2
+pub mod events;              // TrayEvent / InteractionOp（§3.2）/ EventQueue（本文件 2.3）
+pub mod gtk;                 // 渲染直出整合层（icon_paintable，§3.1）
 pub use events::{InteractionOp, TrayEvent};
 pub use handle::{Tray, TrayConfig, TrayHandle};</code></pre>
 
 <h3 id="sec-2-handle">2.2. handle.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct TrayConfig        //见 ARCHITECTURE §3.1（timeout_ms / debounce_ms）
-pub struct Tray;             //见 ARCHITECTURE §3.1；Drop → 最后实例触发 shutdown
+<pre><code>pub struct TrayConfig;       //见 ARCHITECTURE §3.1（timeout_ms / debounce_ms）
+pub struct Tray;             //见 ARCHITECTURE §3.1
 impl Tray {
-    pub fn start(config: TrayConfig) -> Result<(TrayHandle, Receiver<TrayEvent>), TrayError>
-    //见 ARCHITECTURE §3.1；内部：
-    // EventQueue::new → BusParts::new → BusCenter::spawn_runtime
-    // → 轮询 ready 通道等 bootstrap 完成（引导总时限 max(10×timeout_ms, 10s) 守护）
-    //   超时/失败 → join 内部线程并返回 Err
+    pub fn start;            //见 ARCHITECTURE §3.1（bootstrap 流程见 §3.1.1）
 }
-pub struct TrayHandle        //见 ARCHITECTURE §3.1（Clone + Send + Sync）
-// 公开方法组（items / item / is_alive / menu / menu_expand / 交互方法组 / shutdown）
-// 签名见 ARCHITECTURE §3.1；内部受理：
+pub struct TrayHandle;       //见 ARCHITECTURE §3.1（Clone + Send + Sync；最后实例 drop 自动停机）
+// 公开方法组签名见 ARCHITECTURE §3.1；内部受理：
 impl TrayHandle {
-    fn live(&self) -> Result<&BusCenter, TrayError>;   // is_stopped → Err(Stopped)
-    fn input(&self, id: &TrayItemId, input: interact::Input)
-        -> Result<InteractionOutcome, TrayError>;
-        // dispatch(|bus| interact::route(&bus, &id, input))
-    fn dispatch<T, F, Fut>(&self, f: F) -> Result<T, TrayError>
+    fn live(&amp;self) -&gt; Result&lt;&amp;BusCenter, TrayError&gt;;
+    fn input(&amp;self, id: &amp;TrayItemId, input: interact::Input)
+        -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
+    fn dispatch&lt;T, F, Fut&gt;(&amp;self, f: F) -&gt; Result&lt;T, TrayError&gt;
     where
         T: Send + 'static,
-        F: FnOnce(BusCenter) -> Fut + Send + 'static,
-        Fut: Future<Output = Result<T, TrayError>> + Send + 'static;
-        // BusCenter::cmd 同步桥
+        F: FnOnce(BusCenter) -&gt; Fut + Send + 'static,
+        Fut: Future&lt;Output = Result&lt;T, TrayError&gt;&gt; + Send + 'static;
 }
 impl Drop for TrayHandle {
-    fn drop(&mut self);   // strong_count == 1 → RuntimeShared::shutdown
+    fn drop(&amp;mut self);
 }
 pub(crate) struct RuntimeShared {
     bus: BusCenter,                     // 库内总线域句柄（Clone 廉价）
     rt_thread: thread::ThreadId,        // 内部运行时线程（停机 join 用；自线程不 join）
-    join: Mutex<Option<thread::JoinHandle<()>>>,
+    join: Mutex&lt;Option&lt;thread::JoinHandle&lt;()&gt;&gt;&gt;,
 }
 impl RuntimeShared {
-    /// 优雅停机（幂等）：set_stopped → begin_stopping → request_stop；
-    /// 非 runtime 线程上 join 内部线程收尾（防自 join 死锁）
-    fn shutdown(&self);
+    /// 优雅停机（幂等，§3.7.2）
+    fn shutdown(&amp;self);
 }</code></pre>
 
 <h3 id="sec-2-events">2.3. events.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub(crate) const CHANNEL_CAPACITY: usize = 256;   // 通道容量（库内定值）
-pub enum TrayEvent        //见 ARCHITECTURE §3.1（含 NameChanged）
-pub enum InteractionOp    //见 ARCHITECTURE §3.1
+<pre><code>pub enum TrayEvent;          //见 ARCHITECTURE §3.2（含 NameChanged）
+pub enum InteractionOp;      //见 ARCHITECTURE §3.2
 pub(crate) struct EventQueue {
-    tx: tokio::sync::mpsc::Sender<TrayEvent>,   // 唯一通道发送端；Receiver 仅经 Tray::start 交付
-    dropped: AtomicU64,                         // 背压丢弃告警计数（单通道）
+    tx: Mutex&lt;Option&lt;tokio::sync::mpsc::Sender&lt;TrayEvent&gt;&gt;&gt;,   // 唯一通道发送端；Receiver 仅经 Tray::start 交付
+    dropped: AtomicU64,                         // 背压丢弃告警计数
 }
 impl EventQueue {
-    /// 建队：(Arc<队列>, 唯一 Receiver)；此后库内不再发放 Receiver
-    pub(crate) fn new() -> (Arc<Self>, tokio::sync::mpsc::Receiver<TrayEvent>);
-    /// try_send：满则丢弃该事件并递增 dropped（有损交付，不阻塞内部线程）
-    pub(crate) fn send(&self, ev: TrayEvent);
-    /// 背压丢弃累计（Narration 观测用）
-    pub(crate) fn dropped(&self) -> u64;
-    /// 关闭通道：消费端 recv() 此后返回 None（停机路径）
-    pub(crate) fn close(&self);
+    /// 建队：(队列, 唯一 Receiver)
+    pub(crate) fn new() -&gt; (Arc&lt;Self&gt;, tokio::sync::mpsc::Receiver&lt;TrayEvent&gt;);
+    /// 满则丢弃并计数（有损交付）
+    pub(crate) fn send(&amp;self, ev: TrayEvent);
+    /// 关闭通道：消费端 recv() 此后返回 None
+    pub(crate) fn close(&amp;self);
 }</code></pre>
 
 <h3 id="sec-2-tracker">2.4. tracker.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub(crate) struct ItemEntry {
-    pub service: String,   // 公共名（= TrayItemId；唯一名形态报到时暂以临时唯一名占位，
-                       //  Bus Name 报到时升级并触发 NameChanged）
-    pub unique: String,    // 属主唯一名（= 连接身份，第二轮 lookup 键；注册时 GetNameOwner 解析）
-    pub path: String,      // Item 对象路径（交互寻址用；以最新报到为准）
-    pub alive: bool,       // 最近一次存活探测结论（报到时置 true，此后由周期探测覆盖）
-    pub menu: Option<String>, // dbusmenu 对象路径（注册时探测 Menu 属性；None = 无 DBusMenu，右键 fallback）
-    pub menu_only: bool,   // 整项即菜单（左键路由依据；注册时探测，随变更信号就地更新）
+    pub service: String,   // 公共名（= TrayItemId；临时唯一名占位可升级，§3.3.1）
+    pub unique: String,    // 属主唯一名（信号归属匹配键；注册时 GetNameOwner 解析）
+    pub path: String,      // Item 对象路径（交互寻址用）
+    pub alive: bool,       // 最近一次存活探测结论
+    pub menu: Option&lt;String&gt;, // dbusmenu 对象路径；None = 无 DBusMenu
+    pub menu_only: bool,   // 整项即菜单（左键路由依据）
 }
-/// upsert 结果：新条目 / 原地刷新 / id 升级（临时唯一名 → Bus Name，§3.3.1）
+/// upsert 结果：新条目 / 原地刷新 / id 升级（§3.3.1）
 pub(crate) enum Upsert { Inserted, Refreshed, Renamed { old: TrayItemId, new: TrayItemId } }
-pub(crate) struct ItemTracker { items: HashMap<TrayItemId, ItemEntry> }
+pub(crate) struct ItemTracker { items: HashMap&lt;TrayItemId, ItemEntry&gt; }
 impl ItemTracker {
-    /// 字段匹配两轮 lookup（注册名 ↔ service、发送者唯一名 ↔ unique）：
-    /// 命中原地更新，未命中插入；Bus Name 报到使临时唯一名 id 升级 → Renamed（§3.3.1）
-    pub(crate) fn upsert(&mut self, entry: ItemEntry) -> Upsert;
-    /// 死亡清理：按名字（服务名或属主唯一名）双条件命中，移除全部命中条目，返回被移除者
-    pub(crate) fn unregister(&mut self, name: &str) -> Vec<ItemEntry>;
-    /// 信号落点：(唯一名, 对象路径) 唯一命中——同连接已并入单条目，无落点歧义
-    pub(crate) fn find_by_signal(&self, sender: &str, path: &str) -> Option<TrayItemId>;
-    /// dbusmenu 信号落点：(唯一名, 菜单对象路径) 唯一命中
-    pub(crate) fn find_by_menu_signal(&self, sender: &str, path: &str) -> Option<TrayItemId>;
-    /// 就地更新路由标记（PropertiesChanged 携带 ItemIsMenu / Menu 时）
-    pub(crate) fn update_routing(&mut self, service: &str, menu: Option<Option<String>>,
-                                 menu_only: Option<bool>);
-    /// 存活结论（登记簿记的 alive 字段，零 DBus 流量）；不在册 → None
-    pub(crate) fn is_alive(&self, id: &TrayItemId) -> Option<bool>;
-    /// 覆盖存活结论（heartbeat_task 周期探测回写）
-    pub(crate) fn set_alive(&mut self, service: &str, alive: bool);
+    /// 报到入册：双注册并入的落点（§3.3.1）
+    pub(crate) fn upsert(&amp;mut self, entry: ItemEntry) -&gt; Upsert;
+    /// 死亡清理：按（服务名或属主唯一名）命中移除，返回被移除者
+    pub(crate) fn unregister(&amp;mut self, name: &amp;str) -&gt; Vec&lt;ItemEntry&gt;;
+    /// 信号落点：(唯一名, 对象路径) 定位 id
+    pub(crate) fn find_by_signal(&amp;self, sender: &amp;str, path: &amp;str) -&gt; Option&lt;TrayItemId&gt;;
+    /// dbusmenu 信号落点：(唯一名, 菜单对象路径) 定位 id
+    pub(crate) fn find_by_menu_signal(&amp;self, sender: &amp;str, path: &amp;str) -&gt; Option&lt;TrayItemId&gt;;
+    /// 就地更新路由标记（menu / menu_only）
+    pub(crate) fn update_routing(&amp;mut self, service: &amp;str, menu: Option&lt;Option&lt;String&gt;&gt;,
+                                 menu_only: Option&lt;bool&gt;);
+    /// 存活结论；不在册 → None
+    pub(crate) fn is_alive(&amp;self, id: &amp;TrayItemId) -&gt; Option&lt;bool&gt;;
+    /// 覆盖存活结论（周期探测回写）
+    pub(crate) fn set_alive(&amp;mut self, service: &amp;str, alive: bool);
+    /// 全量条目快照（快照 / 心跳的并发遍历源）
+    pub(crate) fn all(&amp;self) -&gt; Vec&lt;ItemEntry&gt;;
+    /// 清空簿记（Displaced / 停机路径）
+    pub(crate) fn clear(&amp;mut self) -&gt; Vec&lt;ItemEntry&gt;;
 }</code></pre>
 
 <h3 id="sec-2-props">2.5. props.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>/// 现场读取单个 Item 全部官方属性，经 zvariant/serde 反序列化为 TrayItem
-/// （ARCHITECTURE §3.3 字段表）；items()/item()/Snapshot 的统一取数路径
-pub(crate) async fn fetch_item(bus: &BusCenter, entry: &ItemEntry)
-    -> Result<TrayItem, TrayError>;                     // read_all → tray_item_from_props
-/// GetAll（org.kde 前缀优先，失败回退 org.freedesktop 前缀；§3.1.2 双级探测第二级）
-pub(crate) async fn read_all(bus: &BusCenter, service: &str, path: &str)
-    -> Result<HashMap<String, OwnedValue>, TrayError>;
-/// 注册期路由探测：Menu 属性（对象路径）与 ItemIsMenu；读取失败按无菜单/非菜单处理（§3.3.1）
-pub(crate) async fn probe_routing(bus: &BusCenter, service: &str, path: &str)
-    -> (Option<String>, bool);
-/// Get 单属性（kde → fd 回退）
-async fn read_prop(bus: &BusCenter, service: &str, path: &str, name: &str)
-    -> Result<Option<OwnedValue>, TrayError>;
-/// 属性表 → TrayItem（字段映射与宽容取值：ARCHITECTURE §3.3 字段表）
-pub(crate) fn tray_item_from_props(entry: &ItemEntry, props: &HashMap<String, OwnedValue>)
-    -> TrayItem;
-/// 图标来源二选一（SNI §3.1.6）：Name 非空 → Name/Path（"/" 开头为 Path），否则 → Pixmap
-pub(crate) fn icon_source(name: Option<&str>, pixmaps: Option<&[PixmapTuple]>) -> IconSource;
-/// 取面积最大的一张位图（多分辨率交付时的确定性选择）
-pub(crate) fn pick_pixmap(pixmaps: Option<&[PixmapTuple]>) -> Pixmap;</code></pre>
+<pre><code>/// 现场读取单个 Item → TrayItem（items()/item()/Snapshot 的统一取数路径）
+pub(crate) async fn fetch_item(bus: &amp;BusCenter, entry: &amp;ItemEntry)
+    -&gt; Result&lt;TrayItem, TrayError&gt;;
+/// GetAll（kde → fd 前缀回退；双级探测第二级，§3.1.2）
+pub(crate) async fn read_all(bus: &amp;BusCenter, service: &amp;str, path: &amp;str)
+    -&gt; Result&lt;HashMap&lt;String, OwnedValue&gt;, TrayError&gt;;
+/// 注册期路由探测 → (menu, menu_only)（§3.3.1）
+pub(crate) async fn probe_routing(bus: &amp;BusCenter, service: &amp;str, path: &amp;str)
+    -&gt; (Option&lt;String&gt;, bool);</code></pre>
 
 <h3 id="sec-2-dbus">2.6. dbus/ <a href="#sec-1">↑ 文件树</a></h3>
 
-<h4 id="sec-2-dbus-mod">2.6.1. mod.rs（DBus 域出口：常量、启动编排、报到受理与反向发现、信号任务）</h4>
-<pre><code>pub(crate) const WATCHER_NAME: &str = "org.kde.StatusNotifierWatcher";
-pub(crate) const WATCHER_PATH: &str = "/StatusNotifierWatcher";
-pub(crate) const ITEM_IFACE_KDE: &str = "org.kde.StatusNotifierItem";
-pub(crate) const ITEM_IFACE_FD: &str = "org.freedesktop.StatusNotifierItem";
-pub(crate) const DEFAULT_ITEM_PATH: &str = "/StatusNotifierItem";
-pub(crate) const DBUSMENU_IFACE: &str = "com.canonical.dbusmenu";
-pub(crate) const PROPS_IFACE: &str = "org.freedesktop.DBus.Properties";
-pub(crate) const DBUS_SERVICE: &str = "org.freedesktop.DBus";
-pub(crate) const DBUS_PATH: &str = "/";
-pub(crate) const DBUS_IFACE: &str = "org.freedesktop.DBus";
-pub(crate) const INTROSPECTABLE_IFACE: &str = "org.freedesktop.DBus.Introspectable";
-
-/// 报到/发现参数三形态解析："name" / "name/path" / "/path"（Ayatana 纯对象路径）；
-/// 纯路径形态服务名取 sender；不可解析 → None（解析规则见 §3.3.1）
-pub(crate) fn split_service_arg(arg: &str, sender: Option<&str>) -> Option<(String, String)>;
-/// 报到受理：解析 → GetNameOwner 属主解析 → 路由探测 → upsert →（announce）广播+Added；
-/// 解析失败 → TrayError::Protocol；announce=false 供反向发现静默入册（§3.3.1）
-pub(crate) async fn register_item(bus: &BusCenter, service_arg: &str,
-                                  sender: Option<&str>, announce: bool) -> Result<bool, TrayError>;
-/// 启动期反向发现：ListNames 前缀过滤 → 双级探测 → 静默入册；过程叙述以返回值交付（§3.1.2）
-async fn discover_existing(bus: &BusCenter) -> Vec<String>;
-/// 存量 Item 双级探测：Introspect 接口名确认 → 失败则 GetAll 属性读取确认（§3.1.2）
-async fn probe_item_iface(bus: &BusCenter, name: &str) -> Result<bool, TrayError>;
-/// 快照：并发 fetch_item 全部在册 Item → 排序 → 入队 Snapshot；置栅栏
-/// mark_snapshot_done 并冲刷缓冲的启动期 Removed（§3.3.2）
-async fn queue_snapshot(bus: &BusCenter) -> Vec<String>;
-/// 内部线程驻停体：bootstrap 完成 → ready 交付 → select 驻停
-/// （request_stop → graceful_shutdown / fatal / displaced 三终局分支）
-pub(crate) async fn run(bus: &BusCenter, stop_rx: watch::Receiver<bool>,
-                        fatal_rx: watch::Receiver<String>, displaced_rx: watch::Receiver<bool>,
-                        ready_tx: mpsc::Sender<Result<BusCenter, TrayError>>);
-/// bootstrap：mount_interfaces → spawn_signal_tasks + heartbeat_task/debounce_task
-/// → discover_existing → queue_snapshot → WatcherService::start（顺序即契约，§3.1.1）
-async fn bootstrap(bus: &BusCenter) -> Result<(), TrayError>;
-/// 停机收尾：watcher::release → 簿记清空 → set_stopped → 事件通道 close
-async fn graceful_shutdown(bus: &BusCenter);
+<h4 id="sec-2-dbus-mod">2.6.1. mod.rs（DBus 域出口：启动编排、报到受理与反向发现、信号任务）</h4>
+<pre><code>/// 报到/发现参数三形态解析："name" / "name/path" / "/path"（§3.3.1）
+pub(crate) fn split_service_arg(arg: &amp;str, sender: Option&lt;&amp;str&gt;) -&gt; Option&lt;(String, String)&gt;;
+/// 报到受理（§3.3.1；announce=false 供反向发现静默入册）
+pub(crate) async fn register_item(bus: &amp;BusCenter, service_arg: &amp;str,
+                                  sender: Option&lt;&amp;str&gt;, announce: bool) -&gt; Result&lt;bool, TrayError&gt;;
+/// 启动期反向发现（§3.1.2）
+async fn discover_existing(bus: &amp;BusCenter) -&gt; Vec&lt;String&gt;;
+/// 存量 Item 双级探测（§3.1.2）
+async fn probe_item_iface(bus: &amp;BusCenter, name: &amp;str) -&gt; Result&lt;bool, TrayError&gt;;
+/// 快照投递 + 栅栏置位 + 启动期 Removed 冲刷（§3.3.2）
+async fn queue_snapshot(bus: &amp;BusCenter) -&gt; Vec&lt;String&gt;;
+/// 内部线程驻停体：stop / fatal / displaced 三终局 select（§3.7）
+pub(crate) async fn run(bus: BusCenter, stop_rx: watch::Receiver&lt;bool&gt;,
+                        fatal_rx: watch::Receiver&lt;String&gt;, displaced_rx: watch::Receiver&lt;bool&gt;,
+                        ready_tx: mpsc::Sender&lt;Result&lt;BusCenter, TrayError&gt;&gt;);
+/// 启动编排（顺序即契约，§3.1.1）
+async fn bootstrap(bus: &amp;BusCenter) -&gt; Result&lt;(), TrayError&gt;;
+/// 停机收尾（§3.7.2）
+async fn graceful_shutdown(bus: &amp;BusCenter);
 /// 6 条 match rule 常驻信号任务的孵化器（§3.2 §3.3.2 §3.4.2）
-fn spawn_signal_tasks(bus: BusCenter);</code></pre>
+fn spawn_signal_tasks(bus: BusCenter);
+/// 订阅并消费一条匹配规则下的信号流（订阅失败降级 Narration）
+async fn pump_signal_stream(rule: MatchRule&lt;'static&gt;, bus: BusCenter,
+                            on_msg: impl FnMut(&amp;BusCenter, Message));
+/// NameOwnerChanged：死亡清理 / 同名换主 / Displaced（§3.3.2 §3.7.1）
+async fn name_owner_changed_task(bus: BusCenter);
+/// 官方 New* 信号（kde/fd 前缀各一条）→ pending 登记（§3.2）
+async fn item_signals_task(bus: BusCenter, iface: &amp;'static str);
+/// PropertiesChanged（arg0 限定，kde/fd 各一条）→ 路由更新 + pending 登记（§3.2）
+async fn properties_changed_task(bus: BusCenter, iface: &amp;'static str);
+/// dbusmenu 信号 → MenuChanged（§3.4.2）
+async fn dbusmenu_signals_task(bus: BusCenter);
+/// 固定窗口节流冲刷（§3.2）
+async fn debounce_task(bus: BusCenter);</code></pre>
 
 <h4 id="sec-2-dbus-bus">2.6.2. bus.rs（库内总线域句柄：连接 + 运行时入口 + 共享簿记；Clone 廉价）</h4>
 <pre><code>pub(crate) struct BusParts {   // 组装件：簿记/通道/配置在连接建立前先行构造
-    tracker: Arc<RwLock<ItemTracker>>,
-    events: Arc<EventQueue>,
-    pending: Arc<Mutex<HashSet<TrayItemId>>>,   // 变更合并待通告集合（§3.2）
+    tracker: Arc&lt;RwLock&lt;ItemTracker&gt;&gt;,
+    events: Arc&lt;EventQueue&gt;,
+    pending: Arc&lt;Mutex&lt;HashSet&lt;TrayItemId&gt;&gt;&gt;,   // 变更合并待通告集合（§3.2）
     config: TrayConfig,
-    stopping: Arc<AtomicBool>, stopped: Arc<AtomicBool>, snapshot_done: Arc<AtomicBool>,
-    stop_tx: watch::Sender<bool>, fatal_tx: watch::Sender<String>, displaced_tx: watch::Sender<bool>,
+    stopping: Arc&lt;AtomicBool&gt;, stopped: Arc&lt;AtomicBool&gt;, snapshot_done: Arc&lt;AtomicBool&gt;,
+    stop_tx: watch::Sender&lt;bool&gt;, fatal_tx: watch::Sender&lt;String&gt;, displaced_tx: watch::Sender&lt;bool&gt;,
 }
 impl BusParts {
-    pub(crate) fn new(config: TrayConfig, events: Arc<EventQueue>) -> Self;
+    pub(crate) fn new(config: TrayConfig, events: Arc&lt;EventQueue&gt;) -&gt; Self;
 }
-pub(crate) struct BusCenter { /* conn: zbus::Connection（tokio 特性）+ timeout + BusParts 共享件 */ }
+pub(crate) struct BusCenter { /* conn（zbus tokio 特性）+ rt（内部运行时 Handle）+ timeout + BusParts 共享件 */ }
 impl BusCenter {
-    /// 启动内部 CurrentThread 运行时线程执行 mod::run；
-    /// ready 通道交付 bootstrap 结果（成功 = BusCenter），join 句柄交回停机 join
+    /// 内部线程 + CurrentThread 运行时启动，ready 交付装配结果（§3.1.1）
     pub(crate) fn spawn_runtime(parts: BusParts)
-        -> (mpsc::Receiver<Result<BusCenter, TrayError>>, thread::JoinHandle<()>);
-    /// DBus 方法调用（受 timeout_ms 约束；泛型反序列化应答体）；
-    /// org.kde/org.freedesktop 前缀回退由调用方（read_all/invoke_xy）完成
-    pub(crate) async fn call<T, B>(&self, dest: &str, path: &str, iface: &str,
-                                   method: &str, body: &B) -> Result<T, TrayError>;
-    /// 同步桥（§3.5）：异步指令投递进内部运行时，调用线程阻塞等待；
-    /// 内部各 DBus 调用已带超时，此处另设宽松守护上限防意外悬挂
-    pub(crate) fn cmd<T, F>(&self, f: F) -> Result<T, TrayError>;
-    /// 在内部运行时 spawn 后台任务（信号任务/周期任务）
-    pub(crate) fn spawn<F>(&self, f: F);
+        -&gt; (mpsc::Receiver&lt;Result&lt;BusCenter, TrayError&gt;&gt;, thread::JoinHandle&lt;()&gt;);
+    /// DBus 方法调用（逐调用 timeout_ms 约束；前缀回退由调用方完成）
+    pub(crate) async fn call&lt;T, B&gt;(&amp;self, dest: &amp;str, path: &amp;str, iface: &amp;str,
+                                   method: &amp;str, body: &amp;B) -&gt; Result&lt;T, TrayError&gt;;
+    /// 同步桥（§3.5）
+    pub(crate) fn cmd&lt;T, F&gt;(&amp;self, f: F) -&gt; Result&lt;T, TrayError&gt;;
+    /// 内部运行时后台任务派发
+    pub(crate) fn spawn&lt;F&gt;(&amp;self, f: F);
     // ── 栅栏与停机标记（原子/守卫通道）：is_snapshot_done / mark_snapshot_done /
     //    defer_removed / take_deferred_removed / is_stopping / begin_stopping /
     //    is_stopped / set_stopped / request_stop / report_fatal / report_displaced /
@@ -253,85 +230,83 @@ impl BusCenter {
 }</code></pre>
 
 <h4 id="sec-2-dbus-watcher">2.6.3. watcher.rs（登记中心服务：名持有 / 所有权丢失上报 / 停机）</h4>
-<pre><code>/// 挂载协议面（org.kde / org.freedesktop 两前缀挂同一路径）；
-/// bootstrap 先于申请名执行（名未在位则报到无从发生，§3.1.1）
-pub(crate) async fn mount_interfaces(bus: &BusCenter) -> Result<(), TrayError>;
+<pre><code>/// 挂载协议面（两前缀挂同一路径；bootstrap 首步，§3.1.1）
+pub(crate) async fn mount_interfaces(bus: &amp;BusCenter) -&gt; Result&lt;(), TrayError&gt;;
 pub(crate) struct WatcherService;
 impl WatcherService {
-    /// 申请 Watcher 名（不声明 allow-replacement，持有期不可被替换）；
-    /// 已被持有 → NameTaken。协议面须已挂载：bootstrap 在快照就绪前完成挂载、
-    /// 名最后申请——申请前置会让 Item 报到与快照收集竞态（§3.1.1）
-    pub(crate) async fn start(bus: &BusCenter) -> Result<Self, TrayError>;
+    /// 申请 Watcher 名（持有期不可被替换；已被持有 → NameTaken）
+    pub(crate) async fn start(bus: &amp;BusCenter) -&gt; Result&lt;Self, TrayError&gt;;
 }
-/// 释放名字（shutdown 路径）；受 timeout 约束，总线异常时不拖死停机路径；幂等
-pub(crate) async fn release(bus: &BusCenter);</code></pre>
+/// 释放名字（停机路径；幂等）
+pub(crate) async fn release(bus: &amp;BusCenter);</code></pre>
 
 <h4 id="sec-2-dbus-iface">2.6.4. iface.rs（协议面：成员语义见 ARCHITECTURE §3.4）</h4>
-<pre><code>// 同一结构体派生 FreedesktopWatcherIface（org.freedesktop 前缀，成员等价，
-// 挂同一路径 /StatusNotifierWatcher）；两前缀受理逻辑相同（§3.3.1）
+<pre><code>pub(crate) struct WatcherIface { bus: BusCenter }
+// FreedesktopWatcherIface：org.freedesktop 前缀成员等价，挂同一路径（§3.3.1）
 #[interface(name = "org.kde.StatusNotifierWatcher")]
 impl WatcherIface {
     async fn register_status_notifier_item(
-        &self,
-        #[zbus(header)] header: zbus::message::Header<'_>,
-        service: &str,
+        &amp;self,
+        #[zbus(header)] header: zbus::message::Header&lt;'_&gt;,
+        service: &amp;str,
     );   // #[zbus(header)] 取消息头 sender → dbus::register_item（§3.3.1）
     #[zbus(property)]
-    fn registered_status_notifier_items(&self) -> Vec<String>;  // → 在册清单（tracker.ids 排序）
-    fn register_status_notifier_host(&self, service: String);   // 兼容桩：受理即忘
+    fn registered_status_notifier_items(&amp;self) -&gt; Vec&lt;String&gt;;  // → 在册清单（id 排序）
+    fn register_status_notifier_host(&amp;self, service: &amp;str);     // 兼容桩：受理即忘
     #[zbus(property)]
-    fn is_status_notifier_host_registered(&self) -> bool;       // 兼容桩：恒真
+    fn is_status_notifier_host_registered(&amp;self) -&gt; bool;       // 兼容桩：恒真
     #[zbus(signal)]
-    pub async fn status_notifier_item_registered(&self, service: &str);
+    pub async fn status_notifier_item_registered(
+        emitter: &amp;SignalEmitter&lt;'_&gt;, service: &amp;str) -&gt; zbus::Result&lt;()&gt;;
     #[zbus(signal)]
-    pub async fn status_notifier_item_unregistered(&self, service: &str);
+    pub async fn status_notifier_item_unregistered(
+        emitter: &amp;SignalEmitter&lt;'_&gt;, service: &amp;str) -&gt; zbus::Result&lt;()&gt;;
 }
-/// 广播：Item 报到 / 离开（SignalEmitter 于 /StatusNotifierWatcher 发射，
-/// 只走 org.kde 事实规范前缀——避免双前缀订阅方收到重复通告）
-pub(crate) async fn emit_registered(bus: &BusCenter, service: &str);
-pub(crate) async fn emit_unregistered(bus: &BusCenter, service: &str);</code></pre>
+/// 广播：Item 报到 / 离开（只走 org.kde 前缀，避免双前缀订阅方重复通告）
+pub(crate) async fn emit_registered(bus: &amp;BusCenter, service: &amp;str);
+pub(crate) async fn emit_unregistered(bus: &amp;BusCenter, service: &amp;str);</code></pre>
 
 <h4 id="sec-2-dbus-heartbeat">2.6.5. heartbeat.rs（周期存活探测：结果 = 登记簿记的 alive 字段，不产生事件）</h4>
-<pre><code>pub(crate) const HEARTBEAT_PERIOD: Duration = Duration::from_secs(5);
-/// 每拍：先 GetNameOwner(自身唯一名) 探测总线——IO 类错误
-/// （InputOutput/Handshake/Connection）→ report_fatal → Fatal（终局），超时跳过本拍；
-/// 再并发逐 Item Get(Status)（超时 timeout_ms）→ set_alive 覆盖 alive（§3.6）
+<pre><code>/// 周期存活探测 → set_alive 回写，不产生事件（§3.6）
 pub(crate) async fn heartbeat_task(bus: BusCenter);</code></pre>
 
 <h4 id="sec-2-dbus-menu">2.6.6. menu.rs（dbusmenu 现场读取：零缓存·逐层懒加载）</h4>
-<pre><code>/// 单层现场读取（§3.4.1）：AboutToShow(parent) → GetLayout(parent, 1 层)
-/// → GetGroupProperties → assemble 组装该层 MenuSnapshot；不落任何缓存
-pub(crate) async fn read_layer(bus: &BusCenter, entry: &ItemEntry, parent: i32)
-    -> Result<MenuSnapshot, TrayError>;
-/// 布局 + 组属性 → 该层 MenuSnapshot（助记符解析 + raw 逃生门 + 默认值补全）
+<pre><code>/// GetLayout 布局节点：(id, 属性集, 子树)
+pub(crate) type NodeRaw = (i32, HashMap&lt;String, OwnedValue&gt;, Vec&lt;OwnedValue&gt;);
+/// 单层现场读取（§3.4.1）
+pub(crate) async fn read_layer(bus: &amp;BusCenter, entry: &amp;ItemEntry, parent: i32)
+    -&gt; Result&lt;MenuSnapshot, TrayError&gt;;
+/// 布局 + 组属性 → 该层 MenuSnapshot（§3.4.1）
 pub(crate) fn assemble(
     parent_id: i32,
     revision: u32,
-    children: &[NodeRaw],
-    group: &[(i32, HashMap<String, OwnedValue>)],
-) -> MenuSnapshot;
-/// 单条目属性表 → MenuItem（dbusmenu 属性名 → 字段映射与缺省补全）
-pub(crate) fn menu_item_from_props(id: i32, p: &HashMap<String, OwnedValue>) -> MenuItem;
-/// 助记符 "_" 解析 → label（保留原文另存 raw_label）
-pub(crate) fn parse_mnemonic(raw: &str) -> String;</code></pre>
+    children: &amp;[NodeRaw],
+    group: &amp;[(i32, HashMap&lt;String, OwnedValue&gt;)],
+) -&gt; MenuSnapshot;
+/// 单条目属性表 → MenuItem（dbusmenu 属性名 → 字段映射，缺省补全）
+pub(crate) fn menu_item_from_props(id: i32, p: &amp;HashMap&lt;String, OwnedValue&gt;) -&gt; MenuItem;
+/// 助记符 "_" 解析 → label（原文保留于 raw_label）
+pub(crate) fn parse_mnemonic(raw: &amp;str) -&gt; String;</code></pre>
 
 <h4 id="sec-2-dbus-interact">2.6.7. interact.rs（语义输入路由：ARCHITECTURE §2.7 + 回执）</h4>
 <pre><code>pub(crate) enum Input {   // 路由前归一的语义输入（_at/_by 变体已在 Handle 层折入）
     Left(i32, i32), Middle(i32, i32), Right(i32, i32),
     ScrollUp(i32), ScrollDown(i32), ScrollLeft(i32), ScrollRight(i32),
 }
-/// 按路由表分发（依据登记簿记 menu_only / menu）；左键独走同步路径——Activate
-/// 失败（非超时）且有菜单时回退 Menu 流程（§3.5.1）；Menu 流程现场取数返回快照，
-/// 其余 VOID 调用受理即返回（§3.5.2）
-pub(crate) async fn route(bus: &BusCenter, id: &str,
-                          input: Input) -> Result<InteractionOutcome, TrayError>;
-/// 延续方法：dbusmenu Event("clicked") 提交（§3.4.1 快照中的条目点击）
-pub(crate) fn menu_activate(bus: &BusCenter, id: &str, menu_item_id: i32) -> Result<(), TrayError>;
-/// SNI 定位方法调用（Activate/SecondaryActivate/ContextMenu）：org.kde 前缀优先，
-/// 非超时失败回退 org.freedesktop；任一侧超时立即报错；双前缀俱败合并上报两侧错误
-async fn invoke_xy(bus: &BusCenter, entry: &ItemEntry, method: &str, x: i32, y: i32) -> Result<(), TrayError>;
-/// Scroll(delta, orientation)：同前缀回退
-async fn invoke_scroll(bus: &BusCenter, entry: &ItemEntry, delta: i32, orient: &str) -> Result<(), TrayError>;</code></pre>
+/// 语义输入路由（§3.5.1 §3.5.2）
+pub(crate) async fn route(bus: &amp;BusCenter, id: &amp;str,
+                          input: Input) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
+/// 延续方法：dbusmenu Event("clicked") 提交（§3.4.1）
+pub(crate) fn menu_activate(bus: &amp;BusCenter, id: &amp;str, menu_item_id: i32) -&gt; Result&lt;(), TrayError&gt;;
+/// VOID 交互后台派发，回执入队 InteractionResult（§3.5.2）
+fn dispatch_void&lt;F, Fut&gt;(bus: &amp;BusCenter, entry: ItemEntry, id: String, op: InteractionOp, f: F)
+where
+    F: FnOnce(BusCenter, ItemEntry) -&gt; Fut + Send + 'static,
+    Fut: Future&lt;Output = Result&lt;(), TrayError&gt;&gt; + Send + 'static;
+/// SNI 定位方法调用（kde → fd 前缀回退，§3.5.1 §3.5.2）
+async fn invoke_xy(bus: &amp;BusCenter, entry: &amp;ItemEntry, method: &amp;str, x: i32, y: i32) -&gt; Result&lt;(), TrayError&gt;;
+/// Scroll(delta, orientation) 调用（同前缀回退）
+async fn invoke_scroll(bus: &amp;BusCenter, entry: &amp;ItemEntry, delta: i32, orient: &amp;str) -&gt; Result&lt;(), TrayError&gt;;</code></pre>
 
 <h3 id="sec-2-gtk">2.7. gtk/ <a href="#sec-1">↑ 文件树</a></h3>
 
@@ -340,10 +315,10 @@ async fn invoke_scroll(bus: &BusCenter, entry: &ItemEntry, delta: i32, orient: &
 pub use paintable::icon_paintable;   // 公开面出口（渲染直出；主线程约束见 ARCHITECTURE §3.1）</code></pre>
 
 <h4 id="sec-2-gtk-paintable">2.7.2. paintable.rs（渲染直出：GTK 主线程）</h4>
-<pre><code>pub fn icon_paintable(icon: &IconSource) -> gdk::Paintable   //见 ARCHITECTURE §3.1
-pub(crate) fn lookup_theme_icon(name: &str) -> Option<gdk::Paintable>;   // Icon Theme Spec 命中判定
-pub(crate) fn missing_icon() -> gdk::Paintable;                          // image-missing 占位（规范保留名，保证存在）
-pub(crate) fn pixmap_to_paintable(p: &Pixmap) -> gdk::Paintable;         // ARGB32 → 纹理的色彩处理在此完成</code></pre>
+<pre><code>pub fn icon_paintable;   //见 ARCHITECTURE §3.1
+fn lookup_theme_icon(name: &amp;str) -&gt; Option&lt;gdk::Paintable&gt;;   // Icon Theme Spec 命中判定
+fn missing_icon() -&gt; gdk::Paintable;                          // image-missing 占位（规范保留名，保证存在）
+fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 → 纹理的色彩处理在此完成</code></pre>
 
 <h2 id="sec-3">3. 关键流程调用栈（伪码）</h2>
 
@@ -380,9 +355,9 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 订阅（spawn_signal_tasks）与周期任务（heartbeat_task / debounce_task）先于申请名同理：名在位即可能收到信号与超时，须先就位才不丢。</p>
 
 <h4 id="sec-3-1-2">3.1.2. 反向发现（存量 Item 双级探测）</h4>
-<pre><code>内部: dbus::discover_existing(bus) -> Vec&lt;String&gt;（过程叙述，快照投递后以 Narration 交付）
+<pre><code>内部: dbus::discover_existing(bus) -&gt; Vec&lt;String&gt;（过程叙述，快照投递后以 Narration 交付）
 ├── ListNames → 过滤 "org.kde.StatusNotifierItem-" 前缀候选
-├── 逐个 probe_item_iface(bus, name) -> Result&lt;bool, TrayError&gt;：双级确认 SNI 接口在位
+├── 逐个 probe_item_iface(bus, name) -&gt; Result&lt;bool, TrayError&gt;：双级确认 SNI 接口在位
 │    ├── 第一级：Introspect(name, /StatusNotifierItem) 应答 XML 含 SNI 接口名
 │    │    （org.kde / org.freedesktop 任一）→ 确认
 │    └── 第二级：props::read_all(name, /StatusNotifierItem) 直接属性读取
@@ -411,8 +386,8 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 <pre><code>内部: 协议面收到 RegisterStatusNotifierItem(service)
       （org.kde / org.freedesktop 两前缀等价：两接口挂同一路径，§2 iface）
 ├── sender ← 消息头 sender（调用方唯一名，#[zbus(header)] 注入）
-└── dbus::register_item(bus, service, sender, announce=true) -> Result&lt;bool, TrayError&gt;
-     ├── split_service_arg(service, sender) -> Option&lt;(String, String)&gt;：注册参数三形态解析
+└── dbus::register_item(bus, service, sender, announce=true) -&gt; Result&lt;bool, TrayError&gt;
+     ├── split_service_arg(service, sender) -&gt; Option&lt;(String, String)&gt;：注册参数三形态解析
      │    ├── "name"（规范服务名）→ (name, /StatusNotifierItem)（默认路径）
      │    ├── "name/path"（混串）→ 就地切分；path 缺前导 "/" 时补齐
      │    └── "/path"（Ayatana 风格纯对象路径）→ (sender, path)：服务名取注册方唯一名
@@ -510,7 +485,7 @@ unique 字段；对唯一名查询返回其自身，故全部注册形态走同�
      └── 入队 InteractionResult{op, 成功/失败}</code></pre>
 
 <h3 id="sec-3-6">3.6. 存活探测循环</h3>
-<pre><code>内部: heartbeat_task（HEARTBEAT_PERIOD = 5s，bus.spawn 常驻）
+<pre><code>内部: heartbeat_task（每 5s 一拍，库内定值；bus.spawn 常驻）
 ├── GetNameOwner(自身唯一名) 探测总线（bus.conn.call_method，受 timeout_ms 约束）
 │    ├── IO 类错误（InputOutput / Handshake / Connection）→ report_fatal → Fatal（终局）
 │    └── 超时 → 视作繁忙，跳过本拍
