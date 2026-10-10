@@ -55,7 +55,9 @@ pub(crate) async fn route(
                 });
                 Ok(InteractionOutcome::Dispatched)
             }
-            // 回退 Menu 流程：交付形态与 menu_only 左键一致（Outcome::Menu，无回执事件）
+            // 回退 Menu 流程：交付形态与 menu_only 左键一致（Outcome::Menu，无回执事件）。
+            // 超时不回退——menu 与 Activate 同一主循环分发，Activate 超时则菜单亦不可读
+            Err(e @ TrayError::Timeout { .. }) => Err(e),
             Err(_) if entry.menu.is_some() => {
                 let snapshot = menu::read_layer(bus, &entry, 0).await?;
                 Ok(InteractionOutcome::Menu(snapshot))
@@ -150,6 +152,8 @@ where
 /// SNI 定位方法（Activate / SecondaryActivate / ContextMenu）：org.kde 前缀优先，
 /// 失败回退 org.freedesktop 前缀；双前缀俱败时合并上报两侧错误
 /// （只报末次会掩盖 kde 侧真因——如 item 端 Activate 无处理器）。
+/// 超时即止：对端失联时另一前缀与后续回退注定同耗（menu 与 Activate
+/// 同一主循环分发，Activate 超时则菜单亦不可读），不做任何重试。
 async fn invoke_xy(
     bus: &BusCenter,
     entry: &ItemEntry,
@@ -162,11 +166,13 @@ async fn invoke_xy(
         .await
     {
         Ok(()) => Ok(()),
+        Err(e @ TrayError::Timeout { .. }) => Err(e),
         Err(kde) => match bus
             .call::<(), _>(&entry.service, &entry.path, ITEM_IFACE_FD, method, &(x, y))
             .await
         {
             Ok(()) => Ok(()),
+            Err(e @ TrayError::Timeout { .. }) => Err(e),
             Err(fd) => Err(TrayError::Protocol(format!(
                 "{method} failed on both prefixes: org.kde: {kde}; org.freedesktop: {fd}"
             ))),
@@ -192,6 +198,7 @@ async fn invoke_scroll(
         .await
     {
         Ok(()) => Ok(()),
+        Err(e @ TrayError::Timeout { .. }) => Err(e),
         Err(kde) => match bus
             .call::<(), _>(
                 &entry.service,
@@ -203,6 +210,7 @@ async fn invoke_scroll(
             .await
         {
             Ok(()) => Ok(()),
+            Err(e @ TrayError::Timeout { .. }) => Err(e),
             Err(fd) => Err(TrayError::Protocol(format!(
                 "Scroll failed on both prefixes: org.kde: {kde}; org.freedesktop: {fd}"
             ))),
