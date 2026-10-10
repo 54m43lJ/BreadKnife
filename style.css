@@ -126,6 +126,7 @@ footer {
 }
 
 /* ── 嵌入图（PlantUML 导出 SVG）── 按原始尺寸渲染，不随容器缩放；
-   过宽的图在图区域内横向滚动，页面文字布局不受影响 */
-figure.diagram { margin: 1rem 0; overflow-x: auto; }
-figure.diagram img { max-width: none; }
+   仅过宽的图在图区域内横向滚动（滚动不外链），页面本身不横向平移 */
+html, body { overflow-x: clip; }
+figure.diagram { margin: 1rem 0; overflow-x: auto; overscroll-behavior-x: contain; }
+figure.diagram img { max-width: none; display: block; }
