@@ -13,22 +13,22 @@
 
 <h2 id="sec-1">1. 文件树</h2>
 <pre><code>src/
-├── lib.rs  <a href="#sec-2-lib"></a>             # 公开面出口（核心 + gtk 整合层）
-├── handle.rs <a href="#sec-2-handle"></a>           # TrayConfig + TrayHandle 前端（指令受理 → 内部线程投递）
-├── events.rs <a href="#sec-2-events"></a>           # TrayEvent、单事件通道（tokio mpsc；start 交付唯一 Receiver）
-├── tracker.rs <a href="#sec-2-tracker"></a>          # Item 登记簿记（最小集）：报到 / 反向发现 / 死亡清理
-├── props.rs  <a href="#sec-2-props"></a>           # 属性即时读取（zvariant/serde → 原生结构）
+├── <a href="#sec-2-lib">lib.rs</a>               # 公开面出口（核心 + gtk 整合层）
+├── <a href="#sec-2-handle">handle.rs</a>            # TrayConfig + TrayHandle 前端（指令受理 → 内部线程投递）
+├── <a href="#sec-2-events">events.rs</a>            # TrayEvent、单事件通道（tokio mpsc；start 交付唯一 Receiver）
+├── <a href="#sec-2-tracker">tracker.rs</a>           # Item 登记簿记（最小集）：报到 / 反向发现 / 死亡清理
+├── <a href="#sec-2-props">props.rs</a>             # 属性即时读取（zvariant/serde → 原生结构）
 ├── dbus/
-│   ├── mod.rs  <a href="#sec-2-dbus-mod"></a>         # DBus 域出口（内部聚合）：常量、启动编排、报到受理与反向发现、全局信号订阅
-│   ├── bus.rs  <a href="#sec-2-dbus-bus"></a>         # 会话总线连接（zbus tokio 特性）与库内 tokio 运行时宿主
-│   ├── watcher.rs <a href="#sec-2-dbus-watcher"></a>      # 登记中心服务：名持有（不可替换）、所有权丢失上报、停机
-│   ├── iface.rs  <a href="#sec-2-dbus-iface"></a>       # org.kde.StatusNotifierWatcher 协议面（ARCHITECTURE §3.4）
-│   ├── heartbeat.rs <a href="#sec-2-dbus-heartbeat"></a>    # 周期存活探测：结果写入登记簿记（alive 字段）
-│   ├── menu.rs  <a href="#sec-2-dbus-menu"></a>        # dbusmenu 现场读取（零缓存·逐层懒加载）
-│   └── interact.rs <a href="#sec-2-dbus-interact"></a>     # 语义输入路由（ARCHITECTURE §2.7）+ InteractionResult 回执
+│   ├── <a href="#sec-2-dbus-mod">mod.rs</a>           # DBus 域出口（内部聚合）：常量、启动编排、报到受理与反向发现、全局信号订阅
+│   ├── <a href="#sec-2-dbus-bus">bus.rs</a>           # 会话总线连接（zbus tokio 特性）与库内 tokio 运行时宿主
+│   ├── <a href="#sec-2-dbus-watcher">watcher.rs</a>       # 登记中心服务：名持有（不可替换）、所有权丢失上报、停机
+│   ├── <a href="#sec-2-dbus-iface">iface.rs</a>         # org.kde.StatusNotifierWatcher 协议面（ARCHITECTURE §3.4）
+│   ├── <a href="#sec-2-dbus-heartbeat">heartbeat.rs</a>     # 周期存活探测：结果写入登记簿记（alive 字段）
+│   ├── <a href="#sec-2-dbus-menu">menu.rs</a>          # dbusmenu 现场读取（零缓存·逐层懒加载）
+│   └── <a href="#sec-2-dbus-interact">interact.rs</a>      # 语义输入路由（ARCHITECTURE §2.7）+ InteractionResult 回执
 └── gtk/
-    ├── mod.rs  <a href="#sec-2-gtk-mod"></a>         # 整合层出口（渲染直出；主线程约束说明）
-    └── paintable.rs <a href="#sec-2-gtk-paintable"></a>    # 渲染直出：主题命中 → 主题图标；路径 → 文件纹理；未命中 → 位图纹理
+    ├── <a href="#sec-2-gtk-mod">mod.rs</a>           # 整合层出口（渲染直出；主线程约束说明）
+    └── <a href="#sec-2-gtk-paintable">paintable.rs</a>     # 渲染直出：主题命中 → 主题图标；路径 → 文件纹理；未命中 → 位图纹理
 
 examples/                # 唯一示例目录：可运行的用法实例（README「实例代码」表）
 ├── minimal.rs           # 最小消费方：start → 消费事件流 → 打印快照与事件
