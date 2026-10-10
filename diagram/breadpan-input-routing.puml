@@ -5,6 +5,7 @@ start
 (left_click / middle_click / right_click / scroll_*，§3.1；
 缺省 x/y=(0,0)、steps=1，_at/_by 变体传显式值);
 |breadpan|
+:校验 Item 在册（否则 ItemNotFound）;
 :路由：查登记簿记 menu_only / menu（零查询）;
 if (left_click？) then (是)
   if (menu_only 且 DBusMenu 在册？) then (是)
@@ -53,7 +54,8 @@ if (right_click 且 DBusMenu 在册？) then (是)
   stop
 endif
 |breadpan|
-:VOID 受理即返回（调用在后台执行）
+:VOID 兜底（middle_click / 右键无菜单 / scroll_*）;
+:受理即返回（调用在后台执行）
 ── 中键 → SecondaryActivate(x,y)；
 右键（无菜单）→ ContextMenu(x,y)——SNI 原生 fallback：
 Item 自绘弹出，宿主不参与渲染，非常规路径；
