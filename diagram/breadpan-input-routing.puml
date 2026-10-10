@@ -55,13 +55,11 @@ if (right_click 且 DBusMenu 在册？) then (是)
 endif
 |breadpan|
 :VOID 受理即返回（调用在后台执行）
-── 中键 → SecondaryActivate(x,y)；
-右键（无菜单）→ ContextMenu(x,y)——SNI 原生 fallback：
-Item 自绘弹出，宿主不参与渲染，非常规路径；
-滚轮 → Scroll(∓steps, orient)
-── invoke_xy / invoke_scroll：org.kde 前缀优先，
-非超时失败回退 org.freedesktop；双前缀俱败
-合并上报两侧错误；任一侧超时 → 立即报错;
+- 中键 → SecondaryActivate(x,y)
+- 右键（无菜单）→ ContextMenu(x,y)
+  ——SNI 原生 fallback：Item 自绘弹出，
+  宿主不参与渲染，非常规路径
+- 滚轮 → Scroll(∓steps, orient);
 note right
   本块是 middle_click 与 scroll_* 的必经线路：
   left_click？判否后直达此处；right_click 仅在
