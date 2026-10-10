@@ -6,15 +6,13 @@ start
 缺省 x/y=(0,0)、steps=1，_at/_by 变体传显式值);
 |breadpan|
 :路由：查登记簿记 menu_only / menu（零查询）;
-if (Menu 命中？\nright_click：DBusMenu 在册
-left_click：menu_only 且 DBusMenu 在册) then (是)
+if (Menu 命中？\nright_click：DBusMenu 在册\nleft_click：menu_only 且 DBusMenu 在册) then (是)
   :Menu 流程（§2.6，含 AboutToShow / GetLayout）;
   |消费方|
   :Outcome::Menu → 渲染弹出
   条目点击 → menu_activate；子层展开 → menu_expand;
   stop
 endif
-|breadpan|
 if (left_click？) then (是：独走同步路径)
   |Item|
   :Activate(x,y);
@@ -45,7 +43,7 @@ if (left_click？) then (是：独走同步路径)
     stop
   endif
   |消费方|
-  :Err（失败且无菜单）;
+  :Err（无菜单可回退）;
   stop
 endif
 |breadpan|

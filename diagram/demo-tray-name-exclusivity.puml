@@ -23,12 +23,12 @@ if (名字已被持有？) then (是)
     :NameTaken
     （提示多 Watcher 不共存）;
     stop
-  else (否)
-    :登记中心就位;
-    stop
   endif
+  :登记中心就位;
+  stop
 else (否)
-  :替身持有成功;
+  :替身持有成功
+  （Tray 持有中不应发生）;
   stop
 endif
 @enduml
