@@ -55,6 +55,7 @@ Sequence diagrams and activity diagrams are drawn with PlantUML — never hand-d
 RULES:
 - **This document is purely for internal mechanism details. If it is anything relevant to the usage of this project, it should be in the architecture doc instead.**
 - **Does not have to be exhaustive. Focus on key execution paths during startup, key events, and shutdown.**
+- **Symbols already defined in the architecture document are referenced in CODE.html in the unified one-line form `pub <type> <name> //见 ARCHITECTURE §xx.xx` — no body, no redefinition. Everything else in CODE.html must be syntactically valid Rust.**
 
 -----
 

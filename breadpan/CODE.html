@@ -42,42 +42,60 @@ handle/events 为公开前端。</p>
 库不创建 GLib 上下文。</p>
 
 <h2 id="sec-2">2. 内部类型与方法签名</h2>
-<p>按 src/ 文件树组织的内部类型与方法签名摘要，与实现一致。
+<p>按 src/ 文件树组织的内部类型与方法签名摘要，与实现一致。标注
+<code>//见 ARCHITECTURE …</code> 的条目为架构文档已定义符号的统一引用格式。
+<strong>注意</strong>：登记合并（Upsert::Renamed / NameChanged，§3.3.1）为
+<strong>先行设计</strong>——dev 代码尚未实现，对齐代码时以本文为准、不得回退旧实现。<br>
 公开类型与签名（Tray / TrayHandle / TrayEvent / 数据模型 / TrayError / gtk）见
 <a href="ARCHITECTURE.html#sec-3">ARCHITECTURE.html §3</a>，此处不重复。</p>
 
 <h3 id="sec-2-lib">2.1. lib.rs <a href="#sec-1">↑ 文件树</a></h3>
-<p>公开面出口：核心类型（TrayItem / TrayCategory / TrayStatus / ToolTip / IconSource /
-Pixmap / MenuSnapshot / MenuItem / InteractionOutcome / TrayError）、
-<code>pub mod events / gtk</code> 与 <code>pub use events::{InteractionOp, TrayEvent};
-pub use handle::{Tray, TrayConfig, TrayHandle};</code>。公开定义见
-<a href="ARCHITECTURE.html#sec-3">ARCHITECTURE.html §3</a>。</p>
+<pre><code>pub struct TrayItem          //见 ARCHITECTURE §3.3
+pub enum TrayCategory        //见 ARCHITECTURE §3.3
+pub enum TrayStatus          //见 ARCHITECTURE §3.3
+pub struct ToolTip           //见 ARCHITECTURE §3.3
+pub enum IconSource          //见 ARCHITECTURE §3.3
+pub struct Pixmap            //见 ARCHITECTURE §3.3
+pub struct MenuSnapshot      //见 ARCHITECTURE §3.3
+pub struct MenuItem          //见 ARCHITECTURE §3.3
+pub enum InteractionOutcome  //见 ARCHITECTURE §3.1
+pub enum TrayError           //见 ARCHITECTURE §3.1
+pub mod events               // TrayEvent / InteractionOp（§3.1）/ EventQueue（本文件 2.3）
+pub mod gtk                  // 渲染直出整合层（icon_paintable，§3.1）
+pub use events::{InteractionOp, TrayEvent};
+pub use handle::{Tray, TrayConfig, TrayHandle};</code></pre>
 
 <h3 id="sec-2-handle">2.2. handle.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>// TrayConfig 公开定义见 ARCHITECTURE §3.1，与前端同文件承载，此处不重复
-pub struct TrayConfig { /* timeout_ms / debounce_ms，语义见 ARCHITECTURE §3.1 */ }
-pub struct Tray;                                       // 无字段构造体；Drop → 最后实例触发 shutdown
+<pre><code>pub struct TrayConfig        //见 ARCHITECTURE §3.1（timeout_ms / debounce_ms）
+pub struct Tray;             //见 ARCHITECTURE §3.1；Drop → 最后实例触发 shutdown
 impl Tray {
-    pub fn start(config: TrayConfig)
-        -> Result<(TrayHandle, Receiver<TrayEvent>), TrayError>;
+    pub fn start(config: TrayConfig) -> Result<(TrayHandle, Receiver<TrayEvent>), TrayError>
+    //见 ARCHITECTURE §3.1；内部：
     // EventQueue::new → BusParts::new → BusCenter::spawn_runtime
     // → 轮询 ready 通道等 bootstrap 完成（引导总时限 max(10×timeout_ms, 10s) 守护）
     //   超时/失败 → join 内部线程并返回 Err
 }
-pub struct TrayHandle { shared: Arc<RuntimeShared> }   // Clone + Send + Sync
+pub struct TrayHandle        //见 ARCHITECTURE §3.1（Clone + Send + Sync）
 // 公开方法组（items / item / is_alive / menu / menu_expand / 交互方法组 / shutdown）
 // 签名见 ARCHITECTURE §3.1；内部受理：
 impl TrayHandle {
+    fn live(&self) -> Result<&BusCenter, TrayError>;   // is_stopped → Err(Stopped)
     fn input(&self, id: &TrayItemId, input: interact::Input)
-        -> Result<InteractionOutcome, TrayError>;      // dispatch(|bus| interact::route(...))
-    fn dispatch<T, F, Fut>(&self, f: F) -> Result<T, TrayError>;   // BusCenter::cmd 同步桥
+        -> Result<InteractionOutcome, TrayError>;
+        // dispatch(|bus| interact::route(&bus, &id, input))
+    fn dispatch<T, F, Fut>(&self, f: F) -> Result<T, TrayError>
+    where
+        T: Send + 'static,
+        F: FnOnce(BusCenter) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T, TrayError>> + Send + 'static;
+        // BusCenter::cmd 同步桥
 }
 impl Drop for TrayHandle {
-    fn drop(&mut self)   // strong_count == 1 → RuntimeShared::shutdown
+    fn drop(&mut self);   // strong_count == 1 → RuntimeShared::shutdown
 }
 pub(crate) struct RuntimeShared {
-    bus: BusCenter,                       // 库内总线域句柄（Clone 廉价）
-    rt_thread: thread::ThreadId,          // 内部运行时线程（停机 join 用；自线程不 join）
+    bus: BusCenter,                     // 库内总线域句柄（Clone 廉价）
+    rt_thread: thread::ThreadId,        // 内部运行时线程（停机 join 用；自线程不 join）
     join: Mutex<Option<thread::JoinHandle<()>>>,
 }
 impl RuntimeShared {
@@ -88,8 +106,8 @@ impl RuntimeShared {
 
 <h3 id="sec-2-events">2.3. events.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub(crate) const CHANNEL_CAPACITY: usize = 256;   // 通道容量（库内定值）
-pub enum TrayEvent { … }       // 公开定义见 ARCHITECTURE §3.1（含 NameChanged）
-pub enum InteractionOp { … }   // 公开定义见 ARCHITECTURE §3.1
+pub enum TrayEvent        //见 ARCHITECTURE §3.1（含 NameChanged）
+pub enum InteractionOp    //见 ARCHITECTURE §3.1
 pub(crate) struct EventQueue {
     tx: tokio::sync::mpsc::Sender<TrayEvent>,   // 唯一通道发送端；Receiver 仅经 Tray::start 交付
     dropped: AtomicU64,                         // 背压丢弃告警计数（单通道）
@@ -107,13 +125,13 @@ impl EventQueue {
 
 <h3 id="sec-2-tracker">2.4. tracker.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub(crate) struct ItemEntry {
-    service: String,   // 公共名（= TrayItemId；唯一名形态报到时暂以临时唯一名占位，
+    pub service: String,   // 公共名（= TrayItemId；唯一名形态报到时暂以临时唯一名占位，
                        //  Bus Name 报到时升级并触发 NameChanged）
-    unique: String,    // 属主唯一名（= 连接身份，第二轮 lookup 键；注册时 GetNameOwner 解析）
-    path: String,      // Item 对象路径（交互寻址用；以最新报到为准）
-    alive: bool,       // 最近一次存活探测结论（报到时置 true，此后由周期探测覆盖）
-    menu: Option<String>, // dbusmenu 对象路径（注册时探测 Menu 属性；None = 无 DBusMenu，右键 fallback）
-    menu_only: bool,   // 整项即菜单（左键路由依据；注册时探测，随变更信号就地更新）
+    pub unique: String,    // 属主唯一名（= 连接身份，第二轮 lookup 键；注册时 GetNameOwner 解析）
+    pub path: String,      // Item 对象路径（交互寻址用；以最新报到为准）
+    pub alive: bool,       // 最近一次存活探测结论（报到时置 true，此后由周期探测覆盖）
+    pub menu: Option<String>, // dbusmenu 对象路径（注册时探测 Menu 属性；None = 无 DBusMenu，右键 fallback）
+    pub menu_only: bool,   // 整项即菜单（左键路由依据；注册时探测，随变更信号就地更新）
 }
 /// upsert 结果：新条目 / 原地刷新 / id 升级（临时唯一名 → Bus Name，§3.3.1）
 pub(crate) enum Upsert { Inserted, Refreshed, Renamed { old: TrayItemId, new: TrayItemId } }
@@ -253,15 +271,20 @@ pub(crate) async fn release(bus: &BusCenter);</code></pre>
 // 挂同一路径 /StatusNotifierWatcher）；两前缀受理逻辑相同（§3.3.1）
 #[interface(name = "org.kde.StatusNotifierWatcher")]
 impl WatcherIface {
-    fn register_status_notifier_item(&self, header, service: &str);
-    // #[zbus(header)] 取消息头 sender → dbus::register_item（§3.3.1）
+    async fn register_status_notifier_item(
+        &self,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+        service: &str,
+    );   // #[zbus(header)] 取消息头 sender → dbus::register_item（§3.3.1）
+    #[zbus(property)]
     fn registered_status_notifier_items(&self) -> Vec<String>;  // → 在册清单（tracker.ids 排序）
     fn register_status_notifier_host(&self, service: String);   // 兼容桩：受理即忘
+    #[zbus(property)]
     fn is_status_notifier_host_registered(&self) -> bool;       // 兼容桩：恒真
-    #[signal]
-    fn status_notifier_item_registered(&self, service: &str);
-    #[signal]
-    fn status_notifier_item_unregistered(&self, service: &str);
+    #[zbus(signal)]
+    pub async fn status_notifier_item_registered(&self, service: &str);
+    #[zbus(signal)]
+    pub async fn status_notifier_item_unregistered(&self, service: &str);
 }
 /// 广播：Item 报到 / 离开（SignalEmitter 于 /StatusNotifierWatcher 发射，
 /// 只走 org.kde 事实规范前缀——避免双前缀订阅方收到重复通告）
@@ -281,7 +304,12 @@ pub(crate) async fn heartbeat_task(bus: BusCenter);</code></pre>
 pub(crate) async fn read_layer(bus: &BusCenter, entry: &ItemEntry, parent: i32)
     -> Result<MenuSnapshot, TrayError>;
 /// 布局 + 组属性 → 该层 MenuSnapshot（助记符解析 + raw 逃生门 + 默认值补全）
-pub(crate) fn assemble(…) -> MenuSnapshot;
+pub(crate) fn assemble(
+    parent_id: i32,
+    revision: u32,
+    children: &[NodeRaw],
+    group: &[(i32, HashMap<String, OwnedValue>)],
+) -> MenuSnapshot;
 /// 单条目属性表 → MenuItem（dbusmenu 属性名 → 字段映射与缺省补全）
 pub(crate) fn menu_item_from_props(id: i32, p: &HashMap<String, OwnedValue>) -> MenuItem;
 /// 助记符 "_" 解析 → label（保留原文另存 raw_label）
@@ -312,9 +340,7 @@ async fn invoke_scroll(bus: &BusCenter, entry: &ItemEntry, delta: i32, orient: &
 pub use paintable::icon_paintable;   // 公开面出口（渲染直出；主线程约束见 ARCHITECTURE §3.1）</code></pre>
 
 <h4 id="sec-2-gtk-paintable">2.7.2. paintable.rs（渲染直出：GTK 主线程）</h4>
-<pre><code>/// 统一出口 icon_paintable（公开面，定义见 ARCHITECTURE §3）：Name → 主题查找；
-/// Path → Texture::from_filename（失败回退 image-missing）；Pixmap → 内存纹理
-pub fn icon_paintable(icon: &IconSource) -> gdk::Paintable;
+<pre><code>pub fn icon_paintable(icon: &IconSource) -> gdk::Paintable   //见 ARCHITECTURE §3.1
 pub(crate) fn lookup_theme_icon(name: &str) -> Option<gdk::Paintable>;   // Icon Theme Spec 命中判定
 pub(crate) fn missing_icon() -> gdk::Paintable;                          // image-missing 占位（规范保留名，保证存在）
 pub(crate) fn pixmap_to_paintable(p: &Pixmap) -> gdk::Paintable;         // ARGB32 → 纹理的色彩处理在此完成</code></pre>
