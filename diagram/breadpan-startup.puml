@@ -6,16 +6,20 @@ participant "存量 Item" as item
 
 消费方 -> bp: start()
 bp -> 会话总线: 连接会话总线
-bp -> 会话总线: 申请 Watcher 名
-note right of 会话总线
-  已被持有 → NameTaken
-  （多 Watcher 不能共存）
+note right of bp
+  挂载协议面（org.kde / org.freedesktop 两前缀）——
+  名未在位，报到无从发生
 end note
-会话总线 --> bp: 名字在位
+bp -> 会话总线: 订阅变更 / 死亡清理信号（全局 match rule）\n+ 启动心跳 / 节流周期任务
 bp -> item: 反向发现：ListNames 扫描 + 探测
 bp -> bp: 登记最小集入册（唯一名 + 对象路径）
-bp -> 会话总线: 订阅变更 / 死亡清理信号
 bp -> bp: 逐个现场读取 → 入队 Snapshot（全部 Item）
+bp -> 会话总线: 申请 Watcher 名（最后申请）
+note right of 会话总线
+  已被持有 → NameTaken（多 Watcher 不能共存）；
+  名最后申请 → 报到必落于快照之后，以增量事件衔接
+end note
+会话总线 --> bp: 名字在位
 消费方 <-- bp: (Handle, 事件通道)
 note over 消费方
   recv().await：Snapshot → 增量事件流

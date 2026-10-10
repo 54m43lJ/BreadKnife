@@ -119,7 +119,7 @@ pub struct TrayConfig {
 
 // ── 入口：一次启动，登记中心与逻辑 Host 同进程就位 ──
 impl Tray {
-    /// 申请 Watcher 总线名（不可被替换）→ 反向发现在册 Item → 建立跟踪；
+    /// 建立登记中心（协议面就位、存量 Item 反向发现、事件通道建立）；
     /// 阻塞至完成（或超时）；通道首事件为快照，与后续事件原子衔接
     pub fn start(config: TrayConfig) -&gt; Result&lt;(TrayHandle, tokio::sync::mpsc::Receiver&lt;TrayEvent&gt;), TrayError&gt;;
 }

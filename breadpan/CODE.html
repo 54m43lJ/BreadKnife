@@ -143,14 +143,18 @@ impl BusCenter {
 }
 
 // ── dbus/watcher.rs：登记中心服务（名持有 / 所有权丢失上报 / 停机）──
+/// 挂载协议面（org.kde / org.freedesktop 两前缀挂同一路径）；
+/// bootstrap 先于申请名执行（名未在位则报到无从发生，§3.1.1）
+pub(crate) async fn mount_interfaces(bus: &amp;BusCenter) -&gt; Result&lt;(), TrayError&gt;;
 pub(crate) struct WatcherService;
 impl WatcherService {
-    /// 申请 Watcher 名（不声明 allow-replacement，持有期不可被替换）并挂载协议面；
-    /// 所有权丢失时触发 on_lost；阻塞至名字在位（已被持有 → NameTaken）
-    pub(crate) fn start(bus: &amp;BusCenter, on_lost: impl Fn() + Send + 'static) -&gt; Result&lt;Self, TrayError&gt;;
-    /// 释放名字、卸载协议面（shutdown 路径）；幂等
-    pub(crate) fn stop(&amp;self);
+    /// 申请 Watcher 名（不声明 allow-replacement，持有期不可被替换）；
+    /// 已被持有 → NameTaken。协议面须已挂载：bootstrap 在快照就绪前完成挂载、
+    /// 名最后申请——申请前置会让 Item 报到与快照收集竞态（§3.1.1）
+    pub(crate) async fn start(bus: &amp;BusCenter) -&gt; Result&lt;Self, TrayError&gt;;
 }
+/// 释放名字（shutdown 路径）；受 timeout 约束，总线异常时不拖死停机路径；幂等
+pub(crate) async fn release(bus: &amp;BusCenter);
 
 // ── dbus/iface.rs：org.kde.StatusNotifierWatcher 协议面（成员语义见 ARCHITECTURE §3.4）──
 #[interface(name = "org.kde.StatusNotifierWatcher")]
@@ -210,14 +214,21 @@ pub(crate) fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         
 <pre><code>流程 Tray::start(config)
 ├── 连接会话总线
 ├── 启动内部 tokio 运行时（CurrentThread，独占内部线程）
-├── WatcherService::start
-│    ├── 申请 Watcher 名（不可被替换）
-│    │    └── 已被他人持有 → 返回 NameTaken（多 Watcher 不能共存）
-│    └── 挂载协议面（§2 iface，ARCHITECTURE §3.4）
-├── 反向发现存量 Item（dbus::discover_existing，§3.1.2）
-├── 订阅 NameOwnerChanged（死亡清理，§3.3.2）
-├── 逐个现场读取（fetch_item）→ 事件入队 Snapshot(全部 Item 记录)
+├── bootstrap（顺序即契约——申请名必须最后，理由见下方说明）
+│    ├── 挂载协议面（org.kde / org.freedesktop 两前缀挂同一路径，§2 iface）
+│    │    └── 名未在位 → 报到无从发生，快照收集不受报到竞态干扰
+│    ├── 全局信号订阅（NameOwnerChanged §3.3.2 / New* 与 PropertiesChanged
+│    │    §3.2 / dbusmenu §3.4.2）+ 周期任务（心跳 §3.6 / 节流窗口 §3.2）
+│    ├── 反向发现存量 Item（dbus::discover_existing，§3.1.2，静默入册）
+│    ├── 快照：逐个现场读取（fetch_item）→ 事件入队 Snapshot(全部 Item 记录)
+│    └── 最后申请 Watcher 名（WatcherService::start，不可被替换）
+│         └── 已被他人持有 → 返回 NameTaken（多 Watcher 不能共存）
 └── 返回 (Handle, 事件通道)</code></pre>
+
+<p>顺序为什么是契约：Watcher 名最后申请——申请前报到无从发生，快照投递后所有报到
+以增量事件衔接（首事件即快照，无重叠无缺口）。若先申请名，等待 Watcher 出现的
+Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> 抢在快照之前——实测复现。
+订阅与周期任务先于申请名同理：名在位即可能收到信号与超时，须先就位才不丢。</p>
 
 <h4 id="sec-3-1-2">3.1.2. 反向发现（存量 Item 双级探测）</h4>
 <pre><code>内部: dbus::discover_existing(bus) -> Vec&lt;String&gt;（过程叙述，快照投递后以 Narration 交付）
