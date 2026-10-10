@@ -77,25 +77,25 @@
 <h3 id="sec-5-1">5.1. 启动组装</h3>
 <table class="seq">
   <tr><th class="lf">启动者</th><th class="mid">demo-tray</th><th class="lbl">breadpan</th></tr>
-  <tr><td class="lf l">── run ──→</td><td class="mid"></td><td class="lbl"></td></tr>
-  <tr><td class="lf"></td><td class="mid l">── Tray::start ──→</td><td class="lbl"></td></tr>
+  <tr><td class="lf l">run ──→</td><td class="mid"></td><td class="lbl"></td></tr>
+  <tr><td class="lf"></td><td class="mid l">Tray::start ──→</td><td class="lbl"></td></tr>
   <tr><td class="lf"></td><td class="mid">（登记中心就位 + 存量 Item 反向发现）</td><td class="lbl"></td></tr>
   <tr><td class="lf"></td><td class="mid r">←── (Handle, 通道)</td><td class="lbl"></td></tr>
   <tr><td class="lf"></td><td class="mid">== 首事件 Snapshot → 卡片流 + 日志 ==</td><td class="lbl"></td></tr>
-  <tr><td class="lf"></td><td class="mid l">── 注册演示 Item（测试台）──→</td><td class="lbl"></td></tr>
+  <tr><td class="lf"></td><td class="mid l">注册演示 Item（测试台）──→</td><td class="lbl"></td></tr>
 </table>
 
 <h3 id="sec-5-2">5.2. 右键菜单全流程</h3>
 <table class="seq">
   <tr><th class="lf">用户</th><th class="mid">demo-tray UI</th><th class="mid">breadpan</th><th class="lbl">演示 Item</th></tr>
-  <tr><td class="lf l">── 右键 ──→</td><td class="mid"></td><td class="mid"></td><td class="lbl"></td></tr>
-  <tr><td class="lf"></td><td class="mid l">── right_click ──→</td><td class="mid"></td><td class="lbl"></td></tr>
-  <tr><td class="lf"></td><td class="mid"></td><td class="mid l">── AboutToShow ──→</td><td class="lbl">（内含前置通知）</td></tr>
+  <tr><td class="lf l">右键 ──→</td><td class="mid"></td><td class="mid"></td><td class="lbl"></td></tr>
+  <tr><td class="lf"></td><td class="mid l">right_click ──→</td><td class="mid"></td><td class="lbl"></td></tr>
+  <tr><td class="lf"></td><td class="mid"></td><td class="mid l">AboutToShow ──→</td><td class="lbl">（内含前置通知）</td></tr>
   <tr><td class="lf"></td><td class="mid"></td><td class="mid r">←── 需要更新?</td><td class="lbl"></td></tr>
-  <tr><td class="lf"></td><td class="mid r">←── 全量快照</td><td class="mid l">── GetLayout ──→</td><td class="lbl"></td></tr>
+  <tr><td class="lf"></td><td class="mid r">←── 全量快照</td><td class="mid l">GetLayout ──→</td><td class="lbl"></td></tr>
   <tr><td class="lf"></td><td class="mid">== 渲染弹出 ==</td><td class="mid r">←── 布局 + 属性</td><td class="lbl"></td></tr>
-  <tr><td class="lf l">── 点条目 ──→</td><td class="mid"></td><td class="mid"></td><td class="lbl"></td></tr>
-  <tr><td class="lf"></td><td class="mid l">── menu_activate ──→</td><td class="mid l">── Event ──→</td><td class="lbl"></td></tr>
+  <tr><td class="lf l">点条目 ──→</td><td class="mid"></td><td class="mid"></td><td class="lbl"></td></tr>
+  <tr><td class="lf"></td><td class="mid l">menu_activate ──→</td><td class="mid l">Event ──→</td><td class="lbl"></td></tr>
   <tr><td class="lf"></td><td class="mid r">←── 回执事件（日志可见）</td><td class="mid r">←── 结果</td><td class="lbl"></td></tr>
   <tr><td class="lf"></td><td class="mid" colspan="3">popup 打开期间 menu add/remove → MenuChanged → demo-tray 重取 menu() → 菜单内容更新</td></tr>
 </table>
@@ -103,9 +103,9 @@
 <h3 id="sec-5-3">5.3. 名字独占</h3>
 <table class="seq">
   <tr><th class="lf">测试台</th><th class="mid">demo-tray</th><th class="mid">breadpan</th><th class="lbl">总线名替身</th></tr>
-  <tr><td class="lf l">── claim ──→</td><td class="mid"></td><td class="mid"></td><td class="lbl"></td></tr>
-  <tr><td class="lf"></td><td class="mid"></td><td class="mid r">── spawn 替身，申请同名 ──→</td><td class="lbl">（demo-tray 发起）</td></tr>
-  <tr><td class="lf"></td><td class="mid"></td><td class="mid r">←── 申请结论：被拒（Tray 持有中，不可替换）</td><td class="lbl"></td></tr>
+  <tr><td class="lf l">claim ──→</td><td class="mid"></td><td class="mid"></td><td class="lbl"></td></tr>
+  <tr><td class="lf"></td><td class="mid l" colspan="2">spawn 替身，申请同名 ──→</td><td class="lbl"></td></tr>
+  <tr><td class="lf"></td><td class="mid r" colspan="2">←── 申请结论：被拒（Tray 持有中，不可替换）</td><td class="lbl"></td></tr>
   <tr><td class="lf" colspan="4">Tray 停机后再次 claim → 替身持有成功；此时重新 Tray::start → NameTaken，提示多 Watcher 不共存</td></tr>
 </table>
 <p class="diagram-note">正常持有期不存在让位/夺回（所有权语义见 <a href="../breadpan/ARCHITECTURE.html#sec-2-8">breadpan §2.8</a>）；Displaced 属极罕见边缘路径，仅总线层异常可触发，窗口内不复现，验收归集成测试。</p>

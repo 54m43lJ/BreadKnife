@@ -49,12 +49,11 @@ Sequence diagrams are never drawn in ASCII. Render each of them as a borderless 
 2. First row is the participant header. Participant names are left-aligned so each label sits on its own lifeline; the row is bold and has no separator line.
 3. A cell is empty unless something happens in that region at that step. A light dashed separator is drawn under cells with content only (`td:not(:empty)`), never under empty cells.
 4. Alignment semantics — flows hug their origin:
-   - rightward message `── text ──→`: left-aligned (`class="l"`)
+   - rightward message `text ──→`: left-aligned (`class="l"`)
    - leftward message `←── text`: right-aligned (`class="r"`)
    - everything else (conditions, internal actions, annotations): centered (default)
-5. A message must fit on one line. Shorten what is shown in the diagram (e.g. method name without parameters) when needed; full signatures belong in auxiliary tables below the diagram.
-6. Cross-region messages (origin and destination are not adjacent lifelines): place the message in the destination's region, right-aligned so the arrowhead lands on the destination lifeline, and note the originator in the destination column (e.g. "（initiated by X）").
-7. Annotations spanning several parties may use `colspan` across the affected regions. This interrupts the lifelines for that row and is acceptable for notes, never for messages.
+5. Cross-region messages (origin and destination are not adjacent lifelines): `colspan` from the origin's region through the destination's, aligned to the origin side so the flow starts at the origin lifeline and its arrowhead ends at the destination. Lifelines crossed along the way are covered on that row — an accepted side effect. Multi-line content stays readable thanks to the per-content dashed separators.
+6. Annotations spanning several parties may use `colspan` across the affected regions. This interrupts the lifelines for that row and is acceptable for notes, never for messages.
 
 ## Code
 RULES:
