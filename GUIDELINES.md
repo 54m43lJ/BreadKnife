@@ -21,7 +21,7 @@ Other constraints:
 3. (if applicable) prototype/mock, can be code, can be pictures/videos
 ## Architecture
 RULES:
-- **mermaid graph is to be completely avoided. use ASCII graph or actual pictures.**
+- **mermaid graph is to be completely avoided. use the borderless-table form for sequence diagrams (see "Sequence diagrams" below), ASCII graph or actual pictures for everything else.**
 - **Architecture document should be customer-facing. Everything a customer (app that depends on it, user of this application, etc.) would directly interact with should be documented here. The remaining internal structure and mechanisms should be in CODE.html instead.**
 - Optionally, any finer requirement that cannot be described by straightforward mechanisms should be attached to the end of that section as complement. This part should always be the last resort, prefer mechanism over specific constraint whenever possible.
 
@@ -40,6 +40,22 @@ RULES:
       1. Data objects used by exposed APIs (also written in code, or pseudocode for multi-language support, without any explanatory comment)
       2. Field definition table explaining the meaning of each field, with reference to external specifications when applicable
       3. Data transformations (referencing exact data object name, which may include specification by external standards)
+
+### Sequence diagrams: borderless table (`table.seq`)
+
+Sequence diagrams are never drawn in ASCII. Render each of them as a borderless table (`<table class="seq">`; styles live in the root `style.css`) so the vertical lifelines stay aligned regardless of script or font width. Rules:
+
+1. Columns are the regions between adjacent lifelines. Border classes draw the lifelines: first column `lf` (border-left + border-right), middle columns `mid` (border-right), last column `lbl` (border-left).
+2. First row is the participant header. Participant names are left-aligned so each label sits on its own lifeline; the row is bold and has no separator line.
+3. A cell is empty unless something happens in that region at that step. A light dashed separator is drawn under cells with content only (`td:not(:empty)`), never under empty cells.
+4. Alignment semantics — flows hug their origin:
+   - rightward message `── text ──→`: left-aligned (`class="l"`)
+   - leftward message `←── text`: right-aligned (`class="r"`)
+   - everything else (conditions, internal actions, annotations): centered (default)
+5. A message must fit on one line. Shorten what is shown in the diagram (e.g. method name without parameters) when needed; full signatures belong in auxiliary tables below the diagram.
+6. Cross-region messages (origin and destination are not adjacent lifelines): place the message in the destination's region, right-aligned so the arrowhead lands on the destination lifeline, and note the originator in the destination column (e.g. "（initiated by X）").
+7. Annotations spanning several parties may use `colspan` across the affected regions. This interrupts the lifelines for that row and is acceptable for notes, never for messages.
+
 ## Code
 RULES:
 - **This document is purely for internal mechanism details. If it is anything relevant to the usage of this project, it should be in the architecture doc instead.**
