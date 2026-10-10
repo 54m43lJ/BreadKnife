@@ -67,22 +67,22 @@
 </table>
 
 <h3 id="sec-2-3">2.3. 时序：启动与快照</h3>
-<img src="../diagram/breadpan-startup.svg" alt="时序：启动与快照">
+<figure class="diagram"><img src="../diagram/breadpan-startup.svg" alt="时序：启动与快照">
 
 <h3 id="sec-2-4">2.4. 时序：变更通告（窗口合并）</h3>
-<img src="../diagram/breadpan-notify.svg" alt="时序：变更通告（窗口合并）">
+<figure class="diagram"><img src="../diagram/breadpan-notify.svg" alt="时序：变更通告（窗口合并）">
 <p>官方 New* 信号原文见 <a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item-signals">SNI 规范 §3.3</a>；其与 <code>PropertiesChanged</code>（<a href="https://dbus.freedesktop.org/doc/dbus-specification.html#standard-interfaces-properties">D-Bus 规范 · 标准接口</a>）同为变更触发源。零详情缓存：本库不做字段级跟踪与并集合并，通告只报「该 Item 有变化」这一事实。</p>
 
 <h3 id="sec-2-5">2.5. 时序：Item 报到与死亡清理</h3>
-<img src="../diagram/breadpan-register.svg" alt="时序：Item 报到与死亡清理">
+<figure class="diagram"><img src="../diagram/breadpan-register.svg" alt="时序：Item 报到与死亡清理">
 <p class="diagram-note">报到即入册：登记只记最小集（唯一名 + 对象路径 + 存活字段 alive + DBusMenu 支持/路径 + 整项即菜单标记），SNI 详情不经手、不落册，由消费方现场读取；协议面同步广播（<a href="#sec-3-4">§3.4</a>），进程内事件与本库簿记同源。</p>
 
 <h3 id="sec-2-6">2.6. 时序：Menu 流程（零缓存·逐层懒加载；click 路由与 menu()/menu_expand() 共用）</h3>
-<img src="../diagram/breadpan-menu.svg" alt="时序：Menu 流程（零缓存·逐层懒加载）">
+<figure class="diagram"><img src="../diagram/breadpan-menu.svg" alt="时序：Menu 流程（零缓存·逐层懒加载）">
 <p class="diagram-note">AboutToShow 是 dbusmenu 规定的宿主常规步骤（接口原文中为 method，非信号）：展示前以目标层父条目 id 调用（根层为 0），应答为真表示布局已变——本库零缓存、GetLayout 紧随其后必然取得最新布局，故应答不改变本流程；应答异常视为未变更继续拉取。dbusmenu 对象路径取自登记簿记（注册时探测 Menu 属性一次，随变更信号就地更新；TrayItem.menu 同源），流程零额外查询。不存在打开菜单即需全量多级布局的场景：每次仅取一层（GetLayout recursionDepth = 1），深层由消费方经 menu_expand 按需展开。click 路由与 menu()/menu_expand() 共用本流程。</p>
 
 <h3 id="sec-2-7">2.7. 时序：输入路由与回执</h3>
-<img src="../diagram/breadpan-input-routing.svg" alt="活动图：输入路由与回执（带泳道）">
+<figure class="diagram"><img src="../diagram/breadpan-input-routing.svg" alt="活动图：输入路由与回执（带泳道）">
 <p>方法 → 路由对照（辅助表；路由依据登记簿记 menu_only / menu，零查询）：</p>
 <table>
   <tr><th>方法</th><th>路由</th></tr>
@@ -104,7 +104,7 @@
 <p class="diagram-note">参数所有权：坐标与步数经 _at/_by 变体传入（缺省 (0,0) / 1）——输入事件与「哪个 Item 被点击」的映射只存在于消费方 UI，本库核心不接入 GTK 输入上下文（零 GTK 依赖）；且 Wayland 协议不向客户端提供全局坐标、GTK4 亦无 root 坐标 API，双方都只能得到近似值，而规范将 x/y 定位为 hint（Item 可忽略），缺省值即符合协议。</p>
 
 <h3 id="sec-2-8">2.8. 时序：所有权丢失（Displaced）</h3>
-<img src="../diagram/breadpan-displaced.svg" alt="时序：所有权丢失（Displaced）">
+<figure class="diagram"><img src="../diagram/breadpan-displaced.svg" alt="时序：所有权丢失（Displaced）">
 <p class="diagram-note">名持有不可被替换：申请时不声明 allow-replacement，持有期间任何外部顶替请求一律失败——切换托盘程序须先手动终止本程序，正常情况下不存在让位/夺回。因此所有权丢失是<strong>极罕见的边缘路径</strong>：持有期内只有总线层异常才可能触发（总线守护重启 / 会话重建、本进程连接被强制关闭等），且发生即意味着被其它 Watcher 取代——入队终局报错，<strong>不重试、不强制夺回</strong>。启动期名字已被他人持有 → <code>NameTaken</code>：多个 Watcher 不能共存，建议消费方整体退出或隐藏托盘相关功能。</p>
 
 <h2 id="sec-3">3. 接口</h2>

@@ -48,6 +48,7 @@ Sequence diagrams and activity diagrams are drawn with PlantUML — never hand-d
 1. Choose the form by complexity: flows with at most one branch decision (fewer than 2 nesting levels) are sequence diagrams; anything with more branching is a UML activity diagram with one swimlane per participant.
 2. Labels are written in the documentation language; keep messages short and push details into notes.
 3. Do not edit the exported image by hand; do not let the source and the image diverge.
+4. Layout: branch-heavy flows are written as vertical early-exit cascades (`if … then (是) … stop endif`, fall-through continues below) so diagrams grow tall instead of wide. Embedded images render at natural size inside a horizontally scrollable `figure.diagram`; never scale them down to fit the page.
 
 ## Code
 RULES:

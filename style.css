@@ -125,5 +125,7 @@ footer {
   main { max-width: 100%; padding: 0; }
 }
 
-/* ── 嵌入图（PlantUML 导出 SVG）── */
-main img { max-width: 100%; height: auto; }
+/* ── 嵌入图（PlantUML 导出 SVG）── 按原始尺寸渲染，不随容器缩放；
+   过宽的图在图区域内横向滚动，页面文字布局不受影响 */
+figure.diagram { margin: 1rem 0; overflow-x: auto; }
+figure.diagram img { max-width: none; }
