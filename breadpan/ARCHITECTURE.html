@@ -346,16 +346,16 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
 <table>
   <tr><th>字段</th><th>含义</th><th>规范依据</th></tr>
   <tr><td>id</td><td>唯一键：Item 注册到 Watcher 的服务名（TrayItemId 即 String，值 = 服务名）——<strong>可能是知名名，也可能是唯一名</strong>（后者经 <code>NameChanged</code> 升级为知名名，见事件表）。事实命名 <code>org.kde.StatusNotifierItem-PID-ID</code>（PID=进程号，ID=同进程实例序号），pid 仅能从服务名 PID 段解析；对象路径不参与标识：服务名消失 → Removed；名字腾空后重现（应用重启）→ 视为新 Item（Added）；名字未腾空的属主直接更替（同名换主）→ OwnerChanged，id 不变、同一 Item 延续（§3.2）。同一登记条目恒为单一 id，事件落点确定</td><td>SNI §3；总线名构成见 <a href="https://dbus.freedesktop.org/doc/dbus-specification.html">D-Bus 规范 · Bus Names</a></td></tr>
-  <tr><td>category</td><td>ApplicationStatus / Communications / SystemServices / Hardware</td><td>SNI §3.1 Category</td></tr>
-  <tr><td>status</td><td>Passive 可隐藏 / Active 应展示 / NeedsAttention 应强调</td><td>SNI §3.1 Status</td></tr>
+  <tr><td>category</td><td>ApplicationStatus / Communications / SystemServices / Hardware；规范外值 → ApplicationStatus</td><td>SNI §3.1 Category</td></tr>
+  <tr><td>status</td><td>Passive 可隐藏 / Active 应展示 / NeedsAttention 应强调；规范外值 → Passive</td><td>SNI §3.1 Status</td></tr>
   <tr><td>alive</td><td>最近一次存活探测结论：true = 探测成功，false = 超时/失败；由库内周期探测维护（非 SNI 字段），随任意现场读取交付</td><td>—（本库存活机制）</td></tr>
   <tr><td>ident</td><td>应用内唯一、跨会话一致（如应用名）；识别用，不用于展示</td><td>SNI §3.1 Id</td></tr>
-  <tr><td>title</td><td>面向用户展示名，可比 ident 更具描述性</td><td>SNI §3.1 Title</td></tr>
+  <tr><td>title</td><td>面向用户展示名，可比 ident 更具描述性；空串 → None</td><td>SNI §3.1 Title</td></tr>
   <tr><td>is_menu_only</td><td>为真时优先展示菜单而非 Activate</td><td>SNI §3.1 ItemIsMenu</td></tr>
-  <tr><td>window_id</td><td>宿主窗口 id；不关心时为 0</td><td>SNI §3.1 WindowId（UINT32）</td></tr>
+  <tr><td>window_id</td><td>宿主窗口 id；不关心时为 0；I32 / U32 变体送达均可解析，无法解析 → 0</td><td>SNI §3.1 WindowId（UINT32）</td></tr>
   <tr><td>icon / overlay_icon / attention_icon</td><td>图标来源，二选一规则见 IconSource 字段表</td><td>SNI §3.1 IconName + IconPixmap / OverlayIcon* / AttentionIcon*</td></tr>
   <tr><td>tooltip</td><td>悬停提示；描述可含标记子集，原样透传</td><td>SNI §3.1 ToolTip · §7 标记子集</td></tr>
-  <tr><td>menu</td><td>SNI <code>Menu</code> 属性原文：com.canonical.dbusmenu 对象路径；None = 无 DBusMenu（右键走 ContextMenu fallback）</td><td>SNI §3.1 Menu（OBJECT PATH）</td></tr>
+  <tr><td>menu</td><td>SNI <code>Menu</code> 属性原文：com.canonical.dbusmenu 对象路径（以字符串形态送达亦可解析）；None = 无 DBusMenu（右键走 ContextMenu fallback）</td><td>SNI §3.1 Menu（OBJECT PATH）</td></tr>
 </table>
 
 <h4>ToolTip / IconSource / Pixmap 字段定义</h4>

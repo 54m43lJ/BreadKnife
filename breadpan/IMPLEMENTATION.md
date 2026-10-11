@@ -40,7 +40,8 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   属主唯一名重绑定 + 路由字段就地重探，交付信息性 `OwnerChanged(id)`（属主更替对
   消费方无可感知影响，无必做动作；ARCHITECTURE §2.4/§3.2）。初版实现曾拆
   `Removed`+`Added`，代码对齐见 TODO.md。
-- **宽容取值**：规范外波动不 panic、按缺省处理——`WindowId` 以 I32 或 U32 送达
+- **宽容取值**（已升格：归一化行为 → ARCHITECTURE §3.3 字段表；变体级解析 →
+  CODE §2.5，待确认清理）：规范外波动不 panic、按缺省处理——`WindowId` 以 I32 或 U32 送达
   均可解析；未知 `Category`/`Status` 回退缺省枚举；空 `Title` → `None`；
   `Menu` 属性以对象路径或字符串送达均可——统一经 `menu_path_of` 取值（两形态
   取文本后过 `ObjectPath::try_from` 规范校验，非字符串类变体或文本不合规 →

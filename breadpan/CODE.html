@@ -158,6 +158,10 @@ impl ItemTracker {
 <pre><code>/// 现场读取单个 Item → TrayItem（items()/item()/Snapshot 的统一取数路径）
 pub(crate) async fn fetch_item(bus: &amp;BusCenter, entry: &amp;ItemEntry)
     -&gt; Result&lt;TrayItem, TrayError&gt;;
+/// 属性集 → TrayItem（宽容取值：I32/U32 变体均可解析；未知 Category/Status 回退缺省
+/// 枚举；空 Title → None；§3.1.3）
+pub(crate) fn tray_item_from_props(entry: &amp;ItemEntry, props: &amp;HashMap&lt;String, OwnedValue&gt;)
+    -&gt; TrayItem;
 /// GetAll（kde → fd 前缀回退；双级探测第二级，§3.1.2）
 pub(crate) async fn read_all(bus: &amp;BusCenter, service: &amp;str, path: &amp;str)
     -&gt; Result&lt;HashMap&lt;String, OwnedValue&gt;, TrayError&gt;;
@@ -384,7 +388,7 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 <pre><code>内部: dbus::queue_snapshot(bus) → Vec&lt;String&gt;（返回值快照后以 Narration 事件交付）
 ├── ItemTracker::all() → Vec&lt;ItemEntry&gt;
 ├── bus.rt.spawn(|| props::fetch_item(bus, entry))（逐条并发）
-│    // 单个读取失败 → 记过程叙述，该 Item 不入快照
+│    // fetch_item = read_all + tray_item_from_props（宽容取值归一化，§2.5）；单个读取失败 → 记过程叙述，该 Item 不入快照
 ├── items.sort_by_key(id)
 │    // 发现序不稳定，排序保证确定性输出
 ├── events.send(TrayEvent::Snapshot{items})
