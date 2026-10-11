@@ -2,3 +2,4 @@
 - [ ] 加入Menu直接返回GTK组件能力
 - [ ] breadpan 节流任务后移：`bus.spawn(debounce_task)` 移至 `queue_snapshot` 之后（随栅栏置位启动），并删除循环体内已死的 `is_snapshot_done` 检查（CODE §3.1.3 / IMPLEMENTATION.md §2）
 - [ ] breadpan 同名换主对齐 `OwnerChanged`：`name_owner_changed_task` 的 `old≠"" ∧ new≠""` 分支由「旧条目 unregister（Removed）+ register_item 重新入册（Added）」改为条目保留——`ItemTracker::rebind_owner` 属主唯一名重绑定 + `probe_routing`/`update_routing` 就地重探，交付 `OwnerChanged(id)`（栅栏前静默）；补同名换主生命周期测试（ARCHITECTURE §2.4/§3.2、CODE §3.3.2）
+- [ ] breadpan Menu 取值宽容化：三处收拢 `menu_path_of`（对象路径/字符串两形态取文本 + `ObjectPath::try_from` 规范校验；`properties_changed_task` / `probe_routing` / `tray_item_from_props`），`properties_changed_task` 解析失败不覆盖旧值（现状 `TryFrom<Value>` 钉类型、失败清空路由键；CODE §3.2 / IMPLEMENTATION.md §2）

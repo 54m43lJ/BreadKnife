@@ -35,9 +35,6 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   （重绑定照常生效，快照即最新，无需补投）；`MenuChanged` 在栅栏前丢弃；
   `Changed` 由节流任务保证不早于快照——其在栅栏置位后才启动（tokio interval
   首拍立即触发，启动期积压的 pending 首拍即冲刷）。
-- **信号归属匹配**：New\*/PropertiesChanged/dbusmenu 信号的发送者是**唯一名**，
-  注册参数可能是知名名 → 簿记最小集在文档字段（服务名+对象路径+alive+
-  menu+menu_only）之外，还需存**属主唯一名**（注册时 `GetNameOwner` 解析）。
 - **同名换主**（`NameOwnerChanged(name, old≠"", new≠"")`）：条目保留、id 不变——
   属主唯一名重绑定 + 路由字段就地重探，交付信息性 `OwnerChanged(id)`（属主更替对
   消费方无可感知影响，无必做动作；ARCHITECTURE §2.4/§3.2）。初版实现曾拆
@@ -52,7 +49,11 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   重复通告）。
 - **宽容取值**：规范外波动不 panic、按缺省处理——`WindowId` 以 I32 或 U32 送达
   均可解析；未知 `Category`/`Status` 回退缺省枚举；空 `Title` → `None`；
-  `Menu` 属性以对象路径或字符串送达均可。
+  `Menu` 属性以对象路径或字符串送达均可——统一经 `menu_path_of` 取值（两形态
+  取文本后过 `ObjectPath::try_from` 规范校验，非字符串类变体或文本不合规 →
+  `None`）；`PropertiesChanged` 路径解析失败**不覆盖旧值**——Menu 键被清空即
+  路由键死亡：右键跌回 fallback、MenuChanged 永久静默（初版以 `TryFrom<Value>`
+  钉类型、失败清空，代码对齐见 TODO.md）。
 
 ## 3. 关键落地细节（CODE 骨架未展开的取舍）
 

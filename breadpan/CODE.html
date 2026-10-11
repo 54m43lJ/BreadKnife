@@ -47,8 +47,9 @@ handle/events 为公开前端。</p>
 条目只承载签名与一行用途——<code>const</code> 定义不收录（字面取值随实现调试浮动，
 取舍记录见 IMPLEMENTATION.md），方法内部步骤一律归 §3 调用栈，未列出者皆为局部实现细节。<br>
 <strong>注意</strong>：登记合并（Upsert::Renamed / NameChanged，§3.3.1）、节流任务
-随栅栏启动（§3.2）与同名换主的 OwnerChanged 交付（§3.3.2）为 IMPLEMENTATION.md
-记录的改进——dev 分支代码滞后于记录，冲突处以 IMPLEMENTATION.md 为准，不随源码回退。<br>
+随栅栏启动（§3.2）、同名换主的 OwnerChanged 交付（§3.3.2）与 Menu 取值宽容化
+（menu_path_of + 解析失败不覆盖，§3.2）为 IMPLEMENTATION.md 记录的改进——
+dev 分支代码滞后于记录，冲突处以 IMPLEMENTATION.md 为准，不随源码回退。<br>
 公开类型与签名（Tray / TrayHandle / TrayEvent / 数据模型 / TrayError / gtk）见
 <a href="ARCHITECTURE.html#sec-3">ARCHITECTURE.html §3</a>，此处不重复。</p>
 
@@ -162,7 +163,10 @@ pub(crate) async fn read_all(bus: &amp;BusCenter, service: &amp;str, path: &amp;
     -&gt; Result&lt;HashMap&lt;String, OwnedValue&gt;, TrayError&gt;;
 /// 注册期路由探测 → (menu, menu_only)（§3.3.1）
 pub(crate) async fn probe_routing(bus: &amp;BusCenter, service: &amp;str, path: &amp;str)
-    -&gt; (Option&lt;String&gt;, bool);</code></pre>
+    -&gt; (Option&lt;String&gt;, bool);
+/// Menu 属性宽容取值（§3.2）：对象路径/字符串两形态取文本，文本经
+/// ObjectPath 规范校验；非字符串类变体或校验失败 → None
+pub(crate) fn menu_path_of(v: &amp;OwnedValue) -&gt; Option&lt;String&gt;;</code></pre>
 
 <h3 id="sec-2-dbus">2.6. dbus/ <a href="#sec-1">↑ 文件树</a></h3>
 
@@ -330,6 +334,9 @@ fn missing_icon() -&gt; gdk::Paintable;                          // image-missin
 fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 → 纹理的色彩处理在此完成</code></pre>
 
 <h2 id="sec-3">3. 关键流程调用栈（伪码）</h2>
+<p>调用栈约定：树形线条只承载两类行——具体方法调用与判断条件；每个调用至多后置一条
+注释，注释不挂枝（无 <code>├──</code>/<code>└──</code>，所在层级竖线延续）；
+更长的动机与取舍写入块后正文。</p>
 
 <h3 id="sec-3-1">3.1. 启动（start）</h3>
 
@@ -338,24 +345,21 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 ├── EventQueue::new() → (Arc&lt;EventQueue&gt;, 唯一 Receiver)
 ├── BusParts::new(config, events)
 ├── BusCenter::spawn_runtime(parts)
-│    └── 内部 CurrentThread 运行时线程：mod::run(bus, stop_rx, fatal_rx,
-│         displaced_rx, ready_tx) → bootstrap(bus)（顺序即契约，理由见下方说明）
-│         ├── watcher::mount_interfaces(bus)?（org.kde / org.freedesktop
-│         │    两前缀挂同一路径 /StatusNotifierWatcher）
-│         │    └── 名未在位 → 报到无从发生，快照收集不受报到竞态干扰
-│         ├── spawn_signal_tasks(bus)：6 条 match rule 常驻任务
-│         │    （name_owner_changed_task / item_signals_task×2 kde+fd /
-│         │      properties_changed_task×2 kde+fd / dbusmenu_signals_task，
-│         │      经 pump_signal_stream 订阅消费——§3.2 §3.3.2 §3.4.2）
-│         ├── bus.spawn(heartbeat::heartbeat_task(bus))（周期存活探测，§3.6）
-│         ├── discover_existing(bus)（反向发现存量 Item，§3.1.2，静默入册）
-│         ├── queue_snapshot(bus)（§3.1.3：快照投递 + 置位栅栏 + 冲刷启动期 Removed）
-│         ├── bus.spawn(debounce_task(bus))（节流窗口，栅栏置位后启动，§3.2）
-│         └── watcher::WatcherService::start(bus)?（最后申请 Watcher 名）
-│              └── 已被他人持有 → 返回 NameTaken（多 Watcher 不能共存）
-├── ready_rx 轮询 bootstrap 结果（引导总时限 max(10×timeout_ms, 10s) 守护）
-│    └── 超时/失败 → join 内部线程并返回 Err
-└── 返回 (TrayHandle{Arc&lt;RuntimeShared&gt;}, 事件通道 Receiver)</code></pre>
+│    └── mod::run(bus, stop_rx, fatal_rx, displaced_rx, ready_tx)
+│         └── bootstrap(bus)（顺序即契约，理由见下方说明段）
+│              ├── watcher::mount_interfaces(bus)?
+│              │    // org.kde / org.freedesktop 两前缀挂同一路径；名未在位则报到无从发生
+│              ├── spawn_signal_tasks(bus)
+│              │    // 6 条 match rule 常驻任务（NOC / New*×2 / PropertiesChanged×2 / dbusmenu，经 pump_signal_stream 订阅，§3.2 §3.3.2 §3.4.2）
+│              ├── bus.spawn(heartbeat::heartbeat_task(bus))（§3.6）
+│              ├── discover_existing(bus)（§3.1.2）
+│              ├── queue_snapshot(bus)（§3.1.3）
+│              ├── bus.spawn(debounce_task(bus))（§3.2，栅栏置位后启动）
+│              └── watcher::WatcherService::start(bus)?
+│                   // 已被他人持有 → NameTaken（多 Watcher 不能共存）
+├── ready_rx.try_recv()（轮询至 bootstrap 结果）
+│    // 引导总时限 max(10×timeout_ms, 10s) 守护；超时/失败 → join 内部线程并返回 Err
+└── return (TrayHandle{Arc&lt;RuntimeShared&gt;}, 事件通道 Receiver)</code></pre>
 
 <p>顺序为什么是契约：Watcher 名最后申请——申请前报到无从发生，快照投递后所有报到
 以增量事件衔接（首事件即快照，无重叠无缺口）。若先申请名，等待 Watcher 出现的
@@ -365,27 +369,29 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 之后，随栅栏置位启动（§3.2）。</p>
 
 <h4 id="sec-3-1-2">3.1.2. 反向发现（存量 Item 双级探测）</h4>
-<pre><code>内部: dbus::discover_existing(bus) -&gt; Vec&lt;String&gt;（过程叙述，快照投递后以 Narration 交付）
-├── ListNames → 过滤 "org.kde.StatusNotifierItem-" 前缀候选
-├── 逐个 probe_item_iface(bus, name) -&gt; Result&lt;bool, TrayError&gt;：双级确认 SNI 接口在位
-│    ├── 第一级：Introspect(name, /StatusNotifierItem) 应答 XML 含 SNI 接口名
-│    │    （org.kde / org.freedesktop 任一）→ 确认
-│    └── 第二级：props::read_all(name, /StatusNotifierItem) 直接属性读取
-│         （Introspect 失败或应答 XML 无接口名时到达——Electron/CEF 等实现
-│          不响应 Introspect，QQ 音乐实测）；Ok = 确认在位
-├── 确认 → register_item(bus, name, sender=None, announce=false)
-│    （静默入册：不广播、不入队 Added——快照是首事件，§3.3.1）
-└── 未确认 / 探测失败 → 记入过程叙述，不中断发现循环</code></pre>
+<pre><code>内部: dbus::discover_existing(bus) → Vec&lt;String&gt;
+├── bus.call(ListNames) → 过滤 org.kde.StatusNotifierItem- 前缀候选
+├── probe_item_iface(bus, name) → Result&lt;bool&gt;（逐候选）
+│    ├── bus.call(Introspect(name, /StatusNotifierItem))
+│    │    // 第一级：应答 XML 含 SNI 接口名（org.kde / org.freedesktop 任一）→ 确认
+│    └── props::read_all(name, /StatusNotifierItem)
+│         // 第二级：前者失败或应答无接口名时到达（Electron/CEF 不响应 Introspect，QQ 音乐实测）；Ok = 确认
+├── 确认？ → dbus::register_item(bus, name, sender=None, announce=false)
+│    // 静默入册：不广播、不入队 Added——快照是首事件（§3.3.1）
+└── 未确认 / 探测失败？ → 记入过程叙述，不中断发现循环</code></pre>
 
 <h4 id="sec-3-1-3">3.1.3. 快照投递与栅栏（queue_snapshot）</h4>
-<pre><code>内部: dbus::queue_snapshot(bus) -&gt; Vec&lt;String&gt;（过程叙述，快照后以 Narration 交付）
-├── ItemTracker::all() 全量条目 → bus.rt.spawn 并发 props::fetch_item
-│    （单个读取失败 → 记过程叙述，该 Item 不入快照）
-├── 按 id 排序（发现序不稳定，排序保证确定性输出）→ 入队 Snapshot{items}——首事件
-├── mark_snapshot_done() 置位栅栏（与入队之间无 await：单线程运行时内不可分割，
-│    事件源不存在「快照已入队、栅栏未置位」的中间态）
-└── take_deferred_removed() 冲刷启动期缓冲：仅快照内 id 补投 Removed，
-     快照外按从未出现丢弃</code></pre>
+<pre><code>内部: dbus::queue_snapshot(bus) → Vec&lt;String&gt;（返回值快照后以 Narration 事件交付）
+├── ItemTracker::all() → Vec&lt;ItemEntry&gt;
+├── bus.rt.spawn(|| props::fetch_item(bus, entry))（逐条并发）
+│    // 单个读取失败 → 记过程叙述，该 Item 不入快照
+├── items.sort_by_key(id)
+│    // 发现序不稳定，排序保证确定性输出
+├── events.send(TrayEvent::Snapshot{items})
+├── bus.mark_snapshot_done()
+│    // 与入队之间无 await：单线程运行时内不可分割，不存在「快照已入队、栅栏未置位」中间态
+└── bus.take_deferred_removed() → Vec&lt;TrayItemId&gt;（逐条 events.send(Removed(id))）
+     // 仅快照内 id 补投；快照外按从未出现丢弃</code></pre>
 <p>栅栏是各事件源「首事件即快照、无重叠无缺口」的兜底：报到（§3.3.1）、NameOwnerChanged
 （§3.3.2，同名换主与死亡清理）、菜单变更（§3.4.2）按栅栏前/后记录行为分支；变更节流任务在置位后才启动
 （§3.2），Changed 天然不早于快照。栅栏为防御性——申请时序（§3.1.1）使栅栏前报到
@@ -393,13 +399,15 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 
 <h3 id="sec-3-2">3.2. 变更通告合并（固定窗口节流）</h3>
 <pre><code>内部: properties_changed_task(iface)×2 / item_signals_task(iface)×2
-   （kde 与 fd 前缀各一条常驻任务；match rule 订阅经 pump_signal_stream）
-├── 信号到达：落点匹配 find_by_signal(发送者唯一名, 对象路径)——
-│    (唯一名, 路径) 唯一命中（双注册已并入，§3.3.1），Changed 落点确定
-│    └── PropertiesChanged 另就地更新路由标记（update_routing，§3.3.1）
-├── pending.insert(id)（仅记入待通告集合；无计时重置——连发不推迟交付）
-└── debounce_task 固定节拍到期（每 debounce_ms 一次，与信号无关；栅栏置位后启动，§3.1.3）
-     └── pending.drain() → 逐个 Changed(id) → 入队 → 投递（单通道，满则丢弃）</code></pre>
+     // kde 与 fd 前缀各一条常驻任务，经 pump_signal_stream 订阅消费
+├── find_by_signal(发送者唯一名, 对象路径) → Option&lt;TrayItemId&gt;
+│    // (唯一名, 路径) 唯一命中（双注册已并入，§3.3.1）；未命中 → 丢弃
+├── ItemTracker::update_routing(&amp;id, menu, menu_only)（仅 PropertiesChanged）
+│    // menu = props::menu_path_of(v)（对象路径/字符串两形态 + ObjectPath 规范校验，§2.5）：解析成功才传 Some——失败传 None 忽略本次更新、保留旧值（Menu 键被清空 = 右键跌回 fallback + MenuChanged 永久静默）；menu_only 非 Bool 变体同则
+├── pending.insert(id)
+│    // 仅记入待通告集合；无计时重置——连发不推迟交付
+└── debounce_task 固定节拍到期 → pending.drain()（逐个 events.send(Changed(id))）
+     // 每 debounce_ms 一次，与信号无关；栅栏置位后启动（§3.1.3）；单通道，满则丢弃</code></pre>
 <p>合并针对的是重读放大：Item 侧的双重上报（New* 与 PropertiesChanged 并发、状态切换伴随连发）
 与进度型 Item 的高频刷新，经零缓存架构放大为消费方的重复现场读取；窗口节流把重读频率压到
 每 Item 至多 1 次/窗口。事实事件幂等，窗口内折叠不丢信息。</p>
@@ -407,169 +415,184 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 <h3 id="sec-3-3">3.3. 报到与下线（死亡清理 / 同名换主）</h3>
 
 <h4 id="sec-3-3-1">3.3.1. 报到（RegisterStatusNotifierItem 受理）</h4>
-<pre><code>内部: 协议面收到 RegisterStatusNotifierItem(service)
-      （org.kde / org.freedesktop 两前缀等价：两接口挂同一路径，§2 iface）
-├── sender ← 消息头 sender（调用方唯一名，#[zbus(header)] 注入）
-└── dbus::register_item(bus, service, sender, announce=true) -&gt; Result&lt;bool, TrayError&gt;
-     ├── split_service_arg(service, sender) -&gt; Option&lt;(String, String)&gt;：注册参数三形态解析
-     │    ├── "name"（知名名）→ (name, /StatusNotifierItem)（默认路径）
-     │    ├── "name/path"（混串）→ 就地切分；path 缺前导 "/" 时补齐
-     │    └── "/path"（Ayatana 风格纯对象路径）→ (sender, path)：服务名取注册方唯一名
-     │         └── 无 sender（或 service 为空）→ None → TrayError::Protocol 拒绝受理
-     │              （以 Narration 事件交付，不影响服务运行）
-     ├── GetNameOwner(service) → 属主唯一名（唯一名查询返回其自身，全部注册形态同路径；
-     │    失败回退 service 本身，不阻塞报到）
-     ├── props::probe_routing(service, path) → (menu, menu_only)（路由标记注册时探测）
-     └── ItemTracker::upsert(ItemEntry) → Upsert（字段匹配两轮 lookup，自愈并入：
-          同一对象/连接不允许出现双条目）
-          ├── 第一轮：注册名 == service（知名名同名：应用重启竞态/同名刷新；
-          │    唯一名形态注册名 == 临时条目 service）→ 命中
-          ├── 第二轮：发送者唯一名 == unique（同连接先前以唯一名临时注册）→ 命中
-          ├── 命中 → 原地更新（path/menu/menu_only/alive 以最新报到为准；
-          │    service 仅在注册名为知名名且原为临时唯一名时升级）
-          │    └── 升级（临时唯一名 → 知名名）→ 入队 NameChanged{old, new}
-          │         （同一对象 id 重键——不发 Removed/Added，
-          │          是否重载数据由消费方裁断）
-          ├── 两轮均未命中 → 新条目 → true
-          │    └── 新登记 &amp;&amp; announce &amp;&amp; 快照栅栏已置位
-          │         → iface::emit_registered（StatusNotifierItemRegistered 广播）+ 入队 Added(id)
-          │         栅栏前 → 静默入册：无广播、无 Added（快照承载，§3.1.3）；
-         announce=false 同此（反向发现路径）</code></pre>
+<pre><code>内部: WatcherIface::register_status_notifier_item(service)
+     // org.kde / org.freedesktop 两前缀等价：两接口挂同一路径（§2.6.4）
+├── header.sender() → Option&lt;UniqueName&gt;
+│    // 调用方唯一名，#[zbus(header)] 注入
+└── dbus::register_item(bus, service, sender, announce=true) → Result&lt;bool, TrayError&gt;
+     ├── split_service_arg(service, sender) → Option&lt;(String, String)&gt;
+     │    // 三形态："name"→(name, /StatusNotifierItem 默认路径)；"name/path"→就地切分、缺前导 "/" 补齐；"/path"→(sender, path)（服务名取注册方唯一名）
+     ├── 解析失败（无 sender 或空 service）？ → TrayError::Protocol 拒绝受理
+     │    // 以 Narration 事件交付，不影响服务运行
+     ├── bus.call(GetNameOwner(service)) → 属主唯一名
+     │    // 唯一名查询返回其自身（全部注册形态同一路径）；失败回退 service 本身，不阻塞报到
+     ├── props::probe_routing(service, path) → (menu, menu_only)
+     │    // 注册期路由探测（menu 经 menu_path_of，§2.5）
+     └── ItemTracker::upsert(ItemEntry) → Upsert
+          // 字段匹配两轮 lookup 自愈并入（同一对象/连接不允许双条目）：①注册名 == service（知名名同名重启竞态；唯一名形态 == 临时条目）②发送者唯一名 == unique（同连接先前以唯一名临时注册）；命中 → 原地刷新（path/menu/menu_only/alive 以最新报到为准），两轮未命中 → 新建
+          ├── service 升级（临时唯一名 → 知名名）？ → events.send(NameChanged{old, new})
+          │    // 同一对象 id 重键：不发 Removed/Added；是否重载数据由消费方裁断
+          └── 新建 &amp;&amp; announce &amp;&amp; 快照栅栏已置位？
+               ├── 是 → iface::emit_registered(service)；events.send(Added(id))
+               └── 否 → 静默入册
+                    // 无广播、无 Added——快照承载（§3.1.3）；announce=false（反向发现）同此</code></pre>
 
 <h4 id="sec-3-3-2">3.3.2. NameOwnerChanged（同名换主 / 死亡清理）</h4>
 <pre><code>内部: name_owner_changed_task 收到 NameOwnerChanged(名字, 旧属主 → 新属主)
-├── Watcher 名 → 所有权丢失（§3.7.1；stopping 守卫吞掉主动释放）
-├── 同名换主（新属主 ≠ ""，应用重启直接顶名）
-│    ├── ItemTracker::rebind_owner(名字, 新属主)——条目保留、id 不变：
-│    │    属主唯一名重绑定，新属主的信号归属随 rebind 续接
+├── 名字 == Watcher 名？ → 所有权丢失（§3.7.1）
+├── 新属主 ≠ ""？ → 同名换主（应用重启直接顶名）
+│    ├── ItemTracker::rebind_owner(名字, 新属主) → bool
+│    │    // 条目保留、id 不变：属主唯一名重绑定，新属主的信号归属随 rebind 续接
 │    ├── props::probe_routing(名字, 路径) → (menu, menu_only)
-│    │    （路由字段就地重探：新属主的 Menu 属性 / menu_only 探测一次）
+│    │    // 路由字段就地重探：新属主的 Menu 属性 / menu_only 探测一次
 │    ├── ItemTracker::update_routing(名字, Some(menu), Some(menu_only))
-│    └── 交付 OwnerChanged(id)（信息性，消费方无必做动作）：
-│         栅栏已置位 → 入队；栅栏前 → 静默（重绑定已生效，快照即最新，不补投）
-└── 死亡清理（新属主 = ""）
-     ├── ItemTracker::unregister(名字) → 被移除条目（按服务名或属主唯一名双条件命中；
-     │    唯一名消失 → 该连接全部条目一并下线，含双注册并入的单一 id）
-     ├── 逐条 iface::emit_unregistered（StatusNotifierItemUnregistered 广播）
-     └── 逐条交付 Removed：栅栏已置位 → 入队；栅栏前 → defer_removed 缓冲（§3.1.3）</code></pre>
+│    └── 快照栅栏已置位？ → events.send(OwnerChanged(id))
+│         // 信息性事件，消费方无必做动作；栅栏前静默——重绑定已生效，快照即最新，不补投
+└── 否则 → 死亡清理（新属主 = ""）
+     ├── ItemTracker::unregister(名字) → Vec&lt;ItemEntry&gt;
+     │    // 按服务名或属主唯一名双条件命中；唯一名消失 → 该连接全部条目一并下线（含双注册并入的单一 id）
+     ├── iface::emit_unregistered(service)（逐条）
+     │    // StatusNotifierItemUnregistered 广播
+     └── 逐条交付：快照栅栏已置位？ → events.send(Removed(id))
+          // 栅栏前 → bus.defer_removed(id) 进缓冲（§3.1.3）</code></pre>
 
 <h3 id="sec-3-4">3.4. 菜单现场读取（Menu 流程，interact 与 menu()/menu_expand() 共用）</h3>
 
 <h4 id="sec-3-4-1">3.4.1. 现场拉取（menu / menu_expand）</h4>
 <pre><code>流程 menu(id) / menu_expand(id, entry_id)
-   （TrayHandle::menu / menu_expand → dispatch 同步桥 → menu::read_layer）
-├── 校验 Item 在册（否则 ItemNotFound）
-├── dbusmenu 对象路径取自登记簿记（注册时探测 Menu 属性；None = 无菜单，不可拉取）
-└── menu::read_layer(bus, entry, parent)——根层 parent=0，展开层=entry_id
-     ├── AboutToShow(parent)（常规前置；应答异常视为未变更）
-     ├── GetLayout(parentId=parent, recursionDepth=1)（懒加载：每次一层）
-     ├── GetGroupProperties
-     └── assemble → 组装该层 MenuSnapshot
-          ├── 解析助记符 "_" → label
-          ├── 保留原文 → raw_label
-          └── 按 visible/enabled/children-display/toggle-type/toggle-state 归一化条目
-          └── 返回单层快照（不落任何缓存；深层经 menu_expand 按需展开）</code></pre>
+├── TrayHandle::menu / menu_expand → bus.cmd(menu::read_layer)
+│    // dispatch 同步桥
+├── bus.entry_of(id) → ItemEntry
+│    // 不在册 → ItemNotFound
+├── entry.menu == None？ → Err
+│    // dbusmenu 对象路径取自登记簿记（注册时探测 Menu 属性）；None = 无菜单，不可拉取
+└── menu::read_layer(bus, entry, parent)
+     // 根层 parent=0，展开层 = entry_id
+     ├── bus.call(AboutToShow(parent))
+     │    // 常规前置；应答异常视为未变更
+     ├── bus.call(GetLayout(parentId=parent, recursionDepth=1))
+     │    // 懒加载：每次仅取一层
+     ├── bus.call(GetGroupProperties)
+     └── menu::assemble(...) → MenuSnapshot
+          // 助记符 "_"→label、原文→raw_label；按 visible/enabled/children-display/toggle-type/toggle-state 归一化；不落任何缓存，深层经 menu_expand 按需展开</code></pre>
 
 <h4 id="sec-3-4-2">3.4.2. 菜单变更通告（LayoutUpdated / ItemsPropertiesUpdated）</h4>
 <pre><code>内部: dbusmenu_signals_task 收到 LayoutUpdated / ItemsPropertiesUpdated
-├── 落点匹配 find_by_menu_signal(发送者唯一名, 菜单对象路径)（唯一命中）
-└── 栅栏已置位 → 入队 MenuChanged(item)（不代为重拉）；栅栏前 → 丢弃</code></pre>
+├── find_by_menu_signal(发送者唯一名, 菜单对象路径) → Option&lt;TrayItemId&gt;
+│    // 唯一命中；未命中 → 丢弃
+└── 快照栅栏已置位？ → events.send(MenuChanged(id))
+     // 不代为重拉，是否重取由消费方决定；栅栏前丢弃（消费方尚无菜单可重取）</code></pre>
 
 <h3 id="sec-3-5">3.5. 输入路由与回执</h3>
 
 <h4 id="sec-3-5-1">3.5.1. 左键（同步路径与 Menu 回退）</h4>
-<pre><code>流程 left_click(id)（TrayHandle::left_click → left_click_at(id, 0, 0)
-   → input(id, Input::Left) → dispatch 同步桥（BusCenter::cmd）→ interact::route）
-├── 校验 Item 在册（否则 ItemNotFound）
-├── menu_only 且 DBusMenu 在册 → Menu 流程（§3.4.1）→ 同步返回 Outcome::Menu
-└── Activate(x,y)（invoke_xy：就地等待往返）
-     ├── 成功 → 入队 InteractionResult{Activate, 成功} → 返回 Outcome::Dispatched
-     ├── 超时 → 直接报错（对端主循环失联；menu 与 Activate 同一主循环分发，
-     │         菜单亦不可读——不跨前缀重试、不回退）
-     ├── 失败且 DBusMenu 在册 → Menu 流程（§3.4.1）→ 返回 Outcome::Menu（无回执事件）
-     │    └── 回退动机：libappindicator 系 Item 的 Activate 无处理器——XML 静态声明
-     │         但分发 catch-all；不可预先探测（Introspect 说谎、探测调用会误触
-     │         激活）。左键出菜单是宿主侧既定策略：菜单由宿主经 dbusmenu 渲染，
-     │         不依赖 item 端激活。失败形态为同步快失败，与超时无关
-     └── 失败且无菜单 → 如实报错</code></pre>
+<pre><code>流程 left_click(id)
+├── TrayHandle::left_click(id) → left_click_at(id, 0, 0)
+├── input(id, Input::Left) → bus.cmd(interact::route)
+│    // dispatch 同步桥
+├── bus.entry_of(id) → ItemEntry
+│    // 不在册 → ItemNotFound
+├── menu_only &amp;&amp; DBusMenu 在册？ → menu::read_layer(...)（§3.4.1）→ return Outcome::Menu
+└── interact::invoke_xy(entry, Activate, (x, y))
+     // 就地等待往返
+     ├── Ok → events.send(InteractionResult{Activate, Ok})；return Outcome::Dispatched
+     ├── Err(超时)？ → return Err
+     │    // 对端主循环失联：menu 同一主循环分发亦不可读——不跨前缀重试、不回退
+     ├── Err(非超时) &amp;&amp; DBusMenu 在册？ → menu::read_layer(...)（§3.4.1）→ return Outcome::Menu
+     │    // 回退无回执事件
+     └── Err(非超时) 无菜单 → return Err</code></pre>
+
+<p>左键回退动机：libappindicator 系 Item 的 Activate 无处理器——XML 静态声明但分发
+catch-all，不可预先探测（Introspect 说谎、探测调用会误触激活）。左键出菜单是宿主侧
+既定策略：菜单由宿主经 dbusmenu 渲染，不依赖 Item 端激活；回退分支的失败形态为
+同步快失败，与超时无关。</p>
 
 <h4 id="sec-3-5-2">3.5.2. 其余语义输入（受理即返回）</h4>
 <pre><code>流程 middle_click(id) / right_click(id) / scroll_up(id) 等
-   （TrayHandle::*_click / *_by → input → dispatch 同步桥 → interact::route；
-    缺省 x/y=(0,0)、steps=1，_at/_by 变体传显式值）
-├── 校验 Item 在册（否则 ItemNotFound）
-├── 路由（依据登记簿记 menu / menu_only，零查询）
-│    ├── right_click → DBusMenu 在册 → Menu 流程（§3.4.1）→ Outcome::Menu
-│    │                 └── 否则 ContextMenu(x,y)（SNI 原生 fallback）
-│    ├── middle_click → SecondaryActivate(x,y)
-│    └── scroll_up/down/left/right → Scroll(∓steps, vertical / horizontal)
-├── 调用（invoke_xy / invoke_scroll：org.kde 前缀优先，非超时失败回退
-│    org.freedesktop——兼容只导出规范原文拼写的少数实现；任一侧超时 →
-│    立即报错；双前缀俱败 → 合并上报两侧错误，避免掩盖首侧真因）
-├── Menu 流程 → 同步返回 Outcome::Menu；VOID 调用（受理即返回）→ 返回 Outcome::Dispatched
-└── 调用结果回内部线程
-     └── 入队 InteractionResult{op, 成功/失败}</code></pre>
+     // *_at / *_by 变体传显式值，缺省 x/y=(0,0)、steps=1；input → bus.cmd(interact::route)
+├── bus.entry_of(id) → ItemEntry
+│    // 不在册 → ItemNotFound
+├── interact::route(id, input)
+│    // 依据登记簿记 menu / menu_only 路由，零查询
+│    ├── right_click？
+│    │    ├── DBusMenu 在册 → Menu 流程（§3.4.1）
+│    │    └── 否则 → invoke_xy(entry, ContextMenu, (x, y))
+│    ├── middle_click → invoke_xy(entry, SecondaryActivate, (x, y))
+│    └── scroll_up / scroll_down / scroll_left / scroll_right → invoke_scroll(entry, direction, ∓steps)
+│         // invoke_*：org.kde 前缀优先，非超时失败回退 org.freedesktop（兼容只导出规范原文拼写的少数实现）；任一侧超时 → 立即报错；双前缀俱败 → 合并上报两侧错误
+├── Menu 流程？ → return Outcome::Menu
+└── events.send(InteractionResult{op, result})
+     // VOID 调用受理即返回 Outcome::Dispatched，回执经事件异步交付</code></pre>
 
 <h3 id="sec-3-6">3.6. 存活探测循环</h3>
-<pre><code>内部: heartbeat_task（每 5s 一拍，库内定值；bus.spawn 常驻）
-├── GetNameOwner(自身唯一名) 探测总线（bus.conn.call_method，受 timeout_ms 约束）
-│    ├── IO 类错误（InputOutput / Handshake / Connection）→ report_fatal → Fatal（终局）
-│    └── 超时 → 视作繁忙，跳过本拍
-├── 逐 Item（bus.rt.spawn 并发）Get(Status)（PROPS_IFACE，超时 timeout_ms）
-│    ├── 成功 → ItemTracker::set_alive(service, true)
-│    └── 失败 → ItemTracker::set_alive(service, false)（覆盖最近一次结果）
-└── 结果仅写入登记簿记，不产生事件——消费方经 is_alive(id)/item(id) 读取</code></pre>
+<pre><code>内部: heartbeat_task（bus.spawn 常驻；每 5s 一拍，库内定值）
+├── bus.call(GetNameOwner(自身唯一名))
+│    // 探测总线，受 timeout_ms 约束；IO 类错误（InputOutput / Handshake / Connection）→ bus.report_fatal() → Fatal 终局；超时 → 视作繁忙，跳过本拍
+├── bus.rt.spawn 逐条 bus.call(Get(Status))（PROPS_IFACE，超时 timeout_ms）
+│    ├── Ok → ItemTracker::set_alive(service, true)
+│    └── Err → ItemTracker::set_alive(service, false)
+│         // 均为覆盖最近一次结论
+└── return
+     // 结论仅写登记簿记，不产生事件——消费方经 is_alive(id) / item(id) 读取</code></pre>
 
 <h3 id="sec-3-7">3.7. 所有权丢失与停机</h3>
 
 <h4 id="sec-3-7-1">3.7.1. 所有权丢失（Displaced）</h4>
 <pre><code>内部: name_owner_changed_task 收到 NameOwnerChanged(Watcher 名, 属主 → "")
-   （极罕见边缘路径：持有期外部顶替一律失败（DoNotQueue），
-    仅总线层异常——如总线守护重启——可触发）
-├── is_stopping / is_stopped 守卫：停机路径主动释放名引发的 NOC 在此吞掉，
-│    不产生 Displaced；仅异常丢失（持有期不可被替换）才继续
-├── report_displaced()（displaced watch 通道通知 mod::run）
-└── run() displaced 分支：
-     ├── 清空 ItemTracker 全部簿记（ItemTracker::clear）
-     ├── 服务转停止形态（set_stopped，不再受理登记）
-     ├── 入队 Displaced → 事件通道 close
-     └── （终局报错：被其它 Watcher 取代；不重试、不强制夺回）</code></pre>
+     // 极罕见边缘路径：持有期外部顶替一律失败（DoNotQueue），仅总线层异常——总线守护重启、本进程连接被强制关闭等——可触发
+├── bus.is_stopping() || bus.is_stopped()？ → 忽略本信号
+│    // 停机路径主动释放名引发的 NOC 在此吞掉，不产生 Displaced
+├── bus.report_displaced()
+│    // displaced watch 通道通知 mod::run
+└── mod::run 的 displaced 分支
+     ├── ItemTracker::clear() → Vec&lt;ItemEntry&gt;
+     ├── bus.set_stopped()
+     │    // 服务转停止形态，不再受理登记
+     ├── events.send(Displaced)；events.close()
+     └── return
+          // 终局报错：被其它 Watcher 取代；不重试、不强制夺回</code></pre>
 
 <h4 id="sec-3-7-2">3.7.2. 停机（shutdown）</h4>
 <pre><code>流程 shutdown()（Handle::shutdown / 最后一个 Handle drop → RuntimeShared::shutdown）
-├── 幂等守卫（is_stopped → 直接返回）
-├── set_stopped（此后 Handle 方法一律 Stopped）
-├── begin_stopping（名释放引发的 NameOwnerChanged 不得触发 Displaced，§3.7.1）
-├── request_stop → 内部线程 run() 的 stop 分支 → graceful_shutdown(bus)：
-│    ├── watcher::release（释放 Watcher 名 → 总线上角色下线；受 timeout 约束）
-│    ├── 清空登记簿记（ItemTracker::clear）
-│    └── 事件通道 close（消费端 recv() → None）
-└── join 内部线程收尾（运行时线程自身调用时不 join——防自 join 死锁）</code></pre>
+├── bus.is_stopped()？ → return
+│    // 幂等守卫
+├── bus.set_stopped()
+│    // 此后 Handle 方法一律 Stopped
+├── bus.begin_stopping()
+│    // 名释放引发的 NameOwnerChanged 不得触发 Displaced（§3.7.1）
+├── request_stop → 内部线程 run() 的 stop 分支
+│    └── dbus::graceful_shutdown(bus)
+│         ├── watcher::release(bus)
+│         │    // 释放 Watcher 名 → 总线上角色下线；受 timeout 约束
+│         ├── ItemTracker::clear()
+│         └── events.close()
+│              // 消费端 recv() → None
+└── join_handle.join()
+     // 运行时线程自身调用时不 join——防自 join 死锁</code></pre>
 
 <h3 id="sec-3-8">3.8. 渲染直出（icon_paintable）</h3>
-<pre><code>流程 icon_paintable(&amp;IconSource) -&gt; gdk::Paintable
-   （GTK 主线程调用；三类失败统一回退 image-missing / 空纹理，不 panic）
-├── Name(name)（主题图标名）
-│    └── lookup_theme_icon(name)
-│         ├── gdk::Display::default()? → IconTheme::for_display（逐显示连接取用）
-│         ├── has_icon(name)（Icon Theme Spec 命中判定，含继承主题链）
-│         │    ├── 否 → None → missing_icon()（image-missing 占位，
-│         │    │         Icon Naming Spec 保留名，主题规范保证存在）
-│         │    └── 是 → lookup_icon(name, [], LOOKUP_SIZE=48, scale=1, Ltr)
-│         │              → 主题 Paintable
-├── Path(path)（文件路径图标，Ayatana 生态事实扩展）
-│    └── gdk::Texture::from_filename(path)
-│         ├── Ok(texture) → 文件纹理
-│         └── Err（文件不存在 / 读取失败 / 解码失败）→ missing_icon()
-│              （与主题未命中同回退；文件为外部状态，不落任何缓存）
-└── Pixmap(p)（裸位图，自带数据——DBus 读取时已拷贝入 TrayItem）
-     └── pixmap_to_paintable(p)
-          ├── 完整性检查：w,h &gt; 0 且 argb.len() ≥ (w×4) × h？
-          │    └── 否 → 1×1 全透明 A8r8g8b8 纹理（渲染为空，不 panic）
-          └── MemoryTexture::new(w, h, A8r8g8b8, bytes, stride = w×4)
-               └── 色彩对齐：SNI ARGB32 网络字节序 [A,R,G,B]、未预乘
-                    ↔ gdk 非预乘 A8r8g8b8 内存格式——字节序天然对齐、
-                    无需换序；预乘合成由渲染器负责</code></pre>
+<pre><code>流程 icon_paintable(&amp;IconSource) → gdk::Paintable
+     // GTK 主线程调用；三类失败统一回退 image-missing / 空纹理，不 panic
+├── IconSource::Name？ → lookup_theme_icon(name)
+│    ├── gdk::Display::default()?
+│    │    // None → missing_icon()
+│    ├── IconTheme::for_display(display)
+│    │    // 逐显示连接取用
+│    └── theme.has_icon(name)？
+│         ├── 是 → theme.lookup_icon(name, [], LOOKUP_SIZE=48, scale=1, Ltr)
+│         └── 否 → missing_icon()
+│              // image-missing 占位：Icon Naming Spec 保留名，主题规范保证存在
+├── IconSource::Path？ → gdk::Texture::from_filename(path)
+│    ├── Ok(texture) → 文件纹理
+│    └── Err → missing_icon()
+│         // 文件不存在 / 读取失败 / 解码失败；文件为外部状态，不落任何缓存
+└── IconSource::Pixmap？ → pixmap_to_paintable(p)
+     // 裸位图，DBus 读取时已拷贝入 TrayItem
+     ├── 尺寸完整？（w, h &gt; 0 且 argb.len() ≥ (w×4) × h）
+     │    └── 否 → 1×1 全透明 A8r8g8b8 纹理
+     │         // 渲染为空，不 panic
+     └── gdk::MemoryTexture::new(w, h, A8r8g8b8, bytes, stride=w×4)
+          // SNI ARGB32 网络字节序 [A,R,G,B]、未预乘 ↔ gdk 非预乘 A8r8g8b8：字节序天然对齐、无需换序</code></pre>
 
 </main>
 </body>
