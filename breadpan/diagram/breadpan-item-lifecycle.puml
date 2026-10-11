@@ -1,0 +1,43 @@
+@startuml breadpan-item-lifecycle
+participant "Item 应用" as item
+participant "breadpan（watcher 模块）" as bp
+participant "事件通道" as ch
+
+== 报到 ==
+item -> bp: RegisterItem(服务名 + 路径)
+bp -> bp: 登记最小集入册（幂等；探测 Menu 属性）
+bp -> ch: Added(id)
+
+== 变更（窗口合并）==
+item -> bp: PropertiesChanged
+item -> bp: 官方 New* 信号
+note right of item
+  NewStatus / NewIcon / NewTitle / NewToolTip /
+  NewOverlayIcon / NewAttentionIcon（SNI §3.3）
+end note
+bp -> bp: 信号入待通告集合（窗口内按 Item 合并）
+bp -> ch: Changed(id)
+note right of ch
+  轻量事实：不含数据
+  消费方重读 item(id) 取最新
+end note
+
+== 同名换主（NameOwnerChanged：新旧属主均非空）==
+item --> bp: NameOwnerChanged(服务名, 旧属主 → 新属主)
+bp -> bp: 属主唯一名重绑定；路由字段就地重探
+note right of bp
+  id 与对象生死不变：
+  不拆 Removed + Added
+end note
+bp -> ch: OwnerChanged(id)
+note right of ch
+  信息性事实：消费方无必做动作
+  （需要时重读 item(id)，读即最新）
+end note
+
+== 死亡（NameOwnerChanged：new_owner 为空）==
+note over item: （Item 进程退出 / 崩溃）
+item --> bp: NameOwnerChanged(服务名, 属主 → "")
+bp -> bp: 簿记移除
+bp -> ch: Removed(id)
+@enduml

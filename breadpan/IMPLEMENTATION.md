@@ -12,11 +12,11 @@
 
 | # | 现象 | 实例 | 本库处理 |
 |---|------|------|----------|
-| 1 | `RegisterStatusNotifierItem` 参数存在**三种形态**：规范服务名；`"name/path"` 混串；Ayatana 风格**纯对象路径** | clash-verge 传 `/org/ayatana/NotificationItem/...` | 前两种就地解析；纯路径形态取**调用方唯一名**作服务名（经消息头 sender 提取，KDE Watcher 的既定语义）；无 sender 或空串 → 拒绝受理（Protocol） |
+| 1 | `RegisterStatusNotifierItem` 参数存在**三种形态**：知名名；`"name/path"` 混串；Ayatana 风格**纯对象路径** | clash-verge 传 `/org/ayatana/NotificationItem/...` | 前两种就地解析；纯路径形态取**调用方唯一名**作服务名（经消息头 sender 提取，KDE Watcher 的既定语义）；无 sender 或空串 → 拒绝受理（Protocol） |
 | 2 | 存量 Item 可能**不实现 Introspect**（返回空 XML） | QQ 音乐（Electron/CEF 内核） | 反向发现探测双级：Introspect 接口名确认 → 失败则 `Properties.GetAll` 直接属性读取确认 |
-| 3 | Item 可能以**唯一名**注册（无 well-known 名） | clash-verge（`:1.22`） | 唯一名即 TrayItemId；`GetNameOwner` 解析属主（唯一名对自身解析成功） |
+| 3 | Item 可能以**唯一名**注册（无知名名） | clash-verge（`:1.22`） | 唯一名即 TrayItemId；`GetNameOwner` 解析属主（唯一名对自身解析成功） |
 | 4 | `IconName` 可能是**文件路径**而非主题图标名 | clash-verge（`/run/user/1000/tray-icon/*.png`） | `IconName` 以 `/` 开头识别为 `IconSource::Path`（字面识别，不做语义猜测）；渲染直出加载文件位图，失败回退 `image-missing` |
-| 5 | 同一对象可能**双重注册**（规范名 + 唯一名/路径形态各一次） | 确定性复现仅 mock。真实侧一例**疑似**：QQ 音乐（CEF）存量项以规范名在册的同时，出现另一条唯一名注册（未验证归属，应用退出后无法复查）。clash-verge 抓包实测**单次**注册（路径形态，且直发 Watcher 唯一名而非总线名） | 设计为自愈：注册按字段匹配两轮 lookup（注册名 ↔ service、发送者唯一名 ↔ unique），命中原地更新——临时唯一名 id 在 Bus Name 报到时升级并发 NameChanged{old, new}（是否重载由消费方裁断）；两轮均未命中才新建条目（CODE §3.3.1） |
+| 5 | 同一对象可能**双重注册**（知名名 + 唯一名/路径形态各一次） | 确定性复现仅 mock。真实侧一例**疑似**：QQ 音乐（CEF）存量项以知名名在册的同时，出现另一条唯一名注册（未验证归属，应用退出后无法复查）。clash-verge 抓包实测**单次**注册（路径形态，且直发 Watcher 唯一名而非其知名名） | 设计为自愈：注册按字段匹配两轮 lookup（注册名 ↔ service、发送者唯一名 ↔ unique），命中原地更新——临时唯一名 id 在知名名报到时升级并发 NameChanged{old, new}（是否重载由消费方裁断）；两轮均未命中才新建条目（CODE §3.3.1） |
 | 6 | `RegisterStatusNotifierHost` 兼容桩被真实 Host 调用 | vicinae-server（面板）在 Watcher 名出现时即调桩注册（本次抓包仅见调用，未捕获其是否读 `IsStatusNotifierHostRegistered`） | 桩语义按 §3.4：受理即忘、不簿记、不产生事件 |
 | 7 | Item 可能**声明 Activate 却不实现**（libappindicator 系：XML 静态声明、分发 catch-all） | clash-verge（`No handler for Activate`，Context 连声明都没有） | 左键 Activate 非超时失败且 DBusMenu 在册 → 回退 Menu 流程（左键出菜单是宿主侧策略，菜单由宿主经 dbusmenu 渲染）；超时不回退（menu 与 Activate 同一主循环分发，同样不可读） |
 
@@ -31,14 +31,17 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   Item——如 clash-verge——其 `Added` 会抢在快照之前，实测复现。）
 - **快照栅栏**（`snapshot_done`，防御性）：快照投递前置位；栅栏前的报到静默入册
   （由快照承载，不发 `Added`）；启动期 Item 死亡的 `Removed` 进缓冲，快照投递后
-  仅对**快照内**的 id 补投（快照外的按从未出现丢弃）；`MenuChanged` 在栅栏前丢弃；
+  仅对**快照内**的 id 补投（快照外的按从未出现丢弃）；`OwnerChanged` 栅栏前静默
+  （重绑定照常生效，快照即最新，无需补投）；`MenuChanged` 在栅栏前丢弃；
   `Changed` 由节流任务保证不早于快照——其在栅栏置位后才启动（tokio interval
   首拍立即触发，启动期积压的 pending 首拍即冲刷）。
 - **信号归属匹配**：New\*/PropertiesChanged/dbusmenu 信号的发送者是**唯一名**，
-  注册参数可能是 well-known 名 → 簿记最小集在文档字段（唯一名+对象路径+alive+
+  注册参数可能是知名名 → 簿记最小集在文档字段（服务名+对象路径+alive+
   menu+menu_only）之外，还需存**属主唯一名**（注册时 `GetNameOwner` 解析）。
-- **同名换主**（`NameOwnerChanged(name, old≠"", new≠"")`）：视为旧条目移除
-  （`Removed`）+ 新属主重新入册（`Added`）——应用重启直接顶名的竞态。
+- **同名换主**（`NameOwnerChanged(name, old≠"", new≠"")`）：条目保留、id 不变——
+  属主唯一名重绑定 + 路由字段就地重探，交付信息性 `OwnerChanged(id)`（属主更替对
+  消费方无可感知影响，无必做动作；ARCHITECTURE §2.4/§3.2）。初版实现曾拆
+  `Removed`+`Added`，代码对齐见 TODO.md。
 - **Watcher 名自身的 NOC**：停机路径主动释放名也触发 NOC，以 `stopping` 标记
   区分——主动释放不产生 `Displaced`，仅异常丢失（持有期不可被替换）才终局。
 - **总线断连 → Fatal**：无现成"连接断开"回调；心跳每拍以 `GetNameOwner(自身
@@ -121,7 +124,7 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   不假设快照为空；fire-and-forget 回执以轮询等待（`wait_until`/`recv_matching`）。
 - **双注册并入**：同一对象重复注册按字段匹配两轮 lookup（注册名 ↔ service、
   发送者唯一名 ↔ unique）命中原地更新（CODE §3.3.1）——断言同一对象恒为
-  单一 id；临时唯一名 → Bus Name 升级断言 NameChanged{old, new}，
+  单一 id；临时唯一名 → 知名名升级断言 NameChanged{old, new}，
   Changed/MenuChanged 落点确定。
 
 ## 6. 已知限制与后续方向

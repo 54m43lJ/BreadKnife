@@ -16,7 +16,7 @@
 ├── <a href="#sec-2-lib">lib.rs</a>               # 公开面出口（核心 + gtk 整合层）
 ├── <a href="#sec-2-handle">handle.rs</a>            # TrayConfig + TrayHandle 前端（指令受理 → 内部线程投递）
 ├── <a href="#sec-2-events">events.rs</a>            # TrayEvent、单事件通道（tokio mpsc；start 交付唯一 Receiver）
-├── <a href="#sec-2-tracker">tracker.rs</a>           # Item 登记簿记（最小集）：报到 / 反向发现 / 死亡清理
+├── <a href="#sec-2-tracker">tracker.rs</a>           # Item 登记簿记（最小集）：报到 / 反向发现 / 换主重绑定 / 死亡清理
 ├── <a href="#sec-2-props">props.rs</a>             # 属性即时读取（zvariant/serde → 原生结构）
 ├── dbus/
 │   ├── <a href="#sec-2-dbus-mod">mod.rs</a>           # DBus 域出口（内部聚合）：启动编排、报到受理与反向发现、全局信号订阅
@@ -25,7 +25,7 @@
 │   ├── <a href="#sec-2-dbus-iface">iface.rs</a>         # org.kde.StatusNotifierWatcher 协议面（ARCHITECTURE §3.4）
 │   ├── <a href="#sec-2-dbus-heartbeat">heartbeat.rs</a>     # 周期存活探测：结果写入登记簿记（alive 字段）
 │   ├── <a href="#sec-2-dbus-menu">menu.rs</a>          # dbusmenu 现场读取（零缓存·逐层懒加载）
-│   └── <a href="#sec-2-dbus-interact">interact.rs</a>      # 语义输入路由（ARCHITECTURE §2.7）+ InteractionResult 回执
+│   └── <a href="#sec-2-dbus-interact">interact.rs</a>      # 语义输入路由（ARCHITECTURE §2.6）+ InteractionResult 回执
 └── gtk/
     ├── <a href="#sec-2-gtk-mod">mod.rs</a>           # 整合层出口（渲染直出；主线程约束说明）
     └── <a href="#sec-2-gtk-paintable">paintable.rs</a>     # 渲染直出：主题命中 → 主题图标；路径 → 文件纹理；未命中 → 位图纹理
@@ -46,9 +46,9 @@ handle/events 为公开前端。</p>
 的条目为架构文档已定义符号的统一引用格式。收录标准：只列 §3 调用栈引用到的核心类型与方法；
 条目只承载签名与一行用途——<code>const</code> 定义不收录（字面取值随实现调试浮动，
 取舍记录见 IMPLEMENTATION.md），方法内部步骤一律归 §3 调用栈，未列出者皆为局部实现细节。<br>
-<strong>注意</strong>：登记合并（Upsert::Renamed / NameChanged，§3.3.1）与节流任务
-随栅栏启动（§3.2）为 IMPLEMENTATION.md 记录的改进——dev 分支代码滞后于记录，
-冲突处以 IMPLEMENTATION.md 为准，不随源码回退。<br>
+<strong>注意</strong>：登记合并（Upsert::Renamed / NameChanged，§3.3.1）、节流任务
+随栅栏启动（§3.2）与同名换主的 OwnerChanged 交付（§3.3.2）为 IMPLEMENTATION.md
+记录的改进——dev 分支代码滞后于记录，冲突处以 IMPLEMENTATION.md 为准，不随源码回退。<br>
 公开类型与签名（Tray / TrayHandle / TrayEvent / 数据模型 / TrayError / gtk）见
 <a href="ARCHITECTURE.html#sec-3">ARCHITECTURE.html §3</a>，此处不重复。</p>
 
@@ -101,7 +101,7 @@ impl RuntimeShared {
 }</code></pre>
 
 <h3 id="sec-2-events">2.3. events.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub enum TrayEvent;          //见 ARCHITECTURE §3.2（含 NameChanged）
+<pre><code>pub enum TrayEvent;          //见 ARCHITECTURE §3.2（含 NameChanged / OwnerChanged）
 pub enum InteractionOp;      //见 ARCHITECTURE §3.2
 pub(crate) struct EventQueue {
     tx: Mutex&lt;Option&lt;tokio::sync::mpsc::Sender&lt;TrayEvent&gt;&gt;&gt;,   // 唯一通道发送端；Receiver 仅经 Tray::start 交付
@@ -118,8 +118,9 @@ impl EventQueue {
 
 <h3 id="sec-2-tracker">2.4. tracker.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub(crate) struct ItemEntry {
-    pub service: String,   // 公共名（= TrayItemId；临时唯一名占位可升级，§3.3.1）
-    pub unique: String,    // 属主唯一名（信号归属匹配键；注册时 GetNameOwner 解析）
+    pub service: String,   // 服务名（= TrayItemId；知名名或唯一名皆可，临时唯一名占位可升级，§3.3.1）
+    pub unique: String,    // 属主唯一名（信号发送者恒为唯一名、与服务名可能不一致——注册时
+                           // GetNameOwner 把服务名解析为属主唯一名存此，即信号归属匹配键，§3.3.1）
     pub path: String,      // Item 对象路径（交互寻址用）
     pub alive: bool,       // 最近一次存活探测结论
     pub menu: Option&lt;String&gt;, // dbusmenu 对象路径；None = 无 DBusMenu
@@ -133,6 +134,8 @@ impl ItemTracker {
     pub(crate) fn upsert(&amp;mut self, entry: ItemEntry) -&gt; Upsert;
     /// 死亡清理：按（服务名或属主唯一名）命中移除，返回被移除者
     pub(crate) fn unregister(&amp;mut self, name: &amp;str) -&gt; Vec&lt;ItemEntry&gt;;
+    /// 同名换主：属主唯一名重绑定（条目保留、id 不变；不在册 → false，§3.3.2）
+    pub(crate) fn rebind_owner(&amp;mut self, name: &amp;str, new_owner: &amp;str) -&gt; bool;
     /// 信号落点：(唯一名, 对象路径) 定位 id
     pub(crate) fn find_by_signal(&amp;self, sender: &amp;str, path: &amp;str) -&gt; Option&lt;TrayItemId&gt;;
     /// dbusmenu 信号落点：(唯一名, 菜单对象路径) 定位 id
@@ -188,7 +191,7 @@ fn spawn_signal_tasks(bus: BusCenter);
 /// 订阅并消费一条匹配规则下的信号流（订阅失败降级 Narration）
 async fn pump_signal_stream(rule: MatchRule&lt;'static&gt;, bus: BusCenter,
                             on_msg: impl FnMut(&amp;BusCenter, Message));
-/// NameOwnerChanged：死亡清理 / 同名换主 / Displaced（§3.3.2 §3.7.1）
+/// NameOwnerChanged：同名换主 / 死亡清理 / Displaced（§3.3.2 §3.7.1）
 async fn name_owner_changed_task(bus: BusCenter);
 /// 官方 New* 信号（kde/fd 前缀各一条）→ pending 登记（§3.2）
 async fn item_signals_task(bus: BusCenter, iface: &amp;'static str);
@@ -294,7 +297,7 @@ pub(crate) fn menu_item_from_props(id: i32, p: &amp;HashMap&lt;String, OwnedValu
 /// 助记符 "_" 解析 → label（原文保留于 raw_label）
 pub(crate) fn parse_mnemonic(raw: &amp;str) -&gt; String;</code></pre>
 
-<h4 id="sec-2-dbus-interact">2.6.7. interact.rs（语义输入路由：ARCHITECTURE §2.7 + 回执）</h4>
+<h4 id="sec-2-dbus-interact">2.6.7. interact.rs（语义输入路由：ARCHITECTURE §2.6 + 回执）</h4>
 <pre><code>pub(crate) enum Input {   // 路由前归一的语义输入（_at/_by 变体已在 Handle 层折入）
     Left(i32, i32), Middle(i32, i32), Right(i32, i32),
     ScrollUp(i32), ScrollDown(i32), ScrollLeft(i32), ScrollRight(i32),
@@ -383,8 +386,8 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 │    事件源不存在「快照已入队、栅栏未置位」的中间态）
 └── take_deferred_removed() 冲刷启动期缓冲：仅快照内 id 补投 Removed，
      快照外按从未出现丢弃</code></pre>
-<p>栅栏是各事件源「首事件即快照、无重叠无缺口」的兜底：报到（§3.3.1）、死亡清理
-（§3.3.2）、菜单变更（§3.4.2）按栅栏前/后记录行为分支；变更节流任务在置位后才启动
+<p>栅栏是各事件源「首事件即快照、无重叠无缺口」的兜底：报到（§3.3.1）、NameOwnerChanged
+（§3.3.2，同名换主与死亡清理）、菜单变更（§3.4.2）按栅栏前/后记录行为分支；变更节流任务在置位后才启动
 （§3.2），Changed 天然不早于快照。栅栏为防御性——申请时序（§3.1.1）使栅栏前报到
 在正常路径上无从发生。</p>
 
@@ -401,7 +404,7 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 与进度型 Item 的高频刷新，经零缓存架构放大为消费方的重复现场读取；窗口节流把重读频率压到
 每 Item 至多 1 次/窗口。事实事件幂等，窗口内折叠不丢信息。</p>
 
-<h3 id="sec-3-3">3.3. 报到与死亡清理</h3>
+<h3 id="sec-3-3">3.3. 报到与下线（死亡清理 / 同名换主）</h3>
 
 <h4 id="sec-3-3-1">3.3.1. 报到（RegisterStatusNotifierItem 受理）</h4>
 <pre><code>内部: 协议面收到 RegisterStatusNotifierItem(service)
@@ -409,21 +412,22 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 ├── sender ← 消息头 sender（调用方唯一名，#[zbus(header)] 注入）
 └── dbus::register_item(bus, service, sender, announce=true) -&gt; Result&lt;bool, TrayError&gt;
      ├── split_service_arg(service, sender) -&gt; Option&lt;(String, String)&gt;：注册参数三形态解析
-     │    ├── "name"（规范服务名）→ (name, /StatusNotifierItem)（默认路径）
+     │    ├── "name"（知名名）→ (name, /StatusNotifierItem)（默认路径）
      │    ├── "name/path"（混串）→ 就地切分；path 缺前导 "/" 时补齐
      │    └── "/path"（Ayatana 风格纯对象路径）→ (sender, path)：服务名取注册方唯一名
      │         └── 无 sender（或 service 为空）→ None → TrayError::Protocol 拒绝受理
      │              （以 Narration 事件交付，不影响服务运行）
-     ├── GetNameOwner(service) → 属主唯一名（失败回退 service 本身）
+     ├── GetNameOwner(service) → 属主唯一名（唯一名查询返回其自身，全部注册形态同路径；
+     │    失败回退 service 本身，不阻塞报到）
      ├── props::probe_routing(service, path) → (menu, menu_only)（路由标记注册时探测）
      └── ItemTracker::upsert(ItemEntry) → Upsert（字段匹配两轮 lookup，自愈并入：
           同一对象/连接不允许出现双条目）
-          ├── 第一轮：注册名 == service（Bus Name 同名：应用重启竞态/同名刷新；
+          ├── 第一轮：注册名 == service（知名名同名：应用重启竞态/同名刷新；
           │    唯一名形态注册名 == 临时条目 service）→ 命中
           ├── 第二轮：发送者唯一名 == unique（同连接先前以唯一名临时注册）→ 命中
           ├── 命中 → 原地更新（path/menu/menu_only/alive 以最新报到为准；
-          │    service 仅在注册名为 Bus Name 且原为临时唯一名时升级）
-          │    └── 升级（临时唯一名 → Bus Name）→ 入队 NameChanged{old, new}
+          │    service 仅在注册名为知名名且原为临时唯一名时升级）
+          │    └── 升级（临时唯一名 → 知名名）→ 入队 NameChanged{old, new}
           │         （同一对象 id 重键——不发 Removed/Added，
           │          是否重载数据由消费方裁断）
           ├── 两轮均未命中 → 新条目 → true
@@ -431,21 +435,23 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
           │         → iface::emit_registered（StatusNotifierItemRegistered 广播）+ 入队 Added(id)
           │         栅栏前 → 静默入册：无广播、无 Added（快照承载，§3.1.3）；
          announce=false 同此（反向发现路径）</code></pre>
-<p>注册参数 service 与信号发送者分属两个命名体系：service 既可以是 well-known 名（规范服务名），
-也可以是唯一名——无 well-known 名的 Item 以 <code>:1.22</code> 形态直接报到（clash-verge 实测）。
-两种形态同等入册，service 即 TrayItemId，簿记不区分。而 SNI 与 dbusmenu 信号的发送者一律是
-唯一名，与注册名可能不一致：注册时经 <code>GetNameOwner</code>（<code>org.freedesktop.DBus</code>
-接口的标准方法，由总线守护进程实现，本库为调用方）把注册名解析为属主唯一名，存入簿记
-unique 字段；对唯一名查询返回其自身，故全部注册形态走同一代码路径。解析失败（名字无属主）
-回退以 service 本身充当，不阻塞报到。该字段有两个消费点：信号归属匹配（§3.2，按发送者
-唯一名 + 对象路径定位 id）与死亡清理（§3.3.2，按服务名或属主唯一名双条件命中）。</p>
 
-<h4 id="sec-3-3-2">3.3.2. 死亡清理（NameOwnerChanged）</h4>
-<pre><code>内部: name_owner_changed_task 收到 NameOwnerChanged(唯一名, 旧属主 → "")
-├── ItemTracker::unregister(名字) → 被移除条目（按服务名或属主唯一名双条件命中；
-│    唯一名消失 → 该连接全部条目一并下线，含双注册并入的单一 id）
-├── 逐条 iface::emit_unregistered（StatusNotifierItemUnregistered 广播）
-└── 逐条交付 Removed：栅栏已置位 → 入队；栅栏前 → defer_removed 缓冲（§3.1.3）</code></pre>
+<h4 id="sec-3-3-2">3.3.2. NameOwnerChanged（同名换主 / 死亡清理）</h4>
+<pre><code>内部: name_owner_changed_task 收到 NameOwnerChanged(名字, 旧属主 → 新属主)
+├── Watcher 名 → 所有权丢失（§3.7.1；stopping 守卫吞掉主动释放）
+├── 同名换主（新属主 ≠ ""，应用重启直接顶名）
+│    ├── ItemTracker::rebind_owner(名字, 新属主)——条目保留、id 不变：
+│    │    属主唯一名重绑定，新属主的信号归属随 rebind 续接
+│    ├── props::probe_routing(名字, 路径) → (menu, menu_only)
+│    │    （路由字段就地重探：新属主的 Menu 属性 / menu_only 探测一次）
+│    ├── ItemTracker::update_routing(名字, Some(menu), Some(menu_only))
+│    └── 交付 OwnerChanged(id)（信息性，消费方无必做动作）：
+│         栅栏已置位 → 入队；栅栏前 → 静默（重绑定已生效，快照即最新，不补投）
+└── 死亡清理（新属主 = ""）
+     ├── ItemTracker::unregister(名字) → 被移除条目（按服务名或属主唯一名双条件命中；
+     │    唯一名消失 → 该连接全部条目一并下线，含双注册并入的单一 id）
+     ├── 逐条 iface::emit_unregistered（StatusNotifierItemUnregistered 广播）
+     └── 逐条交付 Removed：栅栏已置位 → 入队；栅栏前 → defer_removed 缓冲（§3.1.3）</code></pre>
 
 <h3 id="sec-3-4">3.4. 菜单现场读取（Menu 流程，interact 与 menu()/menu_expand() 共用）</h3>
 
