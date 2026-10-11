@@ -46,9 +46,9 @@ handle/events 为公开前端。</p>
 的条目为架构文档已定义符号的统一引用格式。收录标准：只列 §3 调用栈引用到的核心类型与方法；
 条目只承载签名与一行用途——<code>const</code> 定义不收录（字面取值随实现调试浮动，
 取舍记录见 IMPLEMENTATION.md），方法内部步骤一律归 §3 调用栈，未列出者皆为局部实现细节。<br>
-<strong>注意</strong>：登记合并（Upsert::Renamed / NameChanged，§3.3.1）为
-IMPLEMENTATION.md §1#5 / §5 记录的在册自愈设计——dev 分支代码滞后于该记录，
-此处以 IMPLEMENTATION.md 为准，不随源码回退。<br>
+<strong>注意</strong>：登记合并（Upsert::Renamed / NameChanged，§3.3.1）与节流任务
+随栅栏启动（§3.2）为 IMPLEMENTATION.md 记录的改进——dev 分支代码滞后于记录，
+冲突处以 IMPLEMENTATION.md 为准，不随源码回退。<br>
 公开类型与签名（Tray / TrayHandle / TrayEvent / 数据模型 / TrayError / gtk）见
 <a href="ARCHITECTURE.html#sec-3">ARCHITECTURE.html §3</a>，此处不重复。</p>
 
@@ -173,7 +173,7 @@ pub(crate) async fn register_item(bus: &amp;BusCenter, service_arg: &amp;str,
 async fn discover_existing(bus: &amp;BusCenter) -&gt; Vec&lt;String&gt;;
 /// 存量 Item 双级探测（§3.1.2）
 async fn probe_item_iface(bus: &amp;BusCenter, name: &amp;str) -&gt; Result&lt;bool, TrayError&gt;;
-/// 快照投递 + 栅栏置位 + 启动期 Removed 冲刷（§3.3.2）
+/// 快照投递 + 栅栏置位 + 启动期 Removed 冲刷（§3.1.3）
 async fn queue_snapshot(bus: &amp;BusCenter) -&gt; Vec&lt;String&gt;;
 /// 内部线程驻停体：stop / fatal / displaced 三终局 select（§3.7）
 pub(crate) async fn run(bus: BusCenter, stop_rx: watch::Receiver&lt;bool&gt;,
@@ -223,9 +223,15 @@ impl BusCenter {
     pub(crate) fn cmd&lt;T, F&gt;(&amp;self, f: F) -&gt; Result&lt;T, TrayError&gt;;
     /// 内部运行时后台任务派发
     pub(crate) fn spawn&lt;F&gt;(&amp;self, f: F);
-    // ── 栅栏与停机标记（原子/守卫通道）：is_snapshot_done / mark_snapshot_done /
-    //    defer_removed / take_deferred_removed / is_stopping / begin_stopping /
-    //    is_stopped / set_stopped / request_stop / report_fatal / report_displaced /
+    // ── 快照栅栏（§3.1.3）──
+    snapshot_done: Arc&lt;AtomicBool&gt;,                  // 置位后事件源走增量路径
+    deferred_removed: Arc&lt;Mutex&lt;Vec&lt;TrayItemId&gt;&gt;&gt;,   // 启动期 Removed 缓冲
+    fn is_snapshot_done(&amp;self) -&gt; bool;
+    fn mark_snapshot_done(&amp;self);
+    fn defer_removed(&amp;self, id: TrayItemId);
+    fn take_deferred_removed(&amp;self) -&gt; Vec&lt;TrayItemId&gt;;
+    // ── 停机标记（原子/守卫通道）：is_stopping / begin_stopping / is_stopped /
+    //    set_stopped / request_stop / report_fatal / report_displaced /
     //    entry_of（TrayItemId → ItemEntry，不在册 → ItemNotFound）
 }</code></pre>
 
@@ -339,10 +345,9 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │         │      properties_changed_task×2 kde+fd / dbusmenu_signals_task，
 │         │      经 pump_signal_stream 订阅消费——§3.2 §3.3.2 §3.4.2）
 │         ├── bus.spawn(heartbeat::heartbeat_task(bus))（周期存活探测，§3.6）
-│         ├── bus.spawn(debounce_task(bus))（节流窗口，§3.2）
 │         ├── discover_existing(bus)（反向发现存量 Item，§3.1.2，静默入册）
-│         ├── queue_snapshot(bus)：逐个 props::fetch_item → 排序
-│         │    → 事件入队 Snapshot(全部 Item 记录)
+│         ├── queue_snapshot(bus)（§3.1.3：快照投递 + 置位栅栏 + 冲刷启动期 Removed）
+│         ├── bus.spawn(debounce_task(bus))（节流窗口，栅栏置位后启动，§3.2）
 │         └── watcher::WatcherService::start(bus)?（最后申请 Watcher 名）
 │              └── 已被他人持有 → 返回 NameTaken（多 Watcher 不能共存）
 ├── ready_rx 轮询 bootstrap 结果（引导总时限 max(10×timeout_ms, 10s) 守护）
@@ -352,7 +357,9 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 <p>顺序为什么是契约：Watcher 名最后申请——申请前报到无从发生，快照投递后所有报到
 以增量事件衔接（首事件即快照，无重叠无缺口）。若先申请名，等待 Watcher 出现的
 Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> 抢在快照之前——实测复现。
-订阅（spawn_signal_tasks）与周期任务（heartbeat_task / debounce_task）先于申请名同理：名在位即可能收到信号与超时，须先就位才不丢。</p>
+订阅（spawn_signal_tasks）与存活探测（heartbeat_task）先于申请名同理：名在位即可能
+收到信号与超时，须先就位才不丢；节流任务（debounce_task）不在此列——其交付始于快照
+之后，随栅栏置位启动（§3.2）。</p>
 
 <h4 id="sec-3-1-2">3.1.2. 反向发现（存量 Item 双级探测）</h4>
 <pre><code>内部: dbus::discover_existing(bus) -&gt; Vec&lt;String&gt;（过程叙述，快照投递后以 Narration 交付）
@@ -367,6 +374,20 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 │    （静默入册：不广播、不入队 Added——快照是首事件，§3.3.1）
 └── 未确认 / 探测失败 → 记入过程叙述，不中断发现循环</code></pre>
 
+<h4 id="sec-3-1-3">3.1.3. 快照投递与栅栏（queue_snapshot）</h4>
+<pre><code>内部: dbus::queue_snapshot(bus) -&gt; Vec&lt;String&gt;（过程叙述，快照后以 Narration 交付）
+├── ItemTracker::all() 全量条目 → bus.rt.spawn 并发 props::fetch_item
+│    （单个读取失败 → 记过程叙述，该 Item 不入快照）
+├── 按 id 排序（发现序不稳定，排序保证确定性输出）→ 入队 Snapshot{items}——首事件
+├── mark_snapshot_done() 置位栅栏（与入队之间无 await：单线程运行时内不可分割，
+│    事件源不存在「快照已入队、栅栏未置位」的中间态）
+└── take_deferred_removed() 冲刷启动期缓冲：仅快照内 id 补投 Removed，
+     快照外按从未出现丢弃</code></pre>
+<p>栅栏是各事件源「首事件即快照、无重叠无缺口」的兜底：报到（§3.3.1）、死亡清理
+（§3.3.2）、菜单变更（§3.4.2）按栅栏前/后记录行为分支；变更节流任务在置位后才启动
+（§3.2），Changed 天然不早于快照。栅栏为防御性——申请时序（§3.1.1）使栅栏前报到
+在正常路径上无从发生。</p>
+
 <h3 id="sec-3-2">3.2. 变更通告合并（固定窗口节流）</h3>
 <pre><code>内部: properties_changed_task(iface)×2 / item_signals_task(iface)×2
    （kde 与 fd 前缀各一条常驻任务；match rule 订阅经 pump_signal_stream）
@@ -374,7 +395,7 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 │    (唯一名, 路径) 唯一命中（双注册已并入，§3.3.1），Changed 落点确定
 │    └── PropertiesChanged 另就地更新路由标记（update_routing，§3.3.1）
 ├── pending.insert(id)（仅记入待通告集合；无计时重置——连发不推迟交付）
-└── debounce_task 固定节拍到期（每 debounce_ms 一次，与信号无关）
+└── debounce_task 固定节拍到期（每 debounce_ms 一次，与信号无关；栅栏置位后启动，§3.1.3）
      └── pending.drain() → 逐个 Changed(id) → 入队 → 投递（单通道，满则丢弃）</code></pre>
 <p>合并针对的是重读放大：Item 侧的双重上报（New* 与 PropertiesChanged 并发、状态切换伴随连发）
 与进度型 Item 的高频刷新，经零缓存架构放大为消费方的重复现场读取；窗口节流把重读频率压到
@@ -406,11 +427,10 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
           │         （同一对象 id 重键——不发 Removed/Added，
           │          是否重载数据由消费方裁断）
           ├── 两轮均未命中 → 新条目 → true
-          │    └── 新登记 &amp;&amp; announce → iface::emit_registered（StatusNotifierItemRegistered 广播）
-          │         + 入队 Added(id)
-          │         （数据由消费方现场读取；announce=false 仅反向发现路径——静默入册，
-                     由快照承载，§3.1）</code></pre>
-
+          │    └── 新登记 &amp;&amp; announce &amp;&amp; 快照栅栏已置位
+          │         → iface::emit_registered（StatusNotifierItemRegistered 广播）+ 入队 Added(id)
+          │         栅栏前 → 静默入册：无广播、无 Added（快照承载，§3.1.3）；
+         announce=false 同此（反向发现路径）</code></pre>
 <p>注册参数 service 与信号发送者分属两个命名体系：service 既可以是 well-known 名（规范服务名），
 也可以是唯一名——无 well-known 名的 Item 以 <code>:1.22</code> 形态直接报到（clash-verge 实测）。
 两种形态同等入册，service 即 TrayItemId，簿记不区分。而 SNI 与 dbusmenu 信号的发送者一律是
@@ -425,7 +445,7 @@ unique 字段；对唯一名查询返回其自身，故全部注册形态走同�
 ├── ItemTracker::unregister(名字) → 被移除条目（按服务名或属主唯一名双条件命中；
 │    唯一名消失 → 该连接全部条目一并下线，含双注册并入的单一 id）
 ├── 逐条 iface::emit_unregistered（StatusNotifierItemUnregistered 广播）
-└── 逐条入队 Removed</code></pre>
+└── 逐条交付 Removed：栅栏已置位 → 入队；栅栏前 → defer_removed 缓冲（§3.1.3）</code></pre>
 
 <h3 id="sec-3-4">3.4. 菜单现场读取（Menu 流程，interact 与 menu()/menu_expand() 共用）</h3>
 
@@ -447,7 +467,7 @@ unique 字段；对唯一名查询返回其自身，故全部注册形态走同�
 <h4 id="sec-3-4-2">3.4.2. 菜单变更通告（LayoutUpdated / ItemsPropertiesUpdated）</h4>
 <pre><code>内部: dbusmenu_signals_task 收到 LayoutUpdated / ItemsPropertiesUpdated
 ├── 落点匹配 find_by_menu_signal(发送者唯一名, 菜单对象路径)（唯一命中）
-└── 入队 MenuChanged(item)（不代为重拉；快照投递前丢弃）</code></pre>
+└── 栅栏已置位 → 入队 MenuChanged(item)（不代为重拉）；栅栏前 → 丢弃</code></pre>
 
 <h3 id="sec-3-5">3.5. 输入路由与回执</h3>
 

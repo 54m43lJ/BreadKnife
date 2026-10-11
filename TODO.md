@@ -1,2 +1,3 @@
 - [ ] 反转滚轮切换workspace方向
 - [ ] 加入Menu直接返回GTK组件能力
+- [ ] breadpan 节流任务后移：`bus.spawn(debounce_task)` 移至 `queue_snapshot` 之后（随栅栏置位启动），并删除循环体内已死的 `is_snapshot_done` 检查（CODE §3.1.3 / IMPLEMENTATION.md §2）
