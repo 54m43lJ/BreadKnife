@@ -42,9 +42,9 @@ RULES:
       2. Field definition table explaining the meaning of each field, with reference to external specifications when applicable
       3. Data transformations (referencing exact data object name, which may include specification by external standards)
 
-### Diagrams: PlantUML (`diagram/`)
+### Diagrams: PlantUML (`<project>/diagram/`)
 
-Sequence diagrams and activity diagrams are drawn with PlantUML — never hand-drawn in ASCII or HTML tables. Sources (`*.puml`) and exported images (`*.svg`) live in the `diagram/` folder at the project root; the exported SVG is embedded into the HTML via `<img>` with a relative path (`../diagram/…`). The `.puml` source is authoritative: edit the source, re-export, and commit both together (`plantuml -tsvg diagram/*.puml`).
+Sequence diagrams and activity diagrams are drawn with PlantUML — never hand-drawn in ASCII or HTML tables. Sources (`*.puml`) and exported images (`*.svg`) live in the owning project's own `diagram/` folder — the folder follows its project, never a repo-wide root; the exported SVG is embedded into that project's HTML via `<img>` with a relative path (`diagram/…`). The `.puml` source is authoritative: edit the source, re-export, and commit both together (`plantuml -tsvg <project>/diagram/*.puml`).
 
 1. Choose the form by complexity: flows with at most one branch decision (fewer than 2 nesting levels) are sequence diagrams; anything with more branching is a UML activity diagram with one swimlane per participant.
 2. Labels are written in the documentation language; keep messages short and push details into notes.
