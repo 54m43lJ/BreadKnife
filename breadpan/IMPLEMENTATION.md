@@ -39,11 +39,6 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   属主唯一名重绑定 + 路由字段就地重探，交付信息性 `OwnerChanged(id)`（属主更替对
   消费方无可感知影响，无必做动作；ARCHITECTURE §2.4/§3.2）。初版实现曾拆
   `Removed`+`Added`，代码对齐见 TODO.md。
-- **Watcher 名自身的 NOC**：停机路径主动释放名也触发 NOC，以 `stopping` 标记
-  区分——主动释放不产生 `Displaced`，仅异常丢失（持有期不可被替换）才终局。
-- **总线断连 → Fatal**：无现成"连接断开"回调；心跳每拍以 `GetNameOwner(自身
-  唯一名)` 探测总线，IO 类错误（`InputOutput`/`Handshake`/`Connection`）上报
-  Fatal，超时视为繁忙跳过。
 - **双前缀等价的实现形态**：`org.kde` 与 `org.freedesktop` 两个接口名挂同一
   路径、同一实现体；**信号广播只走 org.kde**（事实规范前缀，避免双订阅方收到
   重复通告）。
@@ -86,9 +81,6 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   丢弃 Sender（消费端 `recv()` → `None`）。
 - **心跳**：周期 5s（库内定值）；每 Item 探测 = `Get(Status)`；结论只写簿记
   `alive`，不产生事件。
-- **停机次序**：先置 `Stopped`（此后 Handle 方法一律 Stopped）再置 `stopping`
-  （名释放的 NOC 不触发 Displaced），最后信号停机并 join 内部线程；运行时线程
-  自身调用 shutdown 时不 join（防自 join 死锁）。
 - **自动停机的前提**：内部任务只持有子 Arc（tracker/events/pending/…），
   **不持有** `Arc<RuntimeShared>`——最后一个 Handle drop 时 strong_count==1
   才能触发 shutdown。

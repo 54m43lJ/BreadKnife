@@ -1,0 +1,52 @@
+@startuml breadpan-stop
+participant "消费方" as app
+participant "breadpan（watcher 模块）" as bp
+participant "会话总线" as bus
+participant "事件通道" as ch
+
+== 优雅退出（正常路径）==
+app -> bp: Handle::shutdown()
+note right of app
+  或最后一个 Handle drop 自动触发
+end note
+bp -> bp: set_stopped；begin_stopping
+note right of bp
+  次序即契约：先 Stopped（此后 Handle 方法一律 Stopped）
+  再 stopping——自身名的 NOC 不得触发 Displaced
+end note
+bp -> bus: watcher::release（释放 Watcher 名）
+bus --> bp: NameOwnerChanged(Watcher 名, 属主 → "")
+bp -> bp: stopping 守卫命中 → 吞掉本信号
+note right of bp
+  主动释放不产生 Displaced
+end note
+bp -> bp: graceful_shutdown：清空簿记；通道 close
+ch --> app: recv() → None
+bp -> bp: join_handle.join()
+
+== Displaced（异常丢失，极罕见）==
+note over bus
+  总线守护重启 / 会话重建 / 本进程连接被强制关闭
+end note
+bus --> bp: NameOwnerChanged(Watcher 名, 属主 → "")
+bp -> bp: stopping 守卫未命中 → report_displaced
+bp -> ch: events.send(Displaced)
+ch --> app: Displaced（最后一个事件）
+bp -> bp: 清空簿记；set_stopped；通道 close
+note right of bp
+  终局报错，待遇同 Fatal：被其它 Watcher 取代
+  不重试、不强制夺回
+end note
+
+== Fatal（总线断连，异常终局）==
+note over bp
+  无现成断开回调：心跳每拍以 GetNameOwner(自身唯一名) 探测总线
+  IO 类错误 → report_fatal；超时视作繁忙，跳过本拍
+end note
+bp -> bp: report_fatal → run() fatal 分支
+bp -> bus: watcher::release（释放 Watcher 名，尽力而为）
+bp -> bp: 清空簿记；set_stopped
+bp -> ch: events.send(Fatal)
+ch --> app: Fatal（最后一个事件）
+bp -> bp: 通道 close
+@enduml

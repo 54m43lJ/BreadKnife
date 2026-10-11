@@ -112,9 +112,15 @@
 <p class="diagram-note">被路由到的 DBus 交互（Activate / SecondaryActivate / ContextMenu / Scroll / dbusmenu Event）均为 VOID 单向调用——SNI §3.2 原文："The application will perform any task it considers appropriate as an activation request"。DBus 应答仅代表送达，其后的动作是 Item 私有行为，协议无定义、总线不可见；Scroll 的 delta 规范未定义标度，符号约定 up/left 为负，steps 缺省 1、逐事件发送不聚合。</p>
 <p class="diagram-note">参数所有权：坐标与步数经 _at/_by 变体传入（缺省 (0,0) / 1）——输入事件与「哪个 Item 被点击」的映射只存在于消费方 UI，本库核心不接入 GTK 输入上下文（零 GTK 依赖）；且 Wayland 协议不向客户端提供全局坐标、GTK4 亦无 root 坐标 API，双方都只能得到近似值，而规范将 x/y 定位为 hint（Item 可忽略），缺省值即符合协议。</p>
 
-<h3 id="sec-2-7">2.7. 时序：所有权丢失（Displaced）</h3>
-<div class="diagram"><img src="diagram/breadpan-displaced.svg" alt="时序：所有权丢失（Displaced）"></div>
-<p class="diagram-note">名持有不可被替换：申请时不声明 allow-replacement，持有期间任何外部顶替请求一律失败——切换托盘程序须先手动终止本程序，正常情况下不存在让位/夺回。因此所有权丢失是<strong>极罕见的边缘路径</strong>：持有期内只有总线层异常才可能触发（总线守护重启 / 会话重建、本进程连接被强制关闭等），且发生即意味着被其它 Watcher 取代——入队终局报错，<strong>不重试、不强制夺回</strong>。启动期名字已被他人持有 → <code>NameTaken</code>：多个 Watcher 不能共存，建议消费方整体退出或隐藏托盘相关功能。</p>
+<h3 id="sec-2-7">2.7. 时序：服务停止（优雅退出 / Displaced / Fatal）</h3>
+<div class="diagram"><img src="diagram/breadpan-stop.svg" alt="时序：服务停止（优雅退出 / Displaced / Fatal）"></div>
+<table>
+  <tr><th>路径</th><th>触发</th><th>流程</th><th>终态</th></tr>
+  <tr><td>优雅退出（正常路径）</td><td><code>Handle::shutdown()</code> / 最后一个 Handle drop 自动触发</td><td>先置 Stopped 再置 stopping → 释放 Watcher 名 → 自身名的 NOC 被 stopping 守卫吞掉 → 清空簿记、通道 close → join 内部线程</td><td>角色下线、无残留簿记；消费端 <code>recv() → None</code></td></tr>
+  <tr><td>Displaced（极罕见边缘路径）</td><td>总线层异常：总线守护重启 / 会话重建 / 本进程连接被强制关闭</td><td>自身名的 NOC 到达且无 stopping 标记 → report_displaced → 清空簿记、set_stopped（不再受理登记）、入队 Displaced、通道 close</td><td>终局报错，待遇同 Fatal：被其它 Watcher 取代——不重试、不强制夺回</td></tr>
+  <tr><td>Fatal（异常终局）</td><td>总线断连：心跳探测自身唯一名遇 IO 类错误（连接失败 / 握手失败等）</td><td>report_fatal → fatal 分支：释放 Watcher 名（尽力而为）、清空簿记、set_stopped、入队 Fatal、通道 close</td><td>终止宣告为最后一个事件；此后 Handle 方法一律 <code>Stopped</code>，重建由消费方决定</td></tr>
+</table>
+<p class="diagram-note">名持有不可被替换：申请时不声明 allow-replacement，持有期间任何外部顶替请求一律失败——切换托盘程序须先手动终止本程序，正常情况下不存在让位/夺回。优雅退出与 Displaced 共享同一判定点：自身名的 <code>NameOwnerChanged</code> 由 <code>stopping</code> 标记区分归属——主动释放（优雅退出）吞掉、不产生 Displaced；仅异常丢失（持有期不可被替换，只有总线层异常可触发）才终局。Fatal 独立触发：总线断连无可订阅的断开回调，心跳每拍探测自身唯一名，IO 类错误即终局（超时视作繁忙跳过）。三条终局路径同构：清空簿记、此后 Handle 方法一律 <code>Stopped</code>、终止事件（Displaced / Fatal）是最后一个事件。启动期名字已被他人持有 → <code>NameTaken</code>：多个 Watcher 不能共存，建议消费方整体退出或隐藏托盘相关功能。</p>
 
 <h2 id="sec-3">3. 接口</h2>
 
@@ -216,6 +222,7 @@ pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
     /// 内部过程叙述（反向发现、重扫描等）
     Narration(String),
     /// 终止宣告：最后一个事件，此后 Handle 方法一律返回 Stopped
+    /// （触发：总线断连——心跳探测自身唯一名遇 IO 类错误，§2.7）
     Fatal(String),
 }
 
@@ -236,7 +243,7 @@ pub enum InteractionOp { Activate, SecondaryActivate, ContextMenu, Scroll, MenuA
   <tr><td>Displaced</td><td>极罕见边缘路径：持有期不可被替换，所有权丢失仅由总线层异常触发（如总线守护重启），发生即被其它 Watcher 取代；不重试、不夺回（时序 <a href="#sec-2-7">§2.7</a>）</td><td>提示用户已被取代；整体退出或隐藏托盘功能，重建由消费方决定</td></tr>
   <tr><td>InteractionResult</td><td>交互调用的异步回执</td><td>提示或日志</td></tr>
   <tr><td>Narration</td><td>内部过程性说明（反向发现、重扫描等）</td><td>日志/调试</td></tr>
-  <tr><td>Fatal</td><td>终止宣告，最后一个事件</td><td>决定是否重建</td></tr>
+  <tr><td>Fatal</td><td>终止宣告（总线断连：心跳探测自身唯一名遇 IO 类错误，时序 <a href="#sec-2-7">§2.7</a>）——最后一个事件，此后 Handle 方法一律 Stopped</td><td>决定是否重建</td></tr>
 </table>
 <h4>投递语义</h4>
 <table>
@@ -272,7 +279,7 @@ pub enum TrayError {
   <tr><td>Protocol</td><td>协议类失败（属性缺失、类型不符等）</td><td>跟踪面已字段级降级（见 <a href="#sec-3-3">§3.3</a>）；<code>menu()</code> / <code>menu_expand()</code> 现场读取与交互受理阶段返回本错误，可重试或跳过该 Item</td></tr>
   <tr><td>Stopped</td><td>终止宣告之后的一切调用</td><td>库已停机，按需重建实例</td></tr>
 </table>
-<p class="diagram-note">容错总则：单个 Item 的死亡不影响其他 Item 的跟踪；协议类错误绝不 panic；总线断开 → Fatal → Stopped，重建由消费方决定。</p>
+<p class="diagram-note">容错总则：单个 Item 的死亡不影响其他 Item 的跟踪；协议类错误绝不 panic；总线断开 → Fatal → Stopped（时序 <a href="#sec-2-7">§2.7</a>），重建由消费方决定。</p>
 
 <h3 id="sec-3-3">3.3. 数据模型与转换</h3>
 <p>官方字段映射见下方字段定义表。规范原文：

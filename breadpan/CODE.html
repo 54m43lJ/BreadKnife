@@ -23,7 +23,7 @@
 │   ├── <a href="#sec-2-dbus-bus">bus.rs</a>           # 会话总线连接（zbus tokio 特性）与库内 tokio 运行时宿主
 │   ├── <a href="#sec-2-dbus-watcher">watcher.rs</a>       # 登记中心服务：名持有（不可替换）、所有权丢失上报、停机
 │   ├── <a href="#sec-2-dbus-iface">iface.rs</a>         # org.kde.StatusNotifierWatcher 协议面（ARCHITECTURE §3.4）
-│   ├── <a href="#sec-2-dbus-heartbeat">heartbeat.rs</a>     # 周期存活探测：结果写入登记簿记（alive 字段）
+│   ├── <a href="#sec-2-dbus-heartbeat">heartbeat.rs</a>     # 周期存活探测：Item alive 回写 + 总线断连检测（IO 类错误 → Fatal）
 │   ├── <a href="#sec-2-dbus-menu">menu.rs</a>          # dbusmenu 现场读取（零缓存·逐层懒加载）
 │   └── <a href="#sec-2-dbus-interact">interact.rs</a>      # 语义输入路由（ARCHITECTURE §2.6）+ InteractionResult 回执
 └── gtk/
@@ -527,7 +527,7 @@ catch-all，不可预先探测（Introspect 说谎、探测调用会误触激活
 <h3 id="sec-3-6">3.6. 存活探测循环</h3>
 <pre><code>内部: heartbeat_task（bus.spawn 常驻；每 5s 一拍，库内定值）
 ├── bus.call(GetNameOwner(自身唯一名))
-│    // 探测总线，受 timeout_ms 约束；IO 类错误（InputOutput / Handshake / Connection）→ bus.report_fatal() → Fatal 终局；超时 → 视作繁忙，跳过本拍
+│    // 探测总线，受 timeout_ms 约束；IO 类错误（InputOutput / Handshake / Connection）→ bus.report_fatal()（Fatal 分支 §3.7.3）；超时 → 视作繁忙，跳过本拍
 ├── bus.rt.spawn 逐条 bus.call(Get(Status))（PROPS_IFACE，超时 timeout_ms）
 │    ├── Ok → ItemTracker::set_alive(service, true)
 │    └── Err → ItemTracker::set_alive(service, false)
@@ -535,7 +535,7 @@ catch-all，不可预先探测（Introspect 说谎、探测调用会误触激活
 └── return
      // 结论仅写登记簿记，不产生事件——消费方经 is_alive(id) / item(id) 读取</code></pre>
 
-<h3 id="sec-3-7">3.7. 所有权丢失与停机</h3>
+<h3 id="sec-3-7">3.7. 三终局与停机（Displaced / Fatal / 优雅退出）</h3>
 
 <h4 id="sec-3-7-1">3.7.1. 所有权丢失（Displaced）</h4>
 <pre><code>内部: name_owner_changed_task 收到 NameOwnerChanged(Watcher 名, 属主 → "")
@@ -569,6 +569,19 @@ catch-all，不可预先探测（Introspect 说谎、探测调用会误触激活
 │              // 消费端 recv() → None
 └── join_handle.join()
      // 运行时线程自身调用时不 join——防自 join 死锁</code></pre>
+
+<h4 id="sec-3-7-3">3.7.3. Fatal（总线断连）</h4>
+<pre><code>内部: heartbeat_task 探测总线遇 IO 类错误 → bus.report_fatal(msg)（§3.6）
+     // 无现成连接断开回调：心跳每拍以 GetNameOwner(自身唯一名) 兼作总线存活探测；
+     // IO 类错误（InputOutput / Handshake / Connection）上报，超时视作繁忙跳过本拍
+└── mod::run 的 fatal 分支（fatal_rx 通知到达）
+     ├── watcher::release(bus)
+     │    // 释放 Watcher 名——尽力而为：断连时名可能已随总线不可达
+     ├── ItemTracker::clear()
+     ├── bus.set_stopped()
+     ├── events.send(Fatal(msg))；events.close()
+     │    // 终止宣告是最后一个事件；此后 Handle 方法一律 Stopped
+     └── 终局：不重试；重建由消费方决定</code></pre>
 
 <h3 id="sec-3-8">3.8. 渲染直出（icon_paintable）</h3>
 <pre><code>流程 icon_paintable(&amp;IconSource) → gdk::Paintable
