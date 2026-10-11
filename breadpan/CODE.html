@@ -255,7 +255,7 @@ pub(crate) async fn release(bus: &amp;BusCenter);</code></pre>
 
 <h4 id="sec-2-dbus-iface">2.6.4. iface.rs（协议面：成员语义见 ARCHITECTURE §3.4）</h4>
 <pre><code>pub(crate) struct WatcherIface { bus: BusCenter }
-// FreedesktopWatcherIface：org.freedesktop 前缀成员等价，挂同一路径（§3.3.1）
+// FreedesktopWatcherIface：org.freedesktop 前缀成员等价，挂同一路径、同一实现体（见 ARCHITECTURE §3.4）
 #[interface(name = "org.kde.StatusNotifierWatcher")]
 impl WatcherIface {
     async fn register_status_notifier_item(

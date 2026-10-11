@@ -2,6 +2,7 @@
 
 > 定位：ARCHITECTURE / CODE 两档**未覆盖**内容的补充记录——协议生态的实测怪癖、
 > 文档契约留下缺口处的补全决策、落地时受技术栈约束的绕行方式。
+> 条目内容升格入两档后**暂不删除**，待确认完工后统一清理。
 > 权威边界不变：公开 API、事件与错误语义以
 > [ARCHITECTURE.html §3](ARCHITECTURE.html#sec-3) 为准；内部骨架以
 > [CODE.html](CODE.html) 为准。本文与二者冲突时，以二者为准。
@@ -39,9 +40,6 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   属主唯一名重绑定 + 路由字段就地重探，交付信息性 `OwnerChanged(id)`（属主更替对
   消费方无可感知影响，无必做动作；ARCHITECTURE §2.4/§3.2）。初版实现曾拆
   `Removed`+`Added`，代码对齐见 TODO.md。
-- **双前缀等价的实现形态**：`org.kde` 与 `org.freedesktop` 两个接口名挂同一
-  路径、同一实现体；**信号广播只走 org.kde**（事实规范前缀，避免双订阅方收到
-  重复通告）。
 - **宽容取值**：规范外波动不 panic、按缺省处理——`WindowId` 以 I32 或 U32 送达
   均可解析；未知 `Category`/`Status` 回退缺省枚举；空 `Title` → `None`；
   `Menu` 属性以对象路径或字符串送达均可——统一经 `menu_path_of` 取值（两形态

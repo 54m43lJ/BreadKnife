@@ -32,7 +32,7 @@
   <tr><td>tokio</td><td>异步运行时；本库内部自带（CurrentThread，独占内部线程），消费方无需装配——事件通道（tokio mpsc）的消费端与执行器无关</td></tr>
   <tr><td>GTK 主线程</td><td>GTK/GLib 主循环（MainContext）所在线程；一切 UI 操作与事件消费闭包都在此执行——消费方经 <code>glib::spawn_future_local</code> 把事件流消费 future 挂到本上下文</td></tr>
 </table>
-<p class="diagram-note">命名从事实规范（org.kde.*）：SNI 官方文本拼写为 <code>org.freedesktop.*</code>，但现行实现——KDE、AppIndicator 及各 Host/Item（如 nm-applet）——一律 <code>org.kde.*</code>。本库申请、监听、探测均按 <code>org.kde</code> 前缀，保证与既有实现互操作；若改用 <code>org.freedesktop</code> 名，将与已持有 <code>org.kde</code> 名的既有 Watcher 并存为两个登记中心，登记项互不可见。</p>
+<p class="diagram-note">命名从事实规范（org.kde.*）：SNI 官方文本拼写为 <code>org.freedesktop.*</code>，但现行实现——KDE、AppIndicator 及各 Host/Item（如 nm-applet）——一律 <code>org.kde.*</code>。本库申请与广播按 <code>org.kde</code> 前缀，监听与探测对两套前缀等价处理（<a href="#sec-3-4">§3.4</a>），保证与既有实现互操作；若改用 <code>org.freedesktop</code> 名，将与已持有 <code>org.kde</code> 名的既有 Watcher 并存为两个登记中心，登记项互不可见。</p>
 <p class="diagram-note">官方规范中 bus name 是唯一名与知名名的合称（<code>:</code> 开头者为唯一名，其余为知名名）；本文档不以 bus name 单独指称任一类，一律用「唯一名」「知名名」。官方 Address 一词指连接总线的服务器地址（<code>unix:path=…</code>），与唯一名无关。</p>
 
 <h2 id="sec-2">2. 架构图</h2>
@@ -401,8 +401,8 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
 <p>
   watcher 模块在会话总线导出 <code>org.kde.StatusNotifierWatcher</code>（<a href="#sec-1">§1 术语</a>）。
   该面是外部 Item 应用（图标提供方）与本库的唯一总线契约；逻辑 Host 不经总线（<a href="#sec-3-1">§3.1</a>）。
-  历史实现普遍以 <code>org.kde.*</code> 前缀提供同一接口：监听与应答对
-  <code>org.freedesktop.*</code>（原文拼写）与 <code>org.kde.*</code> 两套前缀等价处理。
+  前缀等价：接受侧 <code>org.kde.*</code> 与 <code>org.freedesktop.*</code> 同时监听、不做区分；
+  广播侧只经 <code>org.kde.*</code> 发出，不做多前缀重复播报。
 </p>
 <table>
   <tr><th>DBus 成员</th><th>类型</th><th>语义</th></tr>
