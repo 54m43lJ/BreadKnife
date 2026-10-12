@@ -87,6 +87,7 @@ impl TrayHandle {
         T: Send + 'static,
         F: FnOnce(BusCenter) -&gt; Fut + Send + 'static,
         Fut: Future&lt;Output = Result&lt;T, TrayError&gt;&gt; + Send + 'static;
+    // 同步桥：命令 future 派发内部运行时 + std::sync::mpsc 阻塞等待；禁 rt.block_on（§3.5.1）
 }
 impl Drop for TrayHandle {
     fn drop(&amp;mut self);
@@ -490,10 +491,9 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 <h3 id="sec-3-5">3.5. 输入路由与回执</h3>
 
 <h4 id="sec-3-5-1">3.5.1. 左键（同步路径与 Menu 回退）</h4>
-<pre><code>流程 left_click(id)
-├── TrayHandle::left_click(id) → left_click_at(id, 0, 0)
+<pre><code>流程 left_click(id) / left_click_at(id, 0, 0)
 ├── input(id, Input::Left) → bus.cmd(interact::route)
-│    // dispatch 同步桥
+│    // 同步桥：rt.spawn 派发命令 future 至内部运行时 + std::sync::mpsc 阻塞等待；禁 rt.block_on（CurrentThread 运行时由内部线程驱动，跨线程并发 block_on 属未定义行为）
 ├── bus.entry_of(id) → ItemEntry
 │    // 不在册 → ItemNotFound
 ├── menu_only &amp;&amp; DBusMenu 在册？ → menu::read_layer(...)（§3.4.1）→ return Outcome::Menu
@@ -512,8 +512,8 @@ catch-all，不可预先探测（Introspect 说谎、探测调用会误触激活
 同步快失败，与超时无关。</p>
 
 <h4 id="sec-3-5-2">3.5.2. 其余语义输入（受理即返回）</h4>
-<pre><code>流程 middle_click(id) / right_click(id) / scroll_up(id) 等
-     // *_at / *_by 变体传显式值，缺省 x/y=(0,0)、steps=1；input → bus.cmd(interact::route)
+<pre><code>流程 middle_click(id) / right_click(id) / scroll_up(id) 等及其 _at / _by 变体
+     // 入口经 input → bus.cmd(interact::route)（同步桥 §3.5.1）
 ├── bus.entry_of(id) → ItemEntry
 │    // 不在册 → ItemNotFound
 ├── interact::route(id, input)

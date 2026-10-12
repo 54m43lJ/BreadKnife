@@ -51,9 +51,11 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
 
 ## 3. 关键落地细节（CODE 骨架未展开的取舍）
 
-- **同步桥**：CODE 写"同步方法经 rt.block_on 受理"，实际**不可行**——CurrentThread
-  运行时由内部线程驱动，跨线程并发 `block_on` 同一运行时属未定义行为。
-  实现为 `Handle::spawn`（命令 future）+ `std::sync::mpsc` 阻塞等待。
+- **同步桥**（已升格：机制与禁令 → CODE §2.2/§3.5.1，待确认清理）：旧版 CODE
+  `RuntimeShared.bus` 注释写"同步方法经 rt.block_on 受理指令"（be569df 引入，
+  1b35341 去模糊化时移除），实际**不可行**——CurrentThread 运行时由内部线程驱动，
+  跨线程并发 `block_on` 同一运行时属未定义行为。实现为 `rt.spawn`（命令 future）+
+  `std::sync::mpsc` 阻塞等待。
 - **等待通道选 std 而非 tokio**：tokio `oneshot::Receiver::blocking_recv` 在
   消费方自己的异步上下文里调用会 panic；std 通道的 `recv_timeout` 无此限制
   （公开面承诺任意线程可调）。
