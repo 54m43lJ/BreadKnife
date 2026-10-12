@@ -87,7 +87,7 @@ impl TrayHandle {
         T: Send + 'static,
         F: FnOnce(BusCenter) -&gt; Fut + Send + 'static,
         Fut: Future&lt;Output = Result&lt;T, TrayError&gt;&gt; + Send + 'static;
-    // 同步桥：命令 future 派发内部运行时 + std::sync::mpsc 阻塞等待；禁 rt.block_on（§3.5.1）
+    // 同步桥：命令 future 派发内部运行时 + std::sync::mpsc 阻塞等待（阻塞等待一律走 std——tokio 原语的 blocking 访问器在异步上下文 panic，违背任意线程可调）；禁 rt.block_on（§3.5.1）
 }
 impl Drop for TrayHandle {
     fn drop(&amp;mut self);

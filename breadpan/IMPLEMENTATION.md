@@ -56,7 +56,8 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   1b35341 去模糊化时移除），实际**不可行**——CurrentThread 运行时由内部线程驱动，
   跨线程并发 `block_on` 同一运行时属未定义行为。实现为 `rt.spawn`（命令 future）+
   `std::sync::mpsc` 阻塞等待。
-- **等待通道选 std 而非 tokio**：tokio `oneshot::Receiver::blocking_recv` 在
+- **等待通道选 std 而非 tokio**（已升格：任意线程可调承诺 → ARCHITECTURE §3.1；
+  选型与理由 → CODE §2.2，待确认清理）：tokio `oneshot::Receiver::blocking_recv` 在
   消费方自己的异步上下文里调用会 panic；std 通道的 `recv_timeout` 无此限制
   （公开面承诺任意线程可调）。
 - **超时层次**：每个 DBus 调用独立受 `timeout_ms` 约束；同步桥另设守护上限

@@ -140,7 +140,7 @@ impl Tray {
 }
 
 // ── Handle：逻辑 Host 的完整操作面 ──
-pub struct TrayHandle;  // Clone + Send + Sync + 'static，全部方法线程安全
+pub struct TrayHandle;  // Clone + Send + Sync + 'static，全部方法线程安全、任意线程可调
 
 impl TrayHandle {
     // ── 查询：现场读取（DBus 即时读取 → 原生结构；items() 为全量刷新操作）──
@@ -192,7 +192,7 @@ pub enum InteractionOutcome { Dispatched, Menu(MenuSnapshot) }   // Dispatched�
 /// 位图 → 内存纹理。须在 GTK 主线程调用
 pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
 </code></pre>
-<p class="diagram-note">补全（机制不覆盖的细则）：公开面无 async fn——异步收敛在事件通道消费端（tokio mpsc 的 <code>recv().await</code>，由消费方经 <code>glib::spawn_future_local</code> 驱动），入口与交互方法均为同步签名；tokio 运行时为库内私有，不要求消费方装配；不拥有 UI 等能力级边界以 <a href="README.html">README.html</a> 为权威；Watcher 总线名全总线唯一——启动期已被持有 → <code>NameTaken</code>（多 Watcher 不能共存），持有期不可被替换，所有权异常丢失 → <code>Displaced</code>（<a href="#sec-2-7">§2.7</a>，极罕见边缘路径，仅总线层异常可触发），本库不做外部 Watcher 客户端模式。</p>
+<p class="diagram-note">补全（机制不覆盖的细则）：公开面无 async fn——异步收敛在事件通道消费端（tokio mpsc 的 <code>recv().await</code>，由消费方经 <code>glib::spawn_future_local</code> 驱动），入口与交互方法均为同步签名、任意线程可调——含消费方自有异步运行时的工作线程，库内经阻塞等待受理，不依赖调用方运行时上下文；tokio 运行时为库内私有，不要求消费方装配；不拥有 UI 等能力级边界以 <a href="README.html">README.html</a> 为权威；Watcher 总线名全总线唯一——启动期已被持有 → <code>NameTaken</code>（多 Watcher 不能共存），持有期不可被替换，所有权异常丢失 → <code>Displaced</code>（<a href="#sec-2-7">§2.7</a>，极罕见边缘路径，仅总线层异常可触发），本库不做外部 Watcher 客户端模式。</p>
 
 <h3 id="sec-3-2">3.2. 消息与错误</h3>
 <pre><code>pub enum TrayEvent {
