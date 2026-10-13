@@ -147,6 +147,7 @@
 <pre><code>// ── 配置 ──
 pub struct TrayConfig {
     pub timeout_ms: u64,     // 服务发现/调用/现场读取超时，默认 2000 ms
+    pub sync_guard_ms: u64,  // 同步方法阻塞守卫上限，默认 30000 ms；推荐 ≥ timeout_ms×4 + 10s
     pub debounce_ms: u64,    // 属性变更合并窗口，默认 50 ms
 }
 
@@ -213,6 +214,7 @@ pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
 <ul class="note">
   <li>公开面无 async fn——异步收敛在事件通道消费端（tokio mpsc 的 <code>recv().await</code>，由消费方经 <code>glib::spawn_future_local</code> 驱动）；</li>
   <li>入口与交互方法均为同步签名、任意线程可调——含消费方自有异步运行时的工作线程，库内经阻塞等待受理，不依赖调用方运行时上下文；</li>
+  <li>同步方法的阻塞时长受 <code>sync_guard_ms</code> 守卫（超时 → <code>TrayError::Hung</code>：内部未在守卫内完成，处置为重建或调大守卫），各执行步骤（DBus 调用）另独立受 <code>timeout_ms</code> 约束；</li>
   <li>tokio 运行时为库内私有，不要求消费方装配；</li>
   <li>不拥有 UI 等能力级边界以 <a href="README.html">README.html</a> 为权威；</li>
   <li>Watcher 总线名全总线唯一——启动期已被持有 → <code>NameTaken</code>（多 Watcher 不能共存），持有期不可被替换，所有权异常丢失 → <code>Displaced</code>（<a href="#sec-2-7">§2.7</a>，极罕见边缘路径，仅总线层异常可触发），本库不做外部 Watcher 客户端模式。</li>
@@ -287,6 +289,9 @@ pub enum TrayError {
     NameTaken(String),
     #[error("operation timed out after {ms} ms")]
     Timeout { ms: u64 },
+    /// 同步命令在守卫上限（sync_guard_ms）内未完成——运行时楔死或守卫配置过低；处置为重建或调大守卫
+    #[error("internal runtime hung: no progress for {ms} ms")]
+    Hung { ms: u64 },
     #[error("item {0} not found")]
     ItemNotFound(String),
     #[error("dbus call failed: {0}")]
@@ -299,6 +304,7 @@ pub enum TrayError {
   <tr><td>Bus</td><td>会话总线连接失败</td><td>检查 session bus 环境后重试 <code>start</code></td></tr>
   <tr><td>NameTaken</td><td>启动期 Watcher 总线名已被他人持有——多个 Watcher 不能共存</td><td>提示消费者；整体退出或隐藏托盘相关功能（本库不做外部 Watcher 客户端模式）</td></tr>
   <tr><td>Timeout</td><td>服务发现 / 调用 / 现场读取超时（<code>timeout_ms</code>）</td><td>重试，或放宽 <code>TrayConfig::timeout_ms</code></td></tr>
+  <tr><td>Hung</td><td>同步命令在守卫上限（<code>sync_guard_ms</code>，默认 30000 ms，推荐 ≥ <code>timeout_ms</code>×4+10s）内未完成——运行时楔死或守卫配置过低，后续调用大概率同样超时</td><td>重建实例或调大守卫（与 Timeout 的「对端慢，可重试」语义不同类）</td></tr>
   <tr><td>ItemNotFound</td><td>Item 不在册 / 无菜单或未就绪</td><td>以最新快照或 Changed 事件校准后再操作</td></tr>
   <tr><td>Protocol</td><td>协议类失败（属性缺失、类型不符等）</td><td>跟踪面已字段级降级（见 <a href="#sec-3-3">§3.3</a>）；<code>menu()</code> / <code>menu_expand()</code> 现场读取与交互受理阶段返回本错误，可重试或跳过该 Item</td></tr>
   <tr><td>Stopped</td><td>终止宣告之后的一切调用</td><td>库已停机，按需重建实例</td></tr>

@@ -85,7 +85,7 @@ impl TrayHandle {
         T: Send + 'static,
         F: FnOnce(BusCenter) -&gt; Fut + Send + 'static,
         Fut: Future&lt;Output = Result&lt;T, TrayError&gt;&gt; + Send + 'static;
-    // 同步桥：命令 future 派发内部运行时 + std::sync::mpsc 阻塞等待（阻塞等待一律走 std——tokio 原语的 blocking 访问器在异步上下文 panic，违背任意线程可调）；禁 rt.block_on（§3.5.1）
+    // 同步桥：命令 future 派发内部运行时 + std::sync::mpsc 阻塞等待，守卫上限 sync_guard_ms（超时 → Hung）；阻塞等待一律走 std——tokio blocking 访问器在异步上下文 panic；禁 rt.block_on（§3.5.1）
 }
 impl Drop for TrayHandle {
     fn drop(&amp;mut self);
@@ -494,7 +494,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 <h4 id="sec-3-5-1">3.5.1. 左键（同步路径与 Menu 回退）</h4>
 <pre><code>流程 left_click(id) / left_click_at(id, 0, 0)
 ├── input(id, Input::Left) → bus.cmd(interact::route)
-│    // 同步桥：rt.spawn 派发命令 future 至内部运行时 + std::sync::mpsc 阻塞等待；禁 rt.block_on（CurrentThread 运行时由内部线程驱动，跨线程并发 block_on 属未定义行为）
+│    // 同步桥：rt.spawn 派发命令 future 至内部运行时 + std::sync::mpsc 阻塞等待（守卫 sync_guard_ms，超时语义见下方）；禁 rt.block_on（CurrentThread 运行时由内部线程驱动，跨线程并发 block_on 属未定义行为）
 ├── bus.entry_of(id) → ItemEntry
 │    // 不在册 → ItemNotFound
 ├── menu_only &amp;&amp; DBusMenu 在册？ → menu::read_layer(...)（§3.4.1）→ return Outcome::Menu
@@ -511,6 +511,14 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
   <li>libappindicator 系 Item 的 Activate 无处理器——XML 静态声明但分发 catch-all，不可预先探测（Introspect 说谎、探测调用会误触激活）；</li>
   <li>左键出菜单是宿主侧既定策略：菜单由宿主经 dbusmenu 渲染，不依赖 Item 端激活；</li>
   <li>回退分支的失败形态为同步快失败，与超时无关。</li>
+</ul>
+
+<ul class="note">
+  <li>命令 future 内每个执行步骤（DBus 调用）自持 <code>timeout_ms</code> 上界；</li>
+  <li>桥的阻塞等待受 <code>sync_guard_ms</code> 守卫（默认 30000 ms，推荐 ≥ <code>timeout_ms</code>×4 + 10s 以覆盖最长的多步流程——当前最长为 menu 流程 3 连调用）；</li>
+  <li>守卫到期 → <code>TrayError::Hung</code>：内部未在守卫内完成——运行时楔死或守卫配置过低，处置为重建或调大守卫（与 Timeout 的「对端慢，可重试」语义不同类）；</li>
+  <li>通道断开且已停机 → <code>Stopped</code>；</li>
+  <li>守卫值不由执行路径推算——路径会变化，推算值静默失效（初版的 4×timeout+10s 即属此类，经裁决改为消费者可配置）。</li>
 </ul>
 
 <h4 id="sec-3-5-2">3.5.2. 其余语义输入（受理即返回）</h4>

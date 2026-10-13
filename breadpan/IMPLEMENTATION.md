@@ -60,9 +60,12 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   选型与理由 → CODE §2.2，待确认清理）：tokio `oneshot::Receiver::blocking_recv` 在
   消费方自己的异步上下文里调用会 panic；std 通道的 `recv_timeout` 无此限制
   （公开面承诺任意线程可调）。
-- **超时层次**：每个 DBus 调用独立受 `timeout_ms` 约束；同步桥另设守护上限
-  （4×timeout + 10s，防内部意外悬挂）；`Tray::start` 引导总时限
-  `max(10×timeout, 10s)`。守护超时若伴随已停机则归一为 `Stopped`。
+- **超时层次**（已升格 / 同步桥守卫经裁决改为消费者可配置，待确认清理）：每个 DBus
+  调用独立受 `timeout_ms` 约束（→ CODE 各调用栈）；`Tray::start` 引导总时限
+  `max(10×timeout, 10s)`（→ CODE §3.1.1）。同步桥守卫不再由公式计算
+  （4×timeout + 10s 经裁决废除——路径变化时静默失效），改为消费者可配置的
+  `sync_guard_ms`（默认 30s，推荐 ≥ `timeout_ms`×4 + 10s）；守卫到期 →
+  `TrayError::Hung`（ARCHITECTURE §3.1/§3.2、CODE §3.5.1），代码对齐见 TODO.md。
 - **全局信号订阅**（6 条 match rule，对照 CODE 的"逐 Item 订阅"）：
   NameOwnerChanged、New\*×2 前缀、PropertiesChanged（arg0 限定）×2 前缀、
   dbusmenu。按 (sender 唯一名, path) 对照簿记过滤。免去逐 Item 加/删规则的
