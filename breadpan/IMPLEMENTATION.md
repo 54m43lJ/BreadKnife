@@ -74,7 +74,7 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   `org.kde` 失败再 `org.freedesktop`——兼容只导出规范原文拼写的少数实现；
   超时即止不重试（对端失联时另一前缀注定同耗）；双前缀俱败合并上报两侧
   错误，避免只报末次掩盖首侧真因。
-- **菜单属性合并**：GetLayout 的布局内嵌属性为底，GetGroupProperties 的组属性
+- **菜单属性合并**（已升格：组属性覆盖规则 → CODE §3.4.1，待确认清理）：GetLayout 的布局内嵌属性为底，GetGroupProperties 的组属性
   覆盖之（专属性查询为权威来源）。
 - **VOID 交互仍等待回执**：VOID 指无返回值，不指无应答——受理即返回
   `Dispatched`，应答/错误以 `InteractionResult` 事件交付（区分"送达"与

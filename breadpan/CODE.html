@@ -474,14 +474,14 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 ├── entry.menu == None？ → Err
 │    // dbusmenu 对象路径取自登记簿记（注册时探测 Menu 属性）；None = 无菜单，不可拉取
 └── menu::read_layer(bus, entry, parent)
-     // 根层 parent=0，展开层 = entry_id
+     // 根层 parent=0，展开层 = entry_id；GetLayout 子树逐项转换，失败静默丢弃
      ├── bus.call(AboutToShow(parent))
      │    // 常规前置；应答异常视为未变更
      ├── bus.call(GetLayout(parentId=parent, recursionDepth=1))
      │    // 懒加载：每次仅取一层
      ├── bus.call(GetGroupProperties)
      └── menu::assemble(...) → MenuSnapshot
-          // 助记符 "_"→label、原文→raw_label；按 visible/enabled/children-display/toggle-type/toggle-state 归一化；不落任何缓存，深层经 menu_expand 按需展开</code></pre>
+          // 布局内嵌属性为底、组属性逐键覆盖；助记符 "_"→label、原文→raw_label；按 visible/enabled/children-display/toggle-type/toggle-state 归一化；不落任何缓存，深层经 menu_expand 按需展开</code></pre>
 
 <h4 id="sec-3-4-2">3.4.2. 菜单变更通告（LayoutUpdated / ItemsPropertiesUpdated）</h4>
 <pre><code>内部: dbusmenu_signals_task 收到 LayoutUpdated / ItemsPropertiesUpdated
