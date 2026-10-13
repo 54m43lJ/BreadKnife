@@ -66,7 +66,7 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   （4×timeout + 10s 经裁决废除——路径变化时静默失效），改为消费者可配置的
   `sync_guard_ms`（默认 30s，推荐 ≥ `timeout_ms`×4 + 10s）；守卫到期 →
   `TrayError::Hung`（ARCHITECTURE §3.1/§3.2、CODE §3.5.1），代码对齐见 TODO.md。
-- **全局信号订阅**（6 条 match rule，对照 CODE 的"逐 Item 订阅"）：
+- **全局信号订阅**（6 条 match rule，对照 CODE 的"逐 Item 订阅"；已升格：空过滤行为 → CODE §3.1.1，待确认清理）：
   NameOwnerChanged、New\*×2 前缀、PropertiesChanged（arg0 限定）×2 前缀、
   dbusmenu。按 (sender 唯一名, path) 对照簿记过滤。免去逐 Item 加/删规则的
   簿记与竞态；代价是总线上未跟踪对象的信号被空过滤（可忽略）。

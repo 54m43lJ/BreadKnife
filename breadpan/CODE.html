@@ -369,7 +369,8 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 <ul class="note">
   <li>Watcher 名最后申请——申请前报到无从发生，快照投递后所有报到以增量事件衔接（首事件即快照、无重叠无缺口）；若先申请名，等待 Watcher 出现的 Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> 抢在快照之前——实测复现；</li>
   <li>订阅（spawn_signal_tasks）与存活探测（heartbeat_task）先于申请名同理：名在位即可能收到信号与超时，须先就位才不丢；</li>
-  <li>节流任务（debounce_task）不在此列——其交付始于快照之后，随栅栏置位启动（§3.2）。</li>
+  <li>节流任务（debounce_task）不在此列——其交付始于快照之后，随栅栏置位启动（§3.2）；</li>
+  <li>总线上未跟踪对象的信号被空过滤（可忽略）。</li>
 </ul>
 
 <h4 id="sec-3-1-2">3.1.2. 反向发现（存量 Item 双级探测）</h4>
