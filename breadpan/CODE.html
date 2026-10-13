@@ -503,7 +503,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
      // 就地等待往返
      ├── Ok → events.send(InteractionResult{Activate, Ok})；return Outcome::Dispatched
      ├── Err(超时)？ → return Err
-     │    // 对端主循环失联：menu 同一主循环分发亦不可读——不跨前缀重试、不回退
+     │    // 超时即止：不跨前缀重试、不回退
      ├── Err(非超时) &amp;&amp; DBusMenu 在册？ → menu::read_layer(...)（§3.4.1）→ return Outcome::Menu
      │    // 回退无回执事件
      └── Err(非超时) 无菜单 → return Err</code></pre>
@@ -534,7 +534,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │    │    └── 否则 → invoke_xy(entry, ContextMenu, (x, y))
 │    ├── middle_click → invoke_xy(entry, SecondaryActivate, (x, y))
 │    └── scroll_up / scroll_down / scroll_left / scroll_right → invoke_scroll(entry, direction, ∓steps)
-│         // invoke_*：org.kde 前缀优先，非超时失败回退 org.freedesktop（兼容只导出规范原文拼写的少数实现）；任一侧超时 → 立即报错；双前缀俱败 → 合并上报两侧错误
+│         // invoke_*：org.kde 前缀优先，非超时失败回退 org.freedesktop；任一侧超时 → 立即报错；双前缀俱败 → 合并上报两侧错误
 ├── Menu 流程？ → return Outcome::Menu
 └── events.send(InteractionResult{op, result})
      // VOID 调用受理即返回 Outcome::Dispatched，回执经事件异步交付</code></pre>

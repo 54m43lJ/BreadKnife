@@ -70,7 +70,7 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   NameOwnerChanged、New\*×2 前缀、PropertiesChanged（arg0 限定）×2 前缀、
   dbusmenu。按 (sender 唯一名, path) 对照簿记过滤。免去逐 Item 加/删规则的
   簿记与竞态；代价是总线上未跟踪对象的信号被空过滤（可忽略）。
-- **逐调用前缀回退**：属性读取（GetAll）与交互调用（Activate/Scroll 等）先
+- **逐调用前缀回退**（已升格：前缀回退规则 → CODE §2.5/§3.5.2，待确认清理）：属性读取（GetAll）与交互调用（Activate/Scroll 等）先
   `org.kde` 失败再 `org.freedesktop`——兼容只导出规范原文拼写的少数实现；
   超时即止不重试（对端失联时另一前缀注定同耗）；双前缀俱败合并上报两侧
   错误，避免只报末次掩盖首侧真因。
