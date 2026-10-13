@@ -115,8 +115,8 @@
   <tr><td><code>scroll_up(id)</code> / <code>scroll_up_by(id, steps)</code>（四向各一对）</td><td>Scroll(∓steps, vertical / horizontal)；steps 缺省 1</td><td><code>Outcome::Dispatched</code> + 回执事件</td></tr>
 </table>
 <ul class="note">
-  <li>被路由到的 DBus 交互（Activate / SecondaryActivate / ContextMenu / Scroll / dbusmenu Event）均为 VOID 单向调用——SNI §3.2 原文："The application will perform any task it considers appropriate as an activation request"；</li>
-  <li>DBus 应答仅代表送达，其后的动作是 Item 私有行为，协议无定义、总线不可见；</li>
+  <li>被路由到的 DBus 交互（Activate / SecondaryActivate / ContextMenu / Scroll / dbusmenu Event）均为 VOID 调用（无返回值）——SNI §3.2 原文："The application will perform any task it considers appropriate as an activation request"；</li>
+  <li>DBus 应答仍被等待、仅代表送达，其后的动作是 Item 私有行为，协议无定义、总线不可见；</li>
   <li>Scroll 的 delta 规范未定义标度，符号约定 up/left 为负，steps 缺省 1、逐事件发送不聚合。</li>
 </ul>
 <ul class="note">
@@ -254,7 +254,7 @@ pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
 
 /// ← 各交互方法（left_click / middle_click / right_click / scroll_* / menu_activate）
 ///    路由到的具体 DBus 交互：SNI §3.2 Activate / SecondaryActivate / ContextMenu / Scroll
-///    （均 VOID 单向，实现完全依赖 Item）；dbusmenu Event("clicked")（menu_activate）
+///    （均 VOID——无返回值，实现完全依赖 Item）；dbusmenu Event("clicked")（menu_activate）
 pub enum InteractionOp { Activate, SecondaryActivate, ContextMenu, Scroll, MenuActivate }
 </code></pre>
 <h4>事件清单与建议动作</h4>
