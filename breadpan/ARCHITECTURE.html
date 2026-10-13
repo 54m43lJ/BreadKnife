@@ -231,7 +231,7 @@ pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
     Removed(TrayItemId),
     /// 变更通告（窗口合并，不携带数据）：重读 item()/items() 取最新
     Changed(TrayItemId),
-    /// dbusmenu 布局/属性变更信号到达；不代为重拉，是否重取由消费方决定
+    /// dbusmenu 布局/属性变更信号到达（窗口合并）；不代为重拉，是否重取由消费方决定
     MenuChanged(TrayItemId),
     /// 双注册并入：临时唯一名 id 升级为知名名 id——同一对象 id 重键，
     /// 对象生死不变（旧 id 不发 Removed）；是否重载数据由消费方裁断
@@ -263,7 +263,7 @@ pub enum InteractionOp { Activate, SecondaryActivate, ContextMenu, Scroll, MenuA
   <tr><td>Snapshot</td><td>启动完成即投递一次：全部 Item 记录（含反向发现所得）</td><td>初始化 UI</td></tr>
   <tr><td>Added / Removed</td><td>运行期 Item 出现 / 服务名消失（映射 Watcher 信号 <code>StatusNotifierItemRegistered</code> / <code>StatusNotifierItemUnregistered</code>，SNI §4.3）；事件只报事实，数据现场读取</td><td>Added → <code>item(id)</code> 取数建卡；Removed → 删卡</td></tr>
   <tr><td>Changed</td><td>变更通告（窗口合并，不携带数据——零详情缓存）</td><td>重读 <code>item()/items()</code> 后更新卡片</td></tr>
-  <tr><td>MenuChanged</td><td>dbusmenu 布局/属性变更信号到达（<code>LayoutUpdated</code> / <code>ItemsPropertiesUpdated</code>，<a href="reference/com.canonical.dbusmenu.xml">接口定义原文</a>；AboutToShow 是宿主→Item 的方法，见 <a href="#sec-2-5">§2.5</a>）</td><td>决定何时重新 <code>menu()</code></td></tr>
+  <tr><td>MenuChanged</td><td>dbusmenu 布局/属性变更信号到达（窗口合并；<code>LayoutUpdated</code> / <code>ItemsPropertiesUpdated</code>，<a href="reference/com.canonical.dbusmenu.xml">接口定义原文</a>；AboutToShow 是宿主→Item 的方法，见 <a href="#sec-2-5">§2.5</a>）</td><td>决定何时重新 <code>menu()</code></td></tr>
   <tr><td>NameChanged</td><td>同一对象的登记 id 变更：临时唯一名 id 在知名名报到到达时升级；对象生死不变——旧 id 不发 Removed</td><td>以 new 重建 id 映射；是否重读数据由消费方裁断（对象未变）</td></tr>
   <tr><td>OwnerChanged</td><td>同名换主：Item 服务名的属主更替（<code>NameOwnerChanged</code> 新旧属主均非空，应用重启直接顶名）——id 与对象生死不变，簿记属主唯一名重绑定、路由字段就地重探（时序 <a href="#sec-2-4">§2.4</a>）</td><td>无必做动作；需要时重读 <code>item(id)</code>（读即最新）</td></tr>
   <tr><td>Displaced</td><td>极罕见边缘路径：持有期不可被替换，所有权丢失仅由总线层异常触发（如总线守护重启），发生即被其它 Watcher 取代；不重试、不夺回（时序 <a href="#sec-2-7">§2.7</a>）</td><td>提示用户已被取代；整体退出或隐藏托盘功能，重建由消费方决定</td></tr>
@@ -276,7 +276,7 @@ pub enum InteractionOp { Activate, SecondaryActivate, ContextMenu, Scroll, MenuA
   <tr><th>语义</th><th>规定</th></tr>
   <tr><td>快照</td><td>启动完成即投递快照；此后仅增量事件，快照与事件流原子配对、无重叠无缺口</td></tr>
   <tr><td>顺序</td><td>同一 Item 的事件严格有序；全局不保证跨 Item 顺序</td></tr>
-  <tr><td>合并</td><td>变更信号按固定窗口（默认 50 ms）节流合并：信号只入待通告集合，节拍到期统一投递——每 Item 至多每窗口一次 <code>Changed(id)</code>，延迟上界 = 窗口、连发不推迟交付；不携带数据，取数走查询</td></tr>
+  <tr><td>合并</td><td>变更与菜单变更信号按固定窗口（默认 50 ms）节流合并：信号分类型入待通告集合，节拍到期统一投递——每 Item 每类至多每窗口一次 <code>Changed(id)</code> / <code>MenuChanged(id)</code>，延迟上界 = 窗口、连发不推迟交付；不携带数据，取数 / 取布局走现场读取</td></tr>
   <tr><td>背压</td><td>通道满：丢弃 + 告警计数，绝不阻塞内部线程（有损交付）</td></tr>
   <tr><td>终止</td><td>终止宣告（Fatal / Displaced）是最后一个事件</td></tr>
 </table>

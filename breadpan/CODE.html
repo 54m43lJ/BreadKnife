@@ -204,7 +204,7 @@ async fn name_owner_changed_task(bus: BusCenter);
 async fn item_signals_task(bus: BusCenter, iface: &amp;'static str);
 /// PropertiesChanged（arg0 限定，kde/fd 各一条）→ 路由更新 + pending 登记（§3.2）
 async fn properties_changed_task(bus: BusCenter, iface: &amp;'static str);
-/// dbusmenu 信号 → MenuChanged（§3.4.2）
+/// dbusmenu 信号 → pending_menu 登记（§3.2 §3.4.2）
 async fn dbusmenu_signals_task(bus: BusCenter);
 /// 固定窗口节流冲刷（§3.2）
 async fn debounce_task(bus: BusCenter);</code></pre>
@@ -213,7 +213,8 @@ async fn debounce_task(bus: BusCenter);</code></pre>
 <pre><code>pub(crate) struct BusParts {   // 组装件：簿记/通道/配置在连接建立前先行构造
     tracker: Arc&lt;RwLock&lt;ItemTracker&gt;&gt;,
     events: Arc&lt;EventQueue&gt;,
-    pending: Arc&lt;Mutex&lt;HashSet&lt;TrayItemId&gt;&gt;&gt;,   // 变更合并待通告集合（§3.2）
+    pending: Arc&lt;Mutex&lt;HashSet&lt;TrayItemId&gt;&gt;&gt;,      // 变更待通告集合（§3.2）
+    pending_menu: Arc&lt;Mutex&lt;HashSet&lt;TrayItemId&gt;&gt;&gt;, // 菜单变更待通告集合（§3.2）
     config: TrayConfig,
     stopping: Arc&lt;AtomicBool&gt;, stopped: Arc&lt;AtomicBool&gt;, snapshot_done: Arc&lt;AtomicBool&gt;,
     stop_tx: watch::Sender&lt;bool&gt;, fatal_tx: watch::Sender&lt;String&gt;, displaced_tx: watch::Sender&lt;bool&gt;,
@@ -404,7 +405,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 </ul>
 
 <h3 id="sec-3-2">3.2. 变更通告合并（固定窗口节流）</h3>
-<pre><code>内部: properties_changed_task(iface)×2 / item_signals_task(iface)×2
+<pre><code>内部: properties_changed_task(iface)×2 / item_signals_task(iface)×2 / dbusmenu_signals_task
      // kde 与 fd 前缀各一条常驻任务，经 pump_signal_stream 订阅消费
 ├── find_by_signal(发送者唯一名, 对象路径) → Option&lt;TrayItemId&gt;
 │    // (唯一名, 路径) 唯一命中（双注册已并入，§3.3.1）；未命中 → 丢弃
@@ -412,10 +413,10 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │    // menu = props::menu_path_of(v)（对象路径/字符串两形态 + ObjectPath 规范校验，§2.5）：解析成功才传 Some——失败传 None 忽略本次更新、保留旧值（Menu 键被清空 = 右键跌回 fallback + MenuChanged 永久静默）；menu_only 非 Bool 变体同则
 ├── pending.insert(id)
 │    // 仅记入待通告集合；无计时重置——连发不推迟交付
-└── debounce_task 固定节拍到期 → pending.drain()（逐个 events.send(Changed(id))）
+└── debounce_task 固定节拍到期 → pending / pending_menu 双集合 drain（逐个 events.send(Changed(id)) 或 events.send(MenuChanged(id))）
      // 每 debounce_ms 一次，与信号无关；栅栏置位后启动（§3.1.3）；单通道，满则丢弃</code></pre>
 <ul class="note">
-  <li>合并针对的是重读放大：Item 侧的双重上报（New* 与 PropertiesChanged 并发、状态切换伴随连发）与进度型 Item 的高频刷新，经零缓存架构放大为消费方的重复现场读取——窗口节流把重读频率压到每 Item 至多 1 次/窗口；</li>
+  <li>合并针对的是重读放大：Item 侧的双重上报（New* 与 PropertiesChanged 并发、状态切换伴随连发）与进度型 Item 的高频刷新，经零缓存架构放大为消费方的重复现场读取；菜单侧布局/属性刷新同理放大为重复取菜单——窗口节流把重读（Changed）与重拉（MenuChanged）频率压到每 Item 每类至多 1 次/窗口；</li>
   <li>事实事件幂等，窗口内折叠不丢信息。</li>
 </ul>
 
@@ -487,7 +488,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 <pre><code>内部: dbusmenu_signals_task 收到 LayoutUpdated / ItemsPropertiesUpdated
 ├── find_by_menu_signal(发送者唯一名, 菜单对象路径) → Option&lt;TrayItemId&gt;
 │    // 唯一命中；未命中 → 丢弃
-└── 快照栅栏已置位？ → events.send(MenuChanged(id))
+└── 快照栅栏已置位？ → pending_menu.insert(id)（§3.2 窗口合并）
      // 不代为重拉，是否重取由消费方决定；栅栏前丢弃（消费方尚无菜单可重取）</code></pre>
 
 <h3 id="sec-3-5">3.5. 输入路由与回执</h3>
