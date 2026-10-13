@@ -277,7 +277,7 @@ pub enum InteractionOp { Activate, SecondaryActivate, ContextMenu, Scroll, MenuA
   <tr><td>快照</td><td>启动完成即投递快照；此后仅增量事件，快照与事件流原子配对、无重叠无缺口</td></tr>
   <tr><td>顺序</td><td>同一 Item 的事件严格有序；全局不保证跨 Item 顺序</td></tr>
   <tr><td>合并</td><td>变更与菜单变更信号按固定窗口（默认 50 ms）节流合并：信号分类型入待通告集合，节拍到期统一投递——每 Item 每类至多每窗口一次 <code>Changed(id)</code> / <code>MenuChanged(id)</code>，延迟上界 = 窗口、连发不推迟交付；不携带数据，取数 / 取布局走现场读取</td></tr>
-  <tr><td>背压</td><td>通道满：丢弃 + 告警计数，绝不阻塞内部线程（有损交付）</td></tr>
+  <tr><td>背压</td><td>通道满：丢弃 + 计数，绝不阻塞内部线程（有损交付）</td></tr>
   <tr><td>终止</td><td>终止宣告（Fatal / Displaced）是最后一个事件</td></tr>
 </table>
 <h4>错误</h4>

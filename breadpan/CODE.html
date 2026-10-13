@@ -105,7 +105,7 @@ impl RuntimeShared {
 pub enum InteractionOp;      //见 ARCHITECTURE §3.2
 pub(crate) struct EventQueue {
     tx: Mutex&lt;Option&lt;tokio::sync::mpsc::Sender&lt;TrayEvent&gt;&gt;&gt;,   // 唯一通道发送端；Receiver 仅经 Tray::start 交付
-    dropped: AtomicU64,                         // 背压丢弃告警计数
+    dropped: AtomicU64,                         // 背压丢弃计数
 }
 impl EventQueue {
     /// 建队：(队列, 唯一 Receiver)
