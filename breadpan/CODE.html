@@ -533,7 +533,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │    │    ├── DBusMenu 在册 → Menu 流程（§3.4.1）
 │    │    └── 否则 → invoke_xy(entry, ContextMenu, (x, y))
 │    ├── middle_click → invoke_xy(entry, SecondaryActivate, (x, y))
-│    └── scroll_up / scroll_down / scroll_left / scroll_right → invoke_scroll(entry, direction, ∓steps)
+│    └── scroll_up / scroll_down / scroll_left / scroll_right → invoke_scroll(entry, ∓steps, vertical / horizontal)
 │         // invoke_*：org.kde 前缀优先，非超时失败回退 org.freedesktop；任一侧超时 → 立即报错；双前缀俱败 → 合并上报两侧错误
 ├── Menu 流程？ → return Outcome::Menu
 └── events.send(InteractionResult{op, result})

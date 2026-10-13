@@ -81,7 +81,7 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
   "目标消失"）。
 - **dbusmenu Event 参数**（已升格：Event 参数约定 → CODE §2.6.7，待确认清理）：`data` 变体发 `I32(0)`（服务端忽略），时间戳取
   Unix 毫秒截断 u32。
-- **滚动符号**：up/left 为负、down/right 为正，steps 缺省 1 逐事件发送。
+- **滚动符号**（已升格：滚动符号与缺省 → ARCHITECTURE §2.6，待确认清理）：up/left 为负、down/right 为正，steps 缺省 1 逐事件发送。
 - **事件通道**：容量 256（库内定值）；满则丢弃并计数（有损交付）；关闭 =
   丢弃 Sender（消费端 `recv()` → `None`）。
 - **心跳**：周期 5s（库内定值）；每 Item 探测 = `Get(Status)`；结论只写簿记

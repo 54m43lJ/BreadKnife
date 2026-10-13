@@ -117,7 +117,7 @@
 <ul class="note">
   <li>被路由到的 DBus 交互（Activate / SecondaryActivate / ContextMenu / Scroll / dbusmenu Event）均为 VOID 调用（无返回值）——SNI §3.2 原文："The application will perform any task it considers appropriate as an activation request"；</li>
   <li>DBus 应答仍被等待、仅代表送达，其后的动作是 Item 私有行为，协议无定义、总线不可见；</li>
-  <li>Scroll 的 delta 规范未定义标度，符号约定 up/left 为负，steps 缺省 1、逐事件发送不聚合。</li>
+  <li>Scroll 的 delta 规范未定义标度，符号约定 up/left 为负、down/right 为正，逐事件发送不聚合。</li>
 </ul>
 <ul class="note">
   <li>坐标与步数经 _at/_by 变体传入（缺省 (0,0) / 1）——输入事件与「哪个 Item 被点击」的映射只存在于消费方 UI，本库核心不接入 GTK 输入上下文（零 GTK 依赖）；</li>
