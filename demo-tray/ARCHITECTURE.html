@@ -28,12 +28,10 @@
                         |
                  DBus session bus
 </code></pre>
-<p class="diagram-note">
-  组装：一次 <code>Tray::start</code>（登记中心就位 + 存量 Item 反向发现）。
-  测试台自备演示 Item 与总线名替身（本工具内部实现，不依赖库公开面）：
-  演示 Item 制造 Item 侧全部变化；总线名替身验证名字独占——Tray 持有期申请同名被拒，
-  占名环境下启动制造 NameTaken。
-</p>
+<ul class="note">
+  <li>组装：一次 <code>Tray::start</code>（登记中心就位 + 存量 Item 反向发现）；</li>
+  <li>测试台自备演示 Item 与总线名替身（本工具内部实现，不依赖库公开面）：演示 Item 制造 Item 侧全部变化；总线名替身验证名字独占——Tray 持有期申请同名被拒，占名环境下启动制造 NameTaken。</li>
+</ul>
 
 <h2 id="sec-2">2. 接口契约</h2>
 
@@ -82,7 +80,10 @@
 
 <h3 id="sec-5-3">5.3. 名字独占</h3>
 <div class="diagram"><img src="diagram/demo-tray-name-exclusivity.svg" alt="活动图：名字独占（带泳道）"></div>
-<p class="diagram-note">正常持有期不存在让位/夺回（所有权语义见 <a href="../breadpan/ARCHITECTURE.html#sec-2-8">breadpan §2.8</a>）；Displaced 属极罕见边缘路径，仅总线层异常可触发，窗口内不复现，验收归集成测试。</p>
+<ul class="note">
+  <li>正常持有期不存在让位/夺回（所有权语义见 <a href="../breadpan/ARCHITECTURE.html#sec-2-7">breadpan §2.7</a>）；</li>
+  <li>Displaced 属极罕见边缘路径，仅总线层异常可触发，窗口内不复现，验收归集成测试。</li>
+</ul>
 
 <h2 id="sec-6">6. 示范与复现职责</h2>
 <table>

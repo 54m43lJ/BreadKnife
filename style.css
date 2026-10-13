@@ -3,6 +3,7 @@
   --card: #ffffff;
   --text: #2d2d2d;
   --muted: #6b6b6b;
+  --note: #4a4a4a;         /* 补充文本（较深灰） */
   --accent: #b0722c;      /* 面包色系 */
   --accent-light: #fdf3e7;
   --border: #e3e0db;
@@ -104,11 +105,14 @@ strong { color: #1a1a1a; }
   border-top: 1px dashed var(--border);
   margin: 2.5rem 0;
 }
-.diagram-note {
+/* ── 补充文本：较深灰 + bulleted list（架构与 CODE 的全部注记统一此形态）── */
+ul.note {
   font-size: .9rem;
-  color: var(--muted);
-  margin-top: .5rem;
+  color: var(--note);
+  margin: .5rem 0;
+  padding-left: 1.2rem;
 }
+ul.note li { margin: .3rem 0; }
 .placeholder {
   color: var(--muted);
   font-style: italic;

@@ -33,25 +33,23 @@
 examples/                # 唯一示例目录：可运行的用法实例（README「实例代码」表）
 ├── minimal.rs           # 最小消费方：start → 消费事件流 → 打印快照与事件
 └── interactions.rs      # 交互与菜单：activate / scroll / menu()·menu_expand 现场读取 / menu_activate</code></pre>
-<p>分组约定：dbus/ 收拢 DBus 域实现——总线连接、Watcher 服务与协议面、存活探测、
-dbusmenu 读取、交互路由；登记簿记与属性取数（tracker、props）留顶层，
-handle/events 为公开前端。</p>
-<p>运行约束：内部线程固定为 1——宿主 tokio CurrentThread 运行时，DBus 收发（zbus tokio 特性）、
-事件组装与投递全部在此异步线程完成，不创建线程池；事件通道为单实例 tokio mpsc
-（start 交付唯一 Receiver；消费端与执行器无关），消费端由消费方经 glib::spawn_future_local 驱动，
-库不创建 GLib 上下文。</p>
+<ul class="note">
+  <li>分组约定：dbus/ 收拢 DBus 域实现——总线连接、Watcher 服务与协议面、存活探测、dbusmenu 读取、交互路由；</li>
+  <li>登记簿记与属性取数（tracker、props）留顶层；</li>
+  <li>handle/events 为公开前端。</li>
+</ul>
+<ul class="note">
+  <li>内部线程固定为 1——宿主 tokio CurrentThread 运行时，DBus 收发（zbus tokio 特性）、事件组装与投递全部在此异步线程完成，不创建线程池；</li>
+  <li>事件通道为单实例 tokio mpsc（start 交付唯一 Receiver；消费端与执行器无关），消费端由消费方经 glib::spawn_future_local 驱动，库不创建 GLib 上下文。</li>
+</ul>
 
 <h2 id="sec-2">2. 内部类型与方法签名</h2>
-<p>按 src/ 文件树组织的内部类型与方法签名摘要。标注 <code>//见 ARCHITECTURE …</code>
-的条目为架构文档已定义符号的统一引用格式。收录标准：只列 §3 调用栈引用到的核心类型与方法；
-条目只承载签名与一行用途——<code>const</code> 定义不收录（字面取值随实现调试浮动，
-取舍记录见 IMPLEMENTATION.md），方法内部步骤一律归 §3 调用栈，未列出者皆为局部实现细节。<br>
-<strong>注意</strong>：登记合并（Upsert::Renamed / NameChanged，§3.3.1）、节流任务
-随栅栏启动（§3.2）、同名换主的 OwnerChanged 交付（§3.3.2）与 Menu 取值宽容化
-（menu_path_of + 解析失败不覆盖，§3.2）为 IMPLEMENTATION.md 记录的改进——
-dev 分支代码滞后于记录，冲突处以 IMPLEMENTATION.md 为准，不随源码回退。<br>
-公开类型与签名（Tray / TrayHandle / TrayEvent / 数据模型 / TrayError / gtk）见
-<a href="ARCHITECTURE.html#sec-3">ARCHITECTURE.html §3</a>，此处不重复。</p>
+<ul class="note">
+  <li>按 src/ 文件树组织的内部类型与方法签名摘要；标注 <code>//见 ARCHITECTURE …</code> 的条目为架构文档已定义符号的统一引用格式；</li>
+  <li>收录标准：只列 §3 调用栈引用到的核心类型与方法；条目只承载签名与一行用途——<code>const</code> 定义不收录（字面取值随实现调试浮动，取舍记录见 IMPLEMENTATION.md），方法内部步骤一律归 §3 调用栈，未列出者皆为局部实现细节；</li>
+  <li>注意：登记合并（Upsert::Renamed / NameChanged，§3.3.1）、节流任务随栅栏启动（§3.2）、同名换主的 OwnerChanged 交付（§3.3.2）与 Menu 取值宽容化（menu_path_of + 解析失败不覆盖，§3.2）为 IMPLEMENTATION.md 记录的改进——dev 分支代码滞后于记录，冲突处以 IMPLEMENTATION.md 为准，不随源码回退；</li>
+  <li>公开类型与签名（Tray / TrayHandle / TrayEvent / 数据模型 / TrayError / gtk）见 <a href="ARCHITECTURE.html#sec-3">ARCHITECTURE.html §3</a>，此处不重复。</li>
+</ul>
 
 <h3 id="sec-2-lib">2.1. lib.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub type TrayItemId;         //见 ARCHITECTURE §3.3
@@ -339,9 +337,11 @@ fn missing_icon() -&gt; gdk::Paintable;                          // image-missin
 fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 → 纹理的色彩处理在此完成</code></pre>
 
 <h2 id="sec-3">3. 关键流程调用栈（伪码）</h2>
-<p>调用栈约定：树形线条只承载两类行——具体方法调用与判断条件；每个调用至多后置一条
-注释，注释不挂枝（无 <code>├──</code>/<code>└──</code>，所在层级竖线延续）；
-更长的动机与取舍写入块后正文。</p>
+<ul class="note">
+  <li>树形线条只承载两类行——具体方法调用与判断条件；</li>
+  <li>每个调用至多后置一条注释，注释不挂枝（无 <code>├──</code>/<code>└──</code>，所在层级竖线延续）；</li>
+  <li>更长的动机与取舍写入块后正文。</li>
+</ul>
 
 <h3 id="sec-3-1">3.1. 启动（start）</h3>
 
@@ -366,12 +366,11 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │    // 引导总时限 max(10×timeout_ms, 10s) 守护；超时/失败 → join 内部线程并返回 Err
 └── return (TrayHandle{Arc&lt;RuntimeShared&gt;}, 事件通道 Receiver)</code></pre>
 
-<p>顺序为什么是契约：Watcher 名最后申请——申请前报到无从发生，快照投递后所有报到
-以增量事件衔接（首事件即快照，无重叠无缺口）。若先申请名，等待 Watcher 出现的
-Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> 抢在快照之前——实测复现。
-订阅（spawn_signal_tasks）与存活探测（heartbeat_task）先于申请名同理：名在位即可能
-收到信号与超时，须先就位才不丢；节流任务（debounce_task）不在此列——其交付始于快照
-之后，随栅栏置位启动（§3.2）。</p>
+<ul class="note">
+  <li>Watcher 名最后申请——申请前报到无从发生，快照投递后所有报到以增量事件衔接（首事件即快照、无重叠无缺口）；若先申请名，等待 Watcher 出现的 Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> 抢在快照之前——实测复现；</li>
+  <li>订阅（spawn_signal_tasks）与存活探测（heartbeat_task）先于申请名同理：名在位即可能收到信号与超时，须先就位才不丢；</li>
+  <li>节流任务（debounce_task）不在此列——其交付始于快照之后，随栅栏置位启动（§3.2）。</li>
+</ul>
 
 <h4 id="sec-3-1-2">3.1.2. 反向发现（存量 Item 双级探测）</h4>
 <pre><code>内部: dbus::discover_existing(bus) → Vec&lt;String&gt;
@@ -397,10 +396,11 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 │    // 与入队之间无 await：单线程运行时内不可分割，不存在「快照已入队、栅栏未置位」中间态
 └── bus.take_deferred_removed() → Vec&lt;TrayItemId&gt;（逐条 events.send(Removed(id))）
      // 仅快照内 id 补投；快照外按从未出现丢弃</code></pre>
-<p>栅栏是各事件源「首事件即快照、无重叠无缺口」的兜底：报到（§3.3.1）、NameOwnerChanged
-（§3.3.2，同名换主与死亡清理）、菜单变更（§3.4.2）按栅栏前/后记录行为分支；变更节流任务在置位后才启动
-（§3.2），Changed 天然不早于快照。栅栏为防御性——申请时序（§3.1.1）使栅栏前报到
-在正常路径上无从发生。</p>
+<ul class="note">
+  <li>栅栏是各事件源「首事件即快照、无重叠无缺口」的兜底：报到（§3.3.1）、NameOwnerChanged（§3.3.2，同名换主与死亡清理）、菜单变更（§3.4.2）按栅栏前/后记录行为分支；</li>
+  <li>变更节流任务在置位后才启动（§3.2），Changed 天然不早于快照；</li>
+  <li>栅栏为防御性——申请时序（§3.1.1）使栅栏前报到在正常路径上无从发生。</li>
+</ul>
 
 <h3 id="sec-3-2">3.2. 变更通告合并（固定窗口节流）</h3>
 <pre><code>内部: properties_changed_task(iface)×2 / item_signals_task(iface)×2
@@ -413,9 +413,10 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
 │    // 仅记入待通告集合；无计时重置——连发不推迟交付
 └── debounce_task 固定节拍到期 → pending.drain()（逐个 events.send(Changed(id))）
      // 每 debounce_ms 一次，与信号无关；栅栏置位后启动（§3.1.3）；单通道，满则丢弃</code></pre>
-<p>合并针对的是重读放大：Item 侧的双重上报（New* 与 PropertiesChanged 并发、状态切换伴随连发）
-与进度型 Item 的高频刷新，经零缓存架构放大为消费方的重复现场读取；窗口节流把重读频率压到
-每 Item 至多 1 次/窗口。事实事件幂等，窗口内折叠不丢信息。</p>
+<ul class="note">
+  <li>合并针对的是重读放大：Item 侧的双重上报（New* 与 PropertiesChanged 并发、状态切换伴随连发）与进度型 Item 的高频刷新，经零缓存架构放大为消费方的重复现场读取——窗口节流把重读频率压到每 Item 至多 1 次/窗口；</li>
+  <li>事实事件幂等，窗口内折叠不丢信息。</li>
+</ul>
 
 <h3 id="sec-3-3">3.3. 报到与下线（死亡清理 / 同名换主）</h3>
 
@@ -506,10 +507,11 @@ Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> �
      │    // 回退无回执事件
      └── Err(非超时) 无菜单 → return Err</code></pre>
 
-<p>左键回退动机：libappindicator 系 Item 的 Activate 无处理器——XML 静态声明但分发
-catch-all，不可预先探测（Introspect 说谎、探测调用会误触激活）。左键出菜单是宿主侧
-既定策略：菜单由宿主经 dbusmenu 渲染，不依赖 Item 端激活；回退分支的失败形态为
-同步快失败，与超时无关。</p>
+<ul class="note">
+  <li>libappindicator 系 Item 的 Activate 无处理器——XML 静态声明但分发 catch-all，不可预先探测（Introspect 说谎、探测调用会误触激活）；</li>
+  <li>左键出菜单是宿主侧既定策略：菜单由宿主经 dbusmenu 渲染，不依赖 Item 端激活；</li>
+  <li>回退分支的失败形态为同步快失败，与超时无关。</li>
+</ul>
 
 <h4 id="sec-3-5-2">3.5.2. 其余语义输入（受理即返回）</h4>
 <pre><code>流程 middle_click(id) / right_click(id) / scroll_up(id) 等及其 _at / _by 变体

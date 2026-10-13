@@ -19,9 +19,10 @@
 <h3 id="sec-1-1">1.1. 文件结构</h3>
 <pre><code>breadknife/           # 项目群根（应用，二进制 bread）
 └── breadpan/         # 托盘协议栈单库（内置登记中心 + 逻辑 Host API + GTK 整合）</code></pre>
-<p class="diagram-note">
-  单一仓库，breadknife 为根，内嵌成员库。各成员的内部文件结构见各自项目的 CODE.html，父级不展开。
-</p>
+<ul class="note">
+  <li>单一仓库，breadknife 为根，内嵌成员库；</li>
+  <li>各成员的内部文件结构见各自项目的 CODE.html，父级不展开。</li>
+</ul>
 <h3 id="sec-1-2">1.2. 依赖视角</h3>
 <pre><code>
    +-------------+
@@ -35,10 +36,10 @@
    |  breadpan   |
    +-------------+
 </code></pre>
-<p class="diagram-note">
-  托盘协议栈收敛为单库：Watcher 登记中心并入 breadpan（原独立库解散），登记中心与逻辑 Host
-  同进程组装，不经总线互认。依赖关系只在依赖方文档表达，库文档不点名其他项目。
-</p>
+<ul class="note">
+  <li>托盘协议栈收敛为单库：Watcher 登记中心并入 breadpan（原独立库解散），登记中心与逻辑 Host 同进程组装，不经总线互认；</li>
+  <li>依赖关系只在依赖方文档表达，库文档不点名其他项目。</li>
+</ul>
 
 <h2 id="sec-2">2. 技术栈</h2>
 <table>
@@ -61,10 +62,12 @@
   bread.sock   ---&gt;  样式系统 (CSS 变量 + RELOAD)         |     UPower / NetworkManager / MPRIS）
                 +----------------------------------------+ --&gt; pamixer / brightnessctl / ddcutil
 </code></pre>
-<p class="diagram-note">
-  Hyprland IPC 为只读监听，驱动界面更新；托盘域总线互动全部在 breadpan 库内，应用侧零 DBus 词汇；
-  服务缺失行为：入口组件（电池/网络）对应服务缺失时自动隐藏，弹出面板内操作项（媒体/音量/亮度）后端缺失时灰置并提示；外部工具是音量与亮度调节的后端。
-</p>
+<ul class="note">
+  <li>Hyprland IPC 为只读监听，驱动界面更新；</li>
+  <li>托盘域总线互动全部在 breadpan 库内，应用侧零 DBus 词汇；</li>
+  <li>服务缺失行为：入口组件（电池/网络）对应服务缺失时自动隐藏，弹出面板内操作项（媒体/音量/亮度）后端缺失时灰置并提示；</li>
+  <li>外部工具是音量与亮度调节的后端。</li>
+</ul>
 
 <h2 id="sec-3">3. 运行模型</h2>
 <table>

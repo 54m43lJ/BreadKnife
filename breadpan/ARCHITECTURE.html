@@ -32,8 +32,15 @@
   <tr><td>tokio</td><td>异步运行时；本库内部自带（CurrentThread，独占内部线程），消费方无需装配——事件通道（tokio mpsc）的消费端与执行器无关</td></tr>
   <tr><td>GTK 主线程</td><td>GTK/GLib 主循环（MainContext）所在线程；一切 UI 操作与事件消费闭包都在此执行——消费方经 <code>glib::spawn_future_local</code> 把事件流消费 future 挂到本上下文</td></tr>
 </table>
-<p class="diagram-note">命名从事实规范（org.kde.*）：SNI 官方文本拼写为 <code>org.freedesktop.*</code>，但现行实现——KDE、AppIndicator 及各 Host/Item（如 nm-applet）——一律 <code>org.kde.*</code>。本库申请与广播按 <code>org.kde</code> 前缀，监听与探测对两套前缀等价处理（<a href="#sec-3-4">§3.4</a>），保证与既有实现互操作；若改用 <code>org.freedesktop</code> 名，将与已持有 <code>org.kde</code> 名的既有 Watcher 并存为两个登记中心，登记项互不可见。</p>
-<p class="diagram-note">官方规范中 bus name 是唯一名与知名名的合称（<code>:</code> 开头者为唯一名，其余为知名名）；本文档不以 bus name 单独指称任一类，一律用「唯一名」「知名名」。官方 Address 一词指连接总线的服务器地址（<code>unix:path=…</code>），与唯一名无关。</p>
+<ul class="note">
+  <li>命名从事实规范（org.kde.*）：SNI 官方文本拼写为 <code>org.freedesktop.*</code>，但现行实现——KDE、AppIndicator 及各 Host/Item（如 nm-applet）——一律 <code>org.kde.*</code>；</li>
+  <li>本库申请与广播按 <code>org.kde</code> 前缀，监听与探测对两套前缀等价处理（<a href="#sec-3-4">§3.4</a>），保证与既有实现互操作；</li>
+  <li>若改用 <code>org.freedesktop</code> 名，将与已持有 <code>org.kde</code> 名的既有 Watcher 并存为两个登记中心，登记项互不可见。</li>
+</ul>
+<ul class="note">
+  <li>官方规范中 bus name 是唯一名与知名名的合称（<code>:</code> 开头者为唯一名，其余为知名名）；本文档不以 bus name 单独指称任一类，一律用「唯一名」「知名名」；</li>
+  <li>官方 Address 一词指连接总线的服务器地址（<code>unix:path=…</code>），与唯一名无关。</li>
+</ul>
 
 <h2 id="sec-2">2. 架构图</h2>
 
@@ -78,39 +85,44 @@
 <div class="diagram"><img src="diagram/breadpan-item-lifecycle.svg" alt="时序：Item 生命周期（报到 → 变更 → 同名换主 → 死亡）"></div>
 <table>
   <tr><th>阶段</th><th>触发</th><th>库内动作</th><th>交付</th></tr>
-  <tr><td>报到</td><td><code>RegisterItem</code></td><td>最小集入册（幂等；探测 Menu 属性）</td><td><code>Added(id)</code></td></tr>
-  <tr><td>变更</td><td><code>PropertiesChanged</code> / 官方 <code>New*</code> 信号</td><td>信号入待通告集合，窗口内按 Item 合并</td><td><code>Changed(id)</code></td></tr>
+  <tr><td>报到</td><td><code>RegisterItem</code></td><td>最小集入册（幂等；探测 Menu 属性）；SNI 详情不经手、不落册，由消费方现场读取（最小集定义见 <a href="#sec-3-3">§3.3</a>）</td><td><code>Added(id)</code></td></tr>
+  <tr><td>变更</td><td><code>PropertiesChanged</code>（<a href="https://dbus.freedesktop.org/doc/dbus-specification.html#standard-interfaces-properties">D-Bus 规范 · 标准接口</a>）/ 官方 <code>New*</code> 信号（<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item-signals">SNI 规范 §3.3</a>）</td><td>信号入待通告集合，窗口内按 Item 合并</td><td><code>Changed(id)</code>——零详情缓存：只报「该 Item 有变化」，不携带数据（投递语义 <a href="#sec-3-2">§3.2</a>）</td></tr>
   <tr><td>同名换主</td><td><code>NameOwnerChanged</code> 且新旧属主均非空（应用重启直接顶名）</td><td>属主唯一名重绑定 + 路由字段就地重探；id 与对象生死不变——不拆 Removed + Added</td><td><code>OwnerChanged(id)</code>（信息性，无必做动作）</td></tr>
   <tr><td>死亡</td><td><code>NameOwnerChanged</code> 且 new_owner 为空（进程退出 / 崩溃）</td><td>簿记移除</td><td><code>Removed(id)</code></td></tr>
 </table>
-<p>官方 New* 信号原文见 <a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item-signals">SNI 规范 §3.3</a>；其与 <code>PropertiesChanged</code>（<a href="https://dbus.freedesktop.org/doc/dbus-specification.html#standard-interfaces-properties">D-Bus 规范 · 标准接口</a>）同为变更触发源。零详情缓存：本库不做字段级跟踪与并集合并，通告只报「该 Item 有变化」这一事实。</p>
-<p class="diagram-note">报到即入册：登记只记最小集（服务名 + 对象路径 + 属主唯一名 + 存活字段 alive + DBusMenu 支持/路径 + 整项即菜单标记），SNI 详情不经手、不落册，由消费方现场读取；协议面同步广播（<a href="#sec-3-4">§3.4</a>），进程内事件与本库簿记同源。同名换主对消费方无可感知影响——id 是唯一键且未变，<code>OwnerChanged</code> 只报事实，是否重读数据由消费方裁断（读即最新）。</p>
+<ul class="note">
+  <li>协议面同步广播（<a href="#sec-3-4">§3.4</a>），进程内事件与本库簿记同源；</li>
+  <li>同名换主对消费方无可感知影响——id 是唯一键且未变，<code>OwnerChanged</code> 只报事实，是否重读数据由消费方裁断（读即最新）。</li>
+</ul>
 
 <h3 id="sec-2-5">2.5. 时序：Menu 流程（零缓存·逐层懒加载；click 路由与 menu()/menu_expand() 共用）</h3>
 <div class="diagram"><img src="diagram/breadpan-menu.svg" alt="时序：Menu 流程（零缓存·逐层懒加载）"></div>
-<p class="diagram-note">AboutToShow 是 dbusmenu 规定的宿主常规步骤（接口原文中为 method，非信号）：展示前以目标层父条目 id 调用（根层为 0），应答为真表示布局已变——本库零缓存、GetLayout 紧随其后必然取得最新布局，故应答不改变本流程；应答异常视为未变更继续拉取。dbusmenu 对象路径取自登记簿记（注册时探测 Menu 属性一次，随变更信号就地更新；TrayItem.menu 同源），流程零额外查询。不存在打开菜单即需全量多级布局的场景：每次仅取一层（GetLayout recursionDepth = 1），深层由消费方经 menu_expand 按需展开。click 路由与 menu()/menu_expand() 共用本流程。</p>
+<ul class="note">
+  <li>AboutToShow 是 dbusmenu 规定的宿主常规步骤（接口原文中为 method，非信号）：展示前以目标层父条目 id 调用（根层为 0），应答为真表示布局已变——本库零缓存、GetLayout 紧随其后必然取得最新布局，故应答不改变本流程；应答异常视为未变更继续拉取；</li>
+  <li>dbusmenu 对象路径取自登记簿记（注册时探测 Menu 属性一次，随变更信号就地更新；TrayItem.menu 同源），流程零额外查询；</li>
+  <li>不存在打开菜单即需全量多级布局的场景：每次仅取一层（GetLayout recursionDepth = 1），深层由消费方经 menu_expand 按需展开；</li>
+  <li>click 路由与 menu()/menu_expand() 共用本流程。</li>
+</ul>
 
 <h3 id="sec-2-6">2.6. 时序：输入路由与回执</h3>
+<p>方法 → 路由与返回对照见下方辅助表：路由依据登记簿记（menu_only / menu），零查询；VOID 调用的回执经 <code>InteractionResult</code> 事件交付。SNI §3.2 的四种交互方法由此全部可达，DBusMenu / ContextMenu 的选择完全内置于 <code>right_click()</code> / <code>left_click()</code> 的路由——消费方无对应方法、无路由职责。</p>
 <div class="diagram"><img src="diagram/breadpan-input-routing.svg" alt="活动图：输入路由与回执（带泳道）"></div>
-<p>方法 → 路由对照（辅助表；路由依据登记簿记 menu_only / menu，零查询）：</p>
 <table>
-  <tr><th>方法</th><th>路由</th></tr>
-  <tr><td><code>left_click(id)</code> / <code>left_click_at(id, x, y)</code></td><td><code>menu_only</code> 且 DBusMenu 在册 → Menu 流程（<a href="#sec-2-5">§2.5</a>）；否则 Activate(x,y)——Activate 失败（非超时）且 DBusMenu 在册 → 回退 Menu 流程（libappindicator 系 Item 的 Activate 无处理器，左键出菜单是宿主侧既定策略）；超时 → 直接报错</td></tr>
-  <tr><td><code>middle_click(id)</code> / <code>middle_click_at(id, x, y)</code></td><td>SecondaryActivate(x,y)</td></tr>
-  <tr><td><code>right_click(id)</code> / <code>right_click_at(id, x, y)</code></td><td>DBusMenu 在册 → Menu 流程（<a href="#sec-2-5">§2.5</a>）；否则 ContextMenu(x,y)——<strong>fallback</strong>：SNI 原生方式，Item 自绘弹出，宿主不参与渲染，非常规路径</td></tr>
-  <tr><td><code>scroll_up(id)</code> / <code>scroll_up_by(id, steps)</code>（四向各一对）</td><td>Scroll(∓steps, vertical / horizontal)；steps 缺省 1</td></tr>
+  <tr><th>方法</th><th>路由</th><th>返回</th></tr>
+  <tr><td><code>left_click(id)</code> / <code>left_click_at(id, x, y)</code></td><td><code>menu_only</code> 且 DBusMenu 在册 → Menu 流程（<a href="#sec-2-5">§2.5</a>）；否则 Activate(x,y)——Activate 失败（非超时）且 DBusMenu 在册 → 回退 Menu 流程（libappindicator 系 Item 的 Activate 无处理器，左键出菜单是宿主侧既定策略）；超时 → 直接报错</td><td>Menu 流程（menu_only 命中或 Activate 非超时失败回退）→ <code>Outcome::Menu</code>（消费方渲染弹出；无回执事件——交付形态与 menu_only 左键一致）；Activate 成功 → <code>Outcome::Dispatched</code> + 回执事件；Activate 超时、或非超时失败且无菜单 → <code>Err</code>。left_click 独走同步路径——就地等待 Activate 往返（回退决策需即时知晓成败）</td></tr>
+  <tr><td><code>middle_click(id)</code> / <code>middle_click_at(id, x, y)</code></td><td>SecondaryActivate(x,y)</td><td><code>Outcome::Dispatched</code> + 回执事件</td></tr>
+  <tr><td><code>right_click(id)</code> / <code>right_click_at(id, x, y)</code></td><td>DBusMenu 在册 → Menu 流程（<a href="#sec-2-5">§2.5</a>）；否则 ContextMenu(x,y)——<strong>fallback</strong>：SNI 原生方式，Item 自绘弹出，宿主不参与渲染，非常规路径</td><td>Menu 流程 → <code>Outcome::Menu</code>；ContextMenu → <code>Outcome::Dispatched</code> + 回执事件</td></tr>
+  <tr><td><code>scroll_up(id)</code> / <code>scroll_up_by(id, steps)</code>（四向各一对）</td><td>Scroll(∓steps, vertical / horizontal)；steps 缺省 1</td><td><code>Outcome::Dispatched</code> + 回执事件</td></tr>
 </table>
-<p>
-  返回：Menu 流程 → <code>Outcome::Menu(快照)</code>（消费方渲染弹出）；成功路由的 VOID 调用 →
-  <code>Outcome::Dispatched</code>（回执经 InteractionResult 事件交付）。left_click 为就地知晓 Activate
-  成败（回退决策的前提）独走同步路径：成功 → <code>Dispatched</code> + 回执事件；失败且 DBusMenu 在册 →
-  回退 Menu 流程（<code>Menu</code>，无回执事件——交付形态与 menu_only 左键一致）；失败无菜单或超时 →
-  <code>Err</code>。SNI §3.2 的四种交互方法（ContextMenu /
-  Activate / SecondaryActivate / Scroll）由此全部可达。DBusMenu / ContextMenu 的选择完全内置于
-  <code>right_click()</code> / <code>left_click()</code> 的路由——消费方无对应方法、无路由职责。
-</p>
-<p class="diagram-note">被路由到的 DBus 交互（Activate / SecondaryActivate / ContextMenu / Scroll / dbusmenu Event）均为 VOID 单向调用——SNI §3.2 原文："The application will perform any task it considers appropriate as an activation request"。DBus 应答仅代表送达，其后的动作是 Item 私有行为，协议无定义、总线不可见；Scroll 的 delta 规范未定义标度，符号约定 up/left 为负，steps 缺省 1、逐事件发送不聚合。</p>
-<p class="diagram-note">参数所有权：坐标与步数经 _at/_by 变体传入（缺省 (0,0) / 1）——输入事件与「哪个 Item 被点击」的映射只存在于消费方 UI，本库核心不接入 GTK 输入上下文（零 GTK 依赖）；且 Wayland 协议不向客户端提供全局坐标、GTK4 亦无 root 坐标 API，双方都只能得到近似值，而规范将 x/y 定位为 hint（Item 可忽略），缺省值即符合协议。</p>
+<ul class="note">
+  <li>被路由到的 DBus 交互（Activate / SecondaryActivate / ContextMenu / Scroll / dbusmenu Event）均为 VOID 单向调用——SNI §3.2 原文："The application will perform any task it considers appropriate as an activation request"；</li>
+  <li>DBus 应答仅代表送达，其后的动作是 Item 私有行为，协议无定义、总线不可见；</li>
+  <li>Scroll 的 delta 规范未定义标度，符号约定 up/left 为负，steps 缺省 1、逐事件发送不聚合。</li>
+</ul>
+<ul class="note">
+  <li>坐标与步数经 _at/_by 变体传入（缺省 (0,0) / 1）——输入事件与「哪个 Item 被点击」的映射只存在于消费方 UI，本库核心不接入 GTK 输入上下文（零 GTK 依赖）；</li>
+  <li>Wayland 协议不向客户端提供全局坐标、GTK4 亦无 root 坐标 API，双方都只能得到近似值，而规范将 x/y 定位为 hint（Item 可忽略），缺省值即符合协议。</li>
+</ul>
 
 <h3 id="sec-2-7">2.7. 时序：服务停止（优雅退出 / Displaced / Fatal）</h3>
 <div class="diagram"><img src="diagram/breadpan-stop.svg" alt="时序：服务停止（优雅退出 / Displaced / Fatal）"></div>
@@ -120,7 +132,13 @@
   <tr><td>Displaced（极罕见边缘路径）</td><td>总线层异常：总线守护重启 / 会话重建 / 本进程连接被强制关闭</td><td>自身名的 NOC 到达且无 stopping 标记 → report_displaced → 清空簿记、set_stopped（不再受理登记）、入队 Displaced、通道 close</td><td>终局报错，待遇同 Fatal：被其它 Watcher 取代——不重试、不强制夺回</td></tr>
   <tr><td>Fatal（异常终局）</td><td>总线断连：心跳探测自身唯一名遇 IO 类错误（连接失败 / 握手失败等）</td><td>report_fatal → fatal 分支：释放 Watcher 名（尽力而为）、清空簿记、set_stopped、入队 Fatal、通道 close</td><td>终止宣告为最后一个事件；此后 Handle 方法一律 <code>Stopped</code>，重建由消费方决定</td></tr>
 </table>
-<p class="diagram-note">名持有不可被替换：申请时不声明 allow-replacement，持有期间任何外部顶替请求一律失败——切换托盘程序须先手动终止本程序，正常情况下不存在让位/夺回。优雅退出与 Displaced 共享同一判定点：自身名的 <code>NameOwnerChanged</code> 由 <code>stopping</code> 标记区分归属——主动释放（优雅退出）吞掉、不产生 Displaced；仅异常丢失（持有期不可被替换，只有总线层异常可触发）才终局。Fatal 独立触发：总线断连无可订阅的断开回调，心跳每拍探测自身唯一名，IO 类错误即终局（超时视作繁忙跳过）。三条终局路径同构：清空簿记、此后 Handle 方法一律 <code>Stopped</code>、终止事件（Displaced / Fatal）是最后一个事件。启动期名字已被他人持有 → <code>NameTaken</code>：多个 Watcher 不能共存，建议消费方整体退出或隐藏托盘相关功能。</p>
+<ul class="note">
+  <li>名持有不可被替换：申请时不声明 allow-replacement，持有期间任何外部顶替请求一律失败——切换托盘程序须先手动终止本程序，正常情况下不存在让位/夺回；</li>
+  <li>优雅退出与 Displaced 共享同一判定点：自身名的 <code>NameOwnerChanged</code> 由 <code>stopping</code> 标记区分归属——主动释放（优雅退出）吞掉、不产生 Displaced；仅异常丢失（持有期不可被替换，只有总线层异常可触发）才终局；</li>
+  <li>Fatal 独立触发：总线断连无可订阅的断开回调，心跳每拍探测自身唯一名，IO 类错误即终局（超时视作繁忙跳过）；</li>
+  <li>三条终局路径同构：清空簿记、此后 Handle 方法一律 <code>Stopped</code>、终止事件（Displaced / Fatal）是最后一个事件；</li>
+  <li>启动期名字已被他人持有 → <code>NameTaken</code>：多个 Watcher 不能共存，建议消费方整体退出或隐藏托盘相关功能。</li>
+</ul>
 
 <h2 id="sec-3">3. 接口</h2>
 
@@ -192,7 +210,13 @@ pub enum InteractionOutcome { Dispatched, Menu(MenuSnapshot) }   // Dispatched�
 /// 位图 → 内存纹理。须在 GTK 主线程调用
 pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
 </code></pre>
-<p class="diagram-note">补全（机制不覆盖的细则）：公开面无 async fn——异步收敛在事件通道消费端（tokio mpsc 的 <code>recv().await</code>，由消费方经 <code>glib::spawn_future_local</code> 驱动），入口与交互方法均为同步签名、任意线程可调——含消费方自有异步运行时的工作线程，库内经阻塞等待受理，不依赖调用方运行时上下文；tokio 运行时为库内私有，不要求消费方装配；不拥有 UI 等能力级边界以 <a href="README.html">README.html</a> 为权威；Watcher 总线名全总线唯一——启动期已被持有 → <code>NameTaken</code>（多 Watcher 不能共存），持有期不可被替换，所有权异常丢失 → <code>Displaced</code>（<a href="#sec-2-7">§2.7</a>，极罕见边缘路径，仅总线层异常可触发），本库不做外部 Watcher 客户端模式。</p>
+<ul class="note">
+  <li>公开面无 async fn——异步收敛在事件通道消费端（tokio mpsc 的 <code>recv().await</code>，由消费方经 <code>glib::spawn_future_local</code> 驱动）；</li>
+  <li>入口与交互方法均为同步签名、任意线程可调——含消费方自有异步运行时的工作线程，库内经阻塞等待受理，不依赖调用方运行时上下文；</li>
+  <li>tokio 运行时为库内私有，不要求消费方装配；</li>
+  <li>不拥有 UI 等能力级边界以 <a href="README.html">README.html</a> 为权威；</li>
+  <li>Watcher 总线名全总线唯一——启动期已被持有 → <code>NameTaken</code>（多 Watcher 不能共存），持有期不可被替换，所有权异常丢失 → <code>Displaced</code>（<a href="#sec-2-7">§2.7</a>，极罕见边缘路径，仅总线层异常可触发），本库不做外部 Watcher 客户端模式。</li>
+</ul>
 
 <h3 id="sec-3-2">3.2. 消息与错误</h3>
 <pre><code>pub enum TrayEvent {
@@ -279,7 +303,11 @@ pub enum TrayError {
   <tr><td>Protocol</td><td>协议类失败（属性缺失、类型不符等）</td><td>跟踪面已字段级降级（见 <a href="#sec-3-3">§3.3</a>）；<code>menu()</code> / <code>menu_expand()</code> 现场读取与交互受理阶段返回本错误，可重试或跳过该 Item</td></tr>
   <tr><td>Stopped</td><td>终止宣告之后的一切调用</td><td>库已停机，按需重建实例</td></tr>
 </table>
-<p class="diagram-note">容错总则：单个 Item 的死亡不影响其他 Item 的跟踪；协议类错误绝不 panic；总线断开 → Fatal → Stopped（时序 <a href="#sec-2-7">§2.7</a>），重建由消费方决定。</p>
+<ul class="note">
+  <li>单个 Item 的死亡不影响其他 Item 的跟踪；</li>
+  <li>协议类错误绝不 panic；</li>
+  <li>总线断开 → Fatal → Stopped（时序 <a href="#sec-2-7">§2.7</a>），重建由消费方决定。</li>
+</ul>
 
 <h3 id="sec-3-3">3.3. 数据模型与转换</h3>
 <p>官方字段映射见下方字段定义表。规范原文：
@@ -385,7 +413,13 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
   <tr><td>icon_name</td><td>Freedesktop 图标名</td><td>dbusmenu · icon-name · <a href="https://specifications.freedesktop.org/icon-naming-spec/latest/">Icon Naming Spec</a></td></tr>
   <tr><td>icon_data</td><td>PNG 字节流（与 SNI 的 ARGB32 位图不同格式）</td><td>dbusmenu · icon-data</td></tr>
 </table>
-<p class="diagram-note">官方定义、本库不透传的字段：Item 属性 <code>AttentionMovieName</code>（SNI §3.1.12）与 <code>ContextMenu</code> 方法（§3.2.1）；条目属性 <code>shortcut</code>；dbusmenu 信号 <code>ItemActivationRequested</code>；vendor 专属属性与事件（<code>x-&lt;vendor&gt;-*</code> 前缀）。能力级边界以 <a href="README.html">README.html</a> 为权威。</p>
+<ul class="note">
+  <li>官方定义、本库不透传的字段：Item 属性 <code>AttentionMovieName</code>（SNI §3.1.12）与 <code>ContextMenu</code> 方法（§3.2.1）；</li>
+  <li>条目属性 <code>shortcut</code>；</li>
+  <li>dbusmenu 信号 <code>ItemActivationRequested</code>；</li>
+  <li>vendor 专属属性与事件（<code>x-&lt;vendor&gt;-*</code> 前缀）；</li>
+  <li>能力级边界以 <a href="README.html">README.html</a> 为权威。</li>
+</ul>
 
 <h4>转换总表</h4>
 <table>
@@ -395,7 +429,11 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
   <tr><td>IconSource</td><td>主题命中判定（Icon Theme Spec）；文件位图加载与解码</td><td>gdk::Paintable（主题图标 / 文件纹理 / 位图纹理；失败统一回退 image-missing）</td></tr>
   <tr><td>DBus 交互调用回执</td><td>归一化</td><td>TrayEvent::InteractionResult</td></tr>
 </table>
-<p class="diagram-note">TrayItem / MenuSnapshot 均为<strong>现场读取的即时投影</strong>：本库不保存其内容——登记簿记仅存服务名 + 对象路径 + 属主唯一名 + 存活字段（alive）+ DBusMenu 支持/路径 + 整项即菜单标记，其余信息在每次调用时经 zbus 即时读取、以 zvariant/serde 反序列化为原生结构交付。开销换简单：不维护过期数据，也就没有失效逻辑。</p>
+<ul class="note">
+  <li>TrayItem / MenuSnapshot 均为<strong>现场读取的即时投影</strong>：本库不保存其内容——登记簿记仅存服务名 + 对象路径 + 属主唯一名 + 存活字段（alive）+ DBusMenu 支持/路径 + 整项即菜单标记；</li>
+  <li>其余信息在每次调用时经 zbus 即时读取、以 zvariant/serde 反序列化为原生结构交付；</li>
+  <li>开销换简单：不维护过期数据，也就没有失效逻辑。</li>
+</ul>
 
 <h3 id="sec-3-4">3.4. 协议面（DBus，对 Item 应用）</h3>
 <p>
@@ -413,7 +451,12 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
   <tr><td><code>StatusNotifierItemRegistered</code></td><td>信号</td><td>广播：Item 报到（协议面保真，供总线观察方）</td></tr>
   <tr><td><code>StatusNotifierItemUnregistered</code></td><td>信号</td><td>广播：Item 离开（死亡清理，<a href="#sec-2-4">§2.4</a>）</td></tr>
 </table>
-<p class="diagram-note">名持有不可被替换（申请时不声明 allow-replacement）：持有期间外部顶替请求一律失败，切换托盘程序须先手动终止本程序；自身停机 → 释放名字，等同角色下线，无残留簿记。所有权丢失 → Displaced（<a href="#sec-2-7">§2.7</a>，极罕见边缘路径，仅总线层异常可触发）。簿记只在内存，不落盘。</p>
+<ul class="note">
+  <li>名持有不可被替换（申请时不声明 allow-replacement）：持有期间外部顶替请求一律失败，切换托盘程序须先手动终止本程序；</li>
+  <li>自身停机 → 释放名字，等同角色下线，无残留簿记；</li>
+  <li>所有权丢失 → Displaced（<a href="#sec-2-7">§2.7</a>，极罕见边缘路径，仅总线层异常可触发）；</li>
+  <li>簿记只在内存，不落盘。</li>
+</ul>
 
 </main>
 </body>
