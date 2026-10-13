@@ -312,7 +312,7 @@ pub(crate) fn parse_mnemonic(raw: &amp;str) -&gt; String;</code></pre>
 /// 语义输入路由（§3.5.1 §3.5.2）
 pub(crate) async fn route(bus: &amp;BusCenter, id: &amp;str,
                           input: Input) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
-/// 延续方法：dbusmenu Event("clicked") 提交（§3.4.1）
+/// 延续方法：dbusmenu Event(menu_item_id, "clicked", Value::I32(0), ts: u32) 提交（ts 为当前时间 timestamp，Unix 毫秒；§3.4.1）
 pub(crate) fn menu_activate(bus: &amp;BusCenter, id: &amp;str, menu_item_id: i32) -&gt; Result&lt;(), TrayError&gt;;
 /// VOID 交互后台派发，回执入队 InteractionResult（§3.5.2）
 fn dispatch_void&lt;F, Fut&gt;(bus: &amp;BusCenter, entry: ItemEntry, id: String, op: InteractionOp, f: F)

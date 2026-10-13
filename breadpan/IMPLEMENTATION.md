@@ -79,7 +79,7 @@ ARCHITECTURE 规定了"首事件即快照、无重叠无缺口"，但未定义�
 - **VOID 交互仍等待回执**（已升格：VOID 术语修正——无返回值、应答仍等待 → ARCHITECTURE §2.6/§3.2，待确认清理）：VOID 指无返回值，不指无应答——受理即返回
   `Dispatched`，应答/错误以 `InteractionResult` 事件交付（区分"送达"与
   "目标消失"）。
-- **dbusmenu Event 参数**：`data` 变体发 `I32(0)`（服务端忽略），时间戳取
+- **dbusmenu Event 参数**（已升格：Event 参数约定 → CODE §2.6.7，待确认清理）：`data` 变体发 `I32(0)`（服务端忽略），时间戳取
   Unix 毫秒截断 u32。
 - **滚动符号**：up/left 为负、down/right 为正，steps 缺省 1 逐事件发送。
 - **事件通道**：容量 256（库内定值）；满则丢弃并计数（有损交付）；关闭 =
