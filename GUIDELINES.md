@@ -4,7 +4,11 @@ Each project should contain 3 documents in HTML:
 3. ARCHITECTURE.html
 4. CODE.html
 
-And each serves a distinct purpose.
+The end goal is a comprehensive set of design constraints that is immediately useful to any developer implementing the code. 
+
+The following content should be AVOIDED at all costs:
+- Comparison to historical design.
+- Reasoning for a specific design choice (except general design principles that applies to a broad scope).
 
 -----
 
