@@ -24,6 +24,7 @@ use crate::{
 };
 
 const MOCK_ID: &str = "org.kde.StatusNotifierItem-99999-1";
+const MOCK_FD_ID: &str = "org.kde.StatusNotifierItem-77777-1";
 const MOCK_ITEM_PATH: &str = "/StatusNotifierItem";
 const MOCK_MENU_PATH: &str = "/org/mock/Menu";
 const WATCHER_IFACE: &str = "org.kde.StatusNotifierWatcher";
@@ -389,6 +390,43 @@ impl MockItem {
 
     #[zbus(signal)]
     pub async fn new_icon(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+}
+
+/// fd-only mock Item：只导出规范原文拼写的接口，用于验证寻址 fallback
+/// （kde 优先、fd 回退；ARCHITECTURE §2）。
+struct MockFdItem {
+    calls: Arc<MockCalls>,
+}
+
+#[interface(name = "org.freedesktop.StatusNotifierItem")]
+impl MockFdItem {
+    #[zbus(property)]
+    fn id(&self) -> String {
+        "mock-fd".into()
+    }
+    #[zbus(property)]
+    fn title(&self) -> String {
+        "Mock FD".into()
+    }
+    #[zbus(property)]
+    fn status(&self) -> String {
+        "Active".into()
+    }
+    #[zbus(property)]
+    fn icon_name(&self) -> String {
+        "edit-copy".into()
+    }
+
+    async fn activate(&self, x: i32, y: i32) {
+        self.calls.record(format!("fd activate {x} {y}"));
+    }
+    async fn secondary_activate(&self, x: i32, y: i32) {
+        self.calls.record(format!("fd secondary {x} {y}"));
+    }
+    async fn scroll(&self, delta: i32, orientation: &str) {
+        self.calls
+            .record(format!("fd scroll {delta} {orientation}"));
+    }
 }
 
 type MenuNode = (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>);
@@ -868,6 +906,77 @@ fn lifecycle() {
         calls.contains("secondary 0 0") && calls.contains("scroll -3 vertical")
     }));
     assert!(wait_until(3000, || calls.contains("scroll 1 horizontal")));
+
+    // fd-only Item：寻址 fallback——kde 调用失败后经 fd 回退成功
+    // （属性读取 GetAll/Get 与交互调用共用同一策略；ARCHITECTURE §2）
+    let rt3 = TestRt::new();
+    let calls3 = Arc::new(MockCalls::default());
+    let calls3_for_item = calls3.clone();
+    let conn3 = rt3.block_on(async move {
+        let conn3 = Connection::session().await.expect("session bus");
+        conn3
+            .object_server()
+            .at(
+                MOCK_ITEM_PATH,
+                MockFdItem {
+                    calls: calls3_for_item,
+                },
+            )
+            .await
+            .unwrap();
+        conn3.request_name(MOCK_FD_ID).await.unwrap();
+        conn3
+    });
+    let reg3 = conn3.clone();
+    rt3.block_on(async move {
+        reg3.call_method(
+            Some("org.kde.StatusNotifierWatcher"),
+            "/StatusNotifierWatcher",
+            Some(WATCHER_IFACE),
+            "RegisterStatusNotifierItem",
+            &MOCK_FD_ID,
+        )
+        .await
+        .unwrap();
+    });
+    assert!(
+        eventually_recv(&mut rx, 3000, |ev| matches!(
+            ev,
+            TrayEvent::Added(id) if id == MOCK_FD_ID
+        )),
+        "expected Added({MOCK_FD_ID})"
+    );
+    let fd_item = handle
+        .item(&MOCK_FD_ID.to_string())
+        .expect("fd-only item read");
+    assert_eq!(fd_item.ident, "mock-fd");
+    assert_eq!(fd_item.title.as_deref(), Some("Mock FD"));
+    assert_eq!(fd_item.status, TrayStatus::Active);
+    assert_eq!(fd_item.icon, IconSource::Name("edit-copy".into()));
+    match handle.left_click(&MOCK_FD_ID.to_string()) {
+        Ok(InteractionOutcome::Dispatched) => {}
+        other => panic!("fd-only left_click should dispatch via fallback, got {other:?}"),
+    }
+    assert!(eventually_recv(&mut rx, 3000, |ev| matches!(
+        ev,
+        TrayEvent::InteractionResult { id, op: InteractionOp::Activate, result: Ok(()) } if id == MOCK_FD_ID
+    )));
+    handle.middle_click(&MOCK_FD_ID.to_string()).unwrap();
+    handle.scroll_down_by(&MOCK_FD_ID.to_string(), 2).unwrap();
+    assert!(wait_until(3000, || {
+        calls3.contains("fd activate 0 0")
+            && calls3.contains("fd secondary 0 0")
+            && calls3.contains("fd scroll 2 vertical")
+    }));
+    // fd-only Item 下线 → Removed
+    drop(conn3);
+    assert!(
+        eventually_recv(&mut rx, 3000, |ev| matches!(
+            ev,
+            TrayEvent::Removed(id) if id == MOCK_FD_ID
+        )),
+        "expected Removed({MOCK_FD_ID})"
+    );
 
     // 变更通告：New* 信号与 PropertiesChanged 同窗口合并为单次 Changed
     // （双注册已并入同一 id：信号按（属主唯一名, 对象路径）命中 MOCK_ID）

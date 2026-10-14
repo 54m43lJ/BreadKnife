@@ -7,7 +7,7 @@ use std::ops::Deref;
 
 use zbus::zvariant::{OwnedValue, Value};
 
-use crate::dbus::{bus::BusCenter, ITEM_IFACE_KDE, PROPS_IFACE};
+use crate::dbus::{bus::BusCenter, ITEM_IFACE_FD, ITEM_IFACE_KDE, PROPS_IFACE};
 use crate::tracker::ItemEntry;
 use crate::{IconSource, Pixmap, ToolTip, TrayCategory, TrayError, TrayItem, TrayStatus};
 
@@ -20,15 +20,26 @@ pub(crate) async fn fetch_item(bus: &BusCenter, entry: &ItemEntry) -> Result<Tra
     Ok(tray_item_from_props(entry, &props))
 }
 
-/// GetAll（前缀策略见 ARCHITECTURE §2：发起请求一律只用 org.kde 前缀）。
+/// GetAll（寻址 fallback——kde 优先、fd 回退，超时即止；ARCHITECTURE §2；
+/// 双级探测第二级，§4.1.2）。
 pub(crate) async fn read_all(
     bus: &BusCenter,
     service: &str,
     path: &str,
 ) -> Result<HashMap<String, OwnedValue>, TrayError> {
     let kde = ITEM_IFACE_KDE.to_string();
-    bus.call::<HashMap<String, OwnedValue>, _>(service, path, PROPS_IFACE, "GetAll", &kde)
+    match bus
+        .call::<HashMap<String, OwnedValue>, _>(service, path, PROPS_IFACE, "GetAll", &kde)
         .await
+    {
+        Err(e @ TrayError::Timeout { .. }) => Err(e),
+        Err(_) => {
+            let fd = ITEM_IFACE_FD.to_string();
+            bus.call::<HashMap<String, OwnedValue>, _>(service, path, PROPS_IFACE, "GetAll", &fd)
+                .await
+        }
+        Ok(props) => Ok(props),
+    }
 }
 
 /// 注册期路由探测：Menu 属性（对象路径/字符串两形态）与 ItemIsMenu。
@@ -52,16 +63,27 @@ pub(crate) async fn probe_routing(
     (menu, menu_only)
 }
 
-/// 单属性读取（Get）：读取失败 → None。
+/// 单属性读取（Get，寻址 fallback——kde 优先、fd 回退，超时即止）；
+/// 读取失败 → None。
 async fn read_prop(
     bus: &BusCenter,
     service: &str,
     path: &str,
     name: &str,
 ) -> Result<Option<OwnedValue>, TrayError> {
-    let body = (ITEM_IFACE_KDE, name);
-    let v: OwnedValue = bus.call(service, path, PROPS_IFACE, "Get", &body).await?;
-    Ok(Some(v))
+    match bus
+        .call::<OwnedValue, _>(service, path, PROPS_IFACE, "Get", &(ITEM_IFACE_KDE, name))
+        .await
+    {
+        Err(e @ TrayError::Timeout { .. }) => Err(e),
+        Err(_) => {
+            let v: OwnedValue = bus
+                .call(service, path, PROPS_IFACE, "Get", &(ITEM_IFACE_FD, name))
+                .await?;
+            Ok(Some(v))
+        }
+        Ok(v) => Ok(Some(v)),
+    }
 }
 
 /// 属性集 → TrayItem（ARCHITECTURE §3.3 字段表）。

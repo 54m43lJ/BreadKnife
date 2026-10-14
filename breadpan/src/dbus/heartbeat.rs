@@ -3,7 +3,10 @@
 use std::time::Duration;
 
 use crate::dbus::bus::BusCenter;
-use crate::dbus::{DBUS_IFACE, DBUS_PATH, DBUS_SERVICE, ITEM_IFACE_KDE, PROPS_IFACE};
+use crate::dbus::{
+    DBUS_IFACE, DBUS_PATH, DBUS_SERVICE, ITEM_IFACE_FD, ITEM_IFACE_KDE, PROPS_IFACE,
+};
+use crate::TrayError;
 
 /// 探测周期（库内定值）。
 pub(crate) const HEARTBEAT_PERIOD: Duration = Duration::from_secs(5);
@@ -49,13 +52,14 @@ pub(crate) async fn heartbeat_task(bus: BusCenter, period: Duration) {
             Ok(_) => {}
         }
 
-        // 逐 Item 轻量读取（并发），结果仅写入登记簿记
+        // 逐 Item 轻量读取（并发，寻址 fallback——kde 优先、fd 回退，超时即止），
+        // 结果仅写入登记簿记
         let entries = bus.tracker.read().unwrap().all();
         let mut joins = Vec::with_capacity(entries.len());
         for entry in entries {
             let bus2 = bus.clone();
             joins.push(bus.rt.spawn(async move {
-                let ok = bus2
+                let ok = match bus2
                     .call::<zbus::zvariant::OwnedValue, _>(
                         &entry.service,
                         &entry.path,
@@ -64,7 +68,20 @@ pub(crate) async fn heartbeat_task(bus: BusCenter, period: Duration) {
                         &(ITEM_IFACE_KDE, "Status"),
                     )
                     .await
-                    .is_ok();
+                {
+                    Err(TrayError::Timeout { .. }) => false,
+                    Err(_) => bus2
+                        .call::<zbus::zvariant::OwnedValue, _>(
+                            &entry.service,
+                            &entry.path,
+                            PROPS_IFACE,
+                            "Get",
+                            &(ITEM_IFACE_FD, "Status"),
+                        )
+                        .await
+                        .is_ok(),
+                    Ok(_) => true,
+                };
                 (entry.service.clone(), ok)
             }));
         }

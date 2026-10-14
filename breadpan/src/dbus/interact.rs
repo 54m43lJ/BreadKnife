@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::dbus::bus::BusCenter;
 use crate::dbus::menu;
-use crate::dbus::{DBUSMENU_IFACE, ITEM_IFACE_KDE};
+use crate::dbus::{DBUSMENU_IFACE, ITEM_IFACE_FD, ITEM_IFACE_KDE};
 use crate::events::{InteractionOp, TrayEvent};
 use crate::tracker::ItemEntry;
 use crate::{InteractionOutcome, TrayError};
@@ -153,8 +153,9 @@ where
     });
 }
 
-/// SNI 定位方法（Activate / SecondaryActivate / ContextMenu）：发起请求一律只用
-/// org.kde 前缀（ARCHITECTURE §2）；超时即止，不做重试。
+/// SNI 定位方法（Activate / SecondaryActivate / ContextMenu）：寻址 fallback——
+/// kde 优先、fd 回退（ARCHITECTURE §2）；超时即止；两前缀俱败时合并上报两侧错误
+/// （只报末次会掩盖 kde 侧真因）。
 async fn invoke_xy(
     bus: &BusCenter,
     entry: &ItemEntry,
@@ -162,23 +163,59 @@ async fn invoke_xy(
     x: i32,
     y: i32,
 ) -> Result<(), TrayError> {
-    bus.call::<(), _>(&entry.service, &entry.path, ITEM_IFACE_KDE, method, &(x, y))
+    match bus
+        .call::<(), _>(&entry.service, &entry.path, ITEM_IFACE_KDE, method, &(x, y))
         .await
+    {
+        Ok(()) => Ok(()),
+        Err(e @ TrayError::Timeout { .. }) => Err(e),
+        Err(kde) => match bus
+            .call::<(), _>(&entry.service, &entry.path, ITEM_IFACE_FD, method, &(x, y))
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(e @ TrayError::Timeout { .. }) => Err(e),
+            Err(fd) => Err(TrayError::Protocol(format!(
+                "{method} failed on both prefixes: org.kde: {kde}; org.freedesktop: {fd}"
+            ))),
+        },
+    }
 }
 
-/// Scroll(delta, orientation)：同前缀策略。
+/// Scroll(delta, orientation)：同寻址 fallback 策略。
 async fn invoke_scroll(
     bus: &BusCenter,
     entry: &ItemEntry,
     delta: i32,
     orient: &str,
 ) -> Result<(), TrayError> {
-    bus.call::<(), _>(
-        &entry.service,
-        &entry.path,
-        ITEM_IFACE_KDE,
-        "Scroll",
-        &(delta, orient),
-    )
-    .await
+    match bus
+        .call::<(), _>(
+            &entry.service,
+            &entry.path,
+            ITEM_IFACE_KDE,
+            "Scroll",
+            &(delta, orient),
+        )
+        .await
+    {
+        Ok(()) => Ok(()),
+        Err(e @ TrayError::Timeout { .. }) => Err(e),
+        Err(kde) => match bus
+            .call::<(), _>(
+                &entry.service,
+                &entry.path,
+                ITEM_IFACE_FD,
+                "Scroll",
+                &(delta, orient),
+            )
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(e @ TrayError::Timeout { .. }) => Err(e),
+            Err(fd) => Err(TrayError::Protocol(format!(
+                "Scroll failed on both prefixes: org.kde: {kde}; org.freedesktop: {fd}"
+            ))),
+        },
+    }
 }
