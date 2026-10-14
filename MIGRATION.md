@@ -99,8 +99,9 @@ src/
    B. `MenuSnapshot → GMenuModel + SimpleActionGroup + PopoverMenu`（复用 GTK 渲染与
    键盘导航，但子菜单懒加载难以按需触发，工作量相当、懒加载体验更差）。
 2. **图标文件名回归**：breadpan 对"`IconName` 为文件路径"（Ayatana 生态，如
-   clash-verge）回退 `image-missing`（见 IMPLEMENTATION §6）；需确认 astal 旧行为，
-   若不接受则属 breadpan 渲染层增强（约 0.5 人日，不在此应用侧估算内）。
+   clash-verge）已端到端支持（`IconSource::Path` → 文件纹理，见
+   [breadpan/ARCHITECTURE.html §4.3](breadpan/ARCHITECTURE.html#sec-4-3)）；
+   迁移无此项工作量，真机联调时顺带确认即可。
 3. **同步接口阻塞 GTK 主线程**：`items()/_click()/menu()` 经内部同步桥等待 DBus，
    单次受 `timeout_ms`（默认 2s）约束；病态 Item 可能短暂卡 UI。启动期可接受，
    后续可把交互卸载到工作线程（`TrayHandle` 是 Send+Sync）。
@@ -110,8 +111,10 @@ src/
    仅记录降级，还是监听后重启 `Tray::start`（+0.5 人日候选）。
 6. **`MenuChanged` 刷新语义**：弹窗打开期间需重取菜单（根层或已展开路径）并重建；
    当前 astal 版无此逻辑。
-7. **双注册双 id**（IMPLEMENTATION §6）：个别应用会出两张图标，属库已知限制，
-   迁移后需真机观察是否影响使用。
+7. **双注册并入**：同一对象以不同形态重复报到（如知名名 + Ayatana 纯路径）由库内
+   自愈并入单一 id（临时唯一名 id 升级为知名名时投递 `NameChanged`），不再出两张
+   图标；迁移后按事件语义处理 `NameChanged` 重键即可（见
+   [breadpan/ARCHITECTURE.html §4.2](breadpan/ARCHITECTURE.html#sec-4-2)）。
 8. demo-tray 目前只有文档、无实现（示例仅 `breadpan/examples/*`）；不影响本迁移，
    但"验收基准"操作矩阵可借鉴其 ARCHITECTURE §7。
 
