@@ -32,7 +32,7 @@
 
 examples/                # 唯一示例目录：可运行的用法实例（README「实例代码」表）
 ├── minimal.rs           # 最小消费方：start → 消费事件流 → 打印快照与事件
-└── interactions.rs      # 交互与菜单：activate / scroll / menu()·menu_expand 现场读取 / menu_activate</code></pre>
+└── interactions.rs      # 交互与菜单 REPL：持续监听事件流；可随时查看 item / menu 现状，并下发交互（activate / scroll / menu_activate 等）</code></pre>
 <ul class="note">
   <li>分组约定：dbus/ 收拢 DBus 域实现——总线连接、Watcher 服务与协议面、存活探测、dbusmenu 读取、交互路由；</li>
   <li>登记簿记与属性取数（tracker、props）留顶层；</li>
