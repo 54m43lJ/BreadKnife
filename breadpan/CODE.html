@@ -40,13 +40,13 @@ examples/                # 唯一示例目录：可运行的用法实例（READM
 </ul>
 <ul class="note">
   <li>内部线程固定为 1——宿主 tokio CurrentThread 运行时，DBus 收发（zbus tokio 特性）、事件组装与投递全部在此异步线程完成，不创建线程池；</li>
-  <li>事件通道为单实例 tokio mpsc（start 交付唯一 Receiver；消费端与执行器无关），消费端由消费方经 glib::spawn_future_local 驱动，库不创建 GLib 上下文。</li>
+  <li>事件通道与消费端约定见 ARCHITECTURE §3.2。</li>
 </ul>
 
 <h2 id="sec-2">2. 通用约定</h2>
 <ul>
-  <li><strong>列表输出按 id 排序</strong>：在册条目物化为列表时按 id 升序排序后交付（快照构造 <a href="#sec-4-1-3">§4.1.3</a>、<code>items()</code>（<a href="#sec-3-handle">§3.2</a>）、协议面 <a href="#sec-3-dbus-iface">§3.6.4</a>），与内部迭代 / 并发完成顺序无关。</li>
-  <li><strong>零缓存 · 现场读取</strong>：库内不保留 Item/Menu 内容——逐次现场读取交付；事件只报事实、不携带数据。</li>
+  <li>通用约定（列表输出按 id 排序、零缓存 · 现场读取、公开面全同步）统一见
+  <a href="ARCHITECTURE.html#sec-2">ARCHITECTURE.html §2</a>；本文件不复述，各章按需引用。</li>
 </ul>
 
 <h2 id="sec-3">3. 内部类型与方法签名</h2>
@@ -90,7 +90,7 @@ impl TrayHandle {
         T: Send + 'static,
         F: FnOnce(BusCenter) -&gt; Fut + Send + 'static,
         Fut: Future&lt;Output = Result&lt;T, TrayError&gt;&gt; + Send + 'static;
-    // 同步桥：命令 future 派发内部运行时 + std::sync::mpsc 阻塞等待，守卫上限 sync_guard_ms（超时 → Hung）；阻塞等待一律走 std——tokio blocking 访问器在异步上下文 panic；禁 rt.block_on（§4.5.1）
+    // 同步桥：命令 future 派发内部运行时 + std::sync::mpsc 阻塞等待，守卫上限 sync_guard_ms（语义见 ARCHITECTURE §4.2）；阻塞等待一律走 std——tokio blocking 访问器在异步上下文 panic；禁 rt.block_on（§4.5.1）
 }
 impl Drop for TrayHandle {
     fn drop(&amp;mut self);
@@ -123,7 +123,7 @@ impl EventQueue {
 
 <h3 id="sec-3-tracker">3.4. tracker.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub(crate) struct ItemEntry {
-    pub service: String,   // 服务名（= TrayItemId；知名名或唯一名皆可，临时唯一名占位可升级，§4.3.1）
+    pub service: String,   // 服务名（= TrayItemId；知名名或唯一名皆可，§4.3.1）
     pub unique: String,    // 属主唯一名（信号发送者恒为唯一名、与服务名可能不一致——注册时
                            // GetNameOwner 把服务名解析为属主唯一名存此，即信号归属匹配键，§4.3.1）
     pub path: String,      // Item 对象路径（交互寻址用）
@@ -371,13 +371,13 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │              └── watcher::WatcherService::start(bus)?
 │                   ├── bus.conn.request_name_with_flags(WATCHER_NAME, RequestNameFlags::DoNotQueue.into())
 │                   │    // 名申请必须经 Connection API——raw RequestName 不建立该名入站调用路由
-│                   └── 已被他人持有？ → NameTaken（多 Watcher 不能共存）
+│                   └── 已被他人持有？ → NameTaken
 ├── ready_rx.try_recv()（轮询至 bootstrap 结果）
 │    // 引导总时限 max(10×timeout_ms, 10s) 守护；超时/失败 → join 内部线程并返回 Err
 └── return (TrayHandle{shared: Arc&lt;RuntimeShared&gt;}, 事件通道 Receiver)</code></pre>
 
 <ul class="note">
-  <li>Watcher 名最后申请——申请前报到无从发生，快照投递后所有报到以增量事件衔接（首事件即快照、无重叠无缺口）；若先申请名，等待 Watcher 出现的 Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> 抢在快照之前——实测复现；</li>
+  <li>Watcher 名最后申请——申请前报到无从发生，快照投递后所有报到以增量事件衔接；若先申请名，等待 Watcher 出现的 Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> 抢在快照之前——实测复现；</li>
   <li>订阅（spawn_signal_tasks）与存活探测（heartbeat_task）先于申请名同理：名在位即可能收到信号与超时，须先就位才不丢；</li>
   <li>节流任务（debounce_task）不在此列——其交付始于快照之后，随栅栏置位启动（§4.2）；</li>
   <li>总线上未跟踪对象的信号被空过滤（可忽略）。</li>
@@ -408,7 +408,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 └── bus.take_deferred_removed() → Vec&lt;TrayItemId&gt;（逐条 events.send(Removed(id))）
      // 仅快照内 id 补投；快照外按从未出现丢弃</code></pre>
 <ul class="note">
-  <li>栅栏是各事件源「首事件即快照、无重叠无缺口」的兜底：报到（§4.3.1）、NameOwnerChanged（§4.3.2，同名换主与死亡清理）、菜单变更（§4.4.2）按栅栏前/后记录行为分支；</li>
+  <li>栅栏是快照衔接（见 ARCHITECTURE §4.2）的兜底：报到（§4.3.1）、NameOwnerChanged（§4.3.2，同名换主与死亡清理）、菜单变更（§4.4.2）按栅栏前/后记录行为分支；</li>
   <li>变更节流任务在置位后才启动（§4.2），Changed 天然不早于快照；</li>
   <li>栅栏为防御性——申请时序（§4.1.1）使栅栏前报到在正常路径上无从发生。</li>
 </ul>
@@ -448,7 +448,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
      └── ItemTracker::upsert(ItemEntry) → Upsert
           // 字段匹配两轮 lookup 自愈并入（同一对象/连接不允许双条目）：①注册名 == service（知名名同名重启竞态；唯一名形态 == 临时条目）②发送者唯一名 == unique（同连接先前以唯一名临时注册）；命中 → 原地刷新（path/menu/menu_only/alive 以最新报到为准），两轮未命中 → 新建
           ├── service 升级（临时唯一名 → 知名名）？ → events.send(NameChanged{old, new})
-          │    // 同一对象 id 重键：不发 Removed/Added；是否重载数据由消费方裁断
+          │    // 同一对象 id 重键，不发 Removed/Added
           └── 新建 &amp;&amp; announce &amp;&amp; 快照栅栏已置位？
                ├── 是 → iface::emit_registered(service)；events.send(Added(id))
                └── 否 → 静默入册
@@ -464,7 +464,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │    │    // 路由字段就地重探：新属主的 Menu 属性 / menu_only 探测一次
 │    ├── ItemTracker::update_routing(名字, Some(menu), Some(menu_only))
 │    └── 快照栅栏已置位？ → events.send(OwnerChanged(id))
-│         // 信息性事件，消费方无必做动作；栅栏前静默——重绑定已生效，快照即最新，不补投
+│         // 信息性事实（语义见 ARCHITECTURE §4.2）；栅栏前静默——重绑定已生效，快照即最新，不补投
 └── 否则 → 死亡清理（新属主 = ""）
      ├── ItemTracker::unregister(名字) → Vec&lt;ItemEntry&gt;
      │    // 按服务名或属主唯一名双条件命中；唯一名消失 → 该连接全部条目一并下线（含双注册并入的单一 id）
@@ -486,7 +486,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 └── menu::read_layer(bus, entry, parent)
      // 根层 parent=0，展开层 = entry_id；GetLayout 子树逐项转换，失败静默丢弃
      ├── bus.call(AboutToShow(parent))
-     │    // 常规前置；应答异常视为未变更
+     │    // 常规前置（应答语义见 ARCHITECTURE §3.5）
      ├── bus.call(GetLayout(parentId=parent, recursionDepth=1))
      │    // 懒加载：每次仅取一层
      ├── bus.call(GetGroupProperties)
@@ -519,15 +519,13 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
      └── Err(非超时) 无菜单 → return Err</code></pre>
 
 <ul class="note">
-  <li>libappindicator 系 Item 的 Activate 无处理器——XML 静态声明但分发 catch-all，不可预先探测（Introspect 说谎、探测调用会误触激活）；</li>
-  <li>左键出菜单是宿主侧既定策略：菜单由宿主经 dbusmenu 渲染，不依赖 Item 端激活；</li>
   <li>回退分支的失败形态为同步快失败，与超时无关。</li>
 </ul>
 
 <ul class="note">
   <li>命令 future 内每个执行步骤（DBus 调用）自持 <code>timeout_ms</code> 上界；</li>
-  <li>桥的阻塞等待受 <code>sync_guard_ms</code> 守卫（默认 30000 ms，推荐 ≥ <code>timeout_ms</code>×4 + 10s 以覆盖最长的多步流程——当前最长为 menu 流程 3 连调用）；</li>
-  <li>守卫到期 → <code>TrayError::Hung</code>：内部未在守卫内完成——运行时楔死或守卫配置过低，处置为重建或调大守卫（与 Timeout 的「对端慢，可重试」语义不同类）；</li>
+  <li>桥的阻塞等待受 <code>sync_guard_ms</code> 守卫（推荐值见 ARCHITECTURE §4.1）；</li>
+  <li>守卫到期 → <code>TrayError::Hung</code>（语义与处置见 ARCHITECTURE §4.2）；</li>
   <li>通道断开且已停机 → <code>Stopped</code>；</li>
   <li>守卫值不由执行路径推算——路径会变化，推算值静默失效。</li>
 </ul>
@@ -564,7 +562,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 
 <h4 id="sec-4-7-1">4.7.1. 所有权丢失（Displaced）</h4>
 <pre><code>内部: name_owner_changed_task 收到 NameOwnerChanged(Watcher 名, 属主 → "")
-     // 极罕见边缘路径：持有期外部顶替一律失败（DoNotQueue），仅总线层异常——总线守护重启、本进程连接被强制关闭等——可触发
+     // 极罕见边缘路径（触发条件见 ARCHITECTURE §3.7）
 ├── bus.is_stopping() || bus.is_stopped()？ → 忽略本信号
 │    // 停机路径主动释放名引发的 NOC 在此吞掉，不产生 Displaced
 ├── bus.report_displaced()
@@ -575,7 +573,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
      │    // 服务转停止形态，不再受理登记
      ├── events.send(Displaced)；events.close()
      └── return
-          // 终局报错：被其它 Watcher 取代；不重试、不强制夺回</code></pre>
+          // 终局报错（语义见 ARCHITECTURE §3.7）</code></pre>
 
 <h4 id="sec-4-7-2">4.7.2. 停机（shutdown）</h4>
 <pre><code>流程 shutdown()（TrayHandle::shutdown() / 最后一个实例的 TrayHandle::drop() → RuntimeShared::shutdown）
@@ -584,7 +582,6 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 ├── bus.is_stopped()？ → return
 │    // 幂等守卫
 ├── bus.set_stopped()
-│    // 此后 Handle 方法一律 Stopped
 ├── bus.begin_stopping()
 │    // 名释放引发的 NameOwnerChanged 不得触发 Displaced（§4.7.1）
 ├── request_stop → 内部线程 run() 的 stop 分支
@@ -599,20 +596,19 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 
 <h4 id="sec-4-7-3">4.7.3. Fatal（总线断连）</h4>
 <pre><code>内部: heartbeat_task 探测总线遇 IO 类错误 → bus.report_fatal(msg)（§4.6）
-     // 无现成连接断开回调：心跳每拍以 GetNameOwner(自身唯一名) 兼作总线存活探测；
-     // IO 类错误（InputOutput / Handshake / Connection）上报，超时视作繁忙跳过本拍
+     // 断开无回调可用；探测与错误分类见 §4.6（终局语义见 ARCHITECTURE §3.7）
 └── mod::run 的 fatal 分支（fatal_rx 通知到达）
      ├── watcher::release(bus)
      │    // 释放 Watcher 名——尽力而为：断连时名可能已随总线不可达
      ├── ItemTracker::clear()
      ├── bus.set_stopped()
      ├── events.send(Fatal(msg))；events.close()
-     │    // 终止宣告是最后一个事件；此后 Handle 方法一律 Stopped
-     └── 终局：不重试；重建由消费方决定</code></pre>
+     │    // 终止宣告（投递语义见 ARCHITECTURE §4.2）
+     └── 终局：不重试</code></pre>
 
 <h3 id="sec-4-8">4.8. 渲染直出（icon_paintable）</h3>
 <pre><code>流程 icon_paintable(&amp;IconSource) → gdk::Paintable
-     // GTK 主线程调用；三类失败统一回退 image-missing / 空纹理，不 panic
+     // GTK 主线程调用（失败回退见 ARCHITECTURE §4.1）
 ├── IconSource::Name？ → lookup_theme_icon(name)
 │    ├── gdk::Display::default()?
 │    │    // None → missing_icon()
