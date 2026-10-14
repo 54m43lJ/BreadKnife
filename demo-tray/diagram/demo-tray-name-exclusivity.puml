@@ -1,0 +1,34 @@
+@startuml demo-tray-name-exclusivity
+|测试台|
+start
+:claim;
+|demo-tray|
+:spawn 替身，申请同名;
+|总线名替身|
+if (名字已被持有？) then (是)
+  :拒绝申请;
+  |demo-tray|
+  :申请结论：被拒
+  （Tray 持有中，不可替换）;
+  |测试台|
+  :Tray 停机;
+  |demo-tray|
+  :再次 claim;
+  |总线名替身|
+  :替身持有成功;
+  |测试台|
+  :重新 Tray::start;
+  |breadpan|
+  if (名字已被持有？) then (是——替身持有中)
+    :NameTaken
+    （提示多 Watcher 不共存）;
+    stop
+  endif
+  :登记中心就位;
+  stop
+else (否)
+  :替身持有成功
+  （Tray 持有中不应发生）;
+  stop
+endif
+@enduml

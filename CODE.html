@@ -71,8 +71,8 @@ pub struct TrayUi {
 }
 
 impl Daemon {
-    pub fn start() -> Result&lt;Self, Error&gt;;
-    pub fn run(self) -> Result&lt;(), Error&gt;;   // 事件循环
+    pub fn start() -&gt; Result&lt;Self, Error&gt;;
+    pub fn run(self) -&gt; Result&lt;(), Error&gt;;   // 事件循环
     fn on_hyprland_event(&amp;mut self, ev: HyprlandEvent);
     fn on_control(&amp;mut self, cmd: ControlCommand);
     fn spawn_window(&amp;mut self, mon: MonitorId);

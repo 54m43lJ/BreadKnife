@@ -1,0 +1,15 @@
+@startuml demo-tray-startup
+participant 启动者
+participant "demo-tray" as dt
+participant breadpan
+
+启动者 -> dt: run()
+dt -> breadpan: Tray::start
+note right of breadpan
+  （登记中心就位 +
+  存量 Item 反向发现）
+end note
+breadpan --> dt: (Handle, 通道)
+dt -> dt: 首事件 Snapshot → 卡片流 + 日志
+dt -> breadpan: 注册演示 Item（测试台）
+@enduml

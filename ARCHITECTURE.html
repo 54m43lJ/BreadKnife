@@ -19,9 +19,10 @@
 <h3 id="sec-1-1">1.1. 文件结构</h3>
 <pre><code>breadknife/           # 项目群根（应用，二进制 bread）
 └── breadpan/         # 托盘协议栈单库（内置登记中心 + 逻辑 Host API + GTK 整合）</code></pre>
-<p class="diagram-note">
-  单一仓库，breadknife 为根，内嵌成员库。各成员的内部文件结构见各自项目的 CODE.html，父级不展开。
-</p>
+<ul class="note">
+  <li>单一仓库，breadknife 为根，内嵌成员库；</li>
+  <li>各成员的内部文件结构见各自项目的 CODE.html，父级不展开。</li>
+</ul>
 <h3 id="sec-1-2">1.2. 依赖视角</h3>
 <pre><code>
    +-------------+
@@ -35,10 +36,10 @@
    |  breadpan   |
    +-------------+
 </code></pre>
-<p class="diagram-note">
-  托盘协议栈收敛为单库：Watcher 登记中心并入 breadpan（原独立库解散），登记中心与逻辑 Host
-  同进程组装，不经总线互认。依赖关系只在依赖方文档表达，库文档不点名其他项目。
-</p>
+<ul class="note">
+  <li>托盘协议栈收敛为单库：Watcher 登记中心并入 breadpan（原独立库解散），登记中心与逻辑 Host 同进程组装，不经总线互认；</li>
+  <li>依赖关系只在依赖方文档表达，库文档不点名其他项目。</li>
+</ul>
 
 <h2 id="sec-2">2. 技术栈</h2>
 <table>
@@ -55,16 +56,18 @@
                 |            bread (daemon)              |
                 |                                        |
  Hyprland IPC   |  事件循环                              |
- .socket2.sock --->  workspace / window-info /           |
-                 |  tray / control-center                 | --> breadpan（托盘总线互动全权代理）
-  control socket |                                        | --> DBus（应用自身服务：通知守护 /
-  bread.sock   --->  样式系统 (CSS 变量 + RELOAD)         |     UPower / NetworkManager / MPRIS）
-                +----------------------------------------+ --> pamixer / brightnessctl / ddcutil
+ .socket2.sock ---&gt;  workspace / window-info /           |
+                 |  tray / control-center                 | --&gt; breadpan（托盘总线互动全权代理）
+  control socket |                                        | --&gt; DBus（应用自身服务：通知守护 /
+  bread.sock   ---&gt;  样式系统 (CSS 变量 + RELOAD)         |     UPower / NetworkManager / MPRIS）
+                +----------------------------------------+ --&gt; pamixer / brightnessctl / ddcutil
 </code></pre>
-<p class="diagram-note">
-  Hyprland IPC 为只读监听，驱动界面更新；托盘域总线互动全部在 breadpan 库内，应用侧零 DBus 词汇；
-  服务缺失行为：入口组件（电池/网络）对应服务缺失时自动隐藏，弹出面板内操作项（媒体/音量/亮度）后端缺失时灰置并提示；外部工具是音量与亮度调节的后端。
-</p>
+<ul class="note">
+  <li>Hyprland IPC 为只读监听，驱动界面更新；</li>
+  <li>托盘域总线互动全部在 breadpan 库内，应用侧零 DBus 词汇；</li>
+  <li>服务缺失行为：入口组件（电池/网络）对应服务缺失时自动隐藏，弹出面板内操作项（媒体/音量/亮度）后端缺失时灰置并提示；</li>
+  <li>外部工具是音量与亮度调节的后端。</li>
+</ul>
 
 <h2 id="sec-3">3. 运行模型</h2>
 <table>
@@ -110,13 +113,13 @@
 <pre><code>
   启动者          bread(daemon)        breadpan         Hyprland
     |                  |                 |                |
-    |---- 启动 ------->|                 |                |
-    |                  |-- Tray::start ->|
+    |---- 启动 -------&gt;|                 |                |
+    |                  |-- Tray::start -&gt;|
     |                  |   (登记中心就位 + 存量 Item 反向发现)
-    |                  |<-- Handle+通道 --|
-    |                  |-- 建立监听 --------------------->|
-    |                  |-- 扫描显示器 -------------------->|
-    |                  |<-- 显示器清单 ----------------------- ------------|
+    |                  |&lt;-- Handle+通道 --|
+    |                  |-- 建立监听 ---------------------&gt;|
+    |                  |-- 扫描显示器 --------------------&gt;|
+    |                  |&lt;-- 显示器清单 ----------------------- ------------|
     |                  |== 逐屏创建 Window（layer-shell 锚定）==           |
     |                  |-- 启动控制 Socket 监听                            |
     |                  |-- 进入事件循环                                    |
@@ -126,12 +129,12 @@
 <pre><code>
   Hyprland          bread(daemon)        GTK 窗口
     |                    |                  |
-    |-- monitoradded --->|                  |
-    |                    |-- 创建 Window -->|（锚定 Top|Left|Right，宽度=屏宽）
-    |                    |<------- -------- | 就绪
+    |-- monitoradded ---&gt;|                  |
+    |                    |-- 创建 Window --&gt;|（锚定 Top|Left|Right，宽度=屏宽）
+    |                    |&lt;------- -------- | 就绪
     |                    |                  |
-    |-- monitorremoved ->|                  |
-    |                    |-- 销毁 Window -->|
+    |-- monitorremoved -&gt;|                  |
+    |                    |-- 销毁 Window --&gt;|
     |                    |-- 更新映射表     |
 </code></pre>
 
@@ -139,42 +142,42 @@
 <pre><code>
   调用方          bread.sock          bread(daemon)        样式系统
     |                 |                    |                  |
-    |-- "RELOAD\n" -->|                    |                  |
-    |                 |-- 指令分发 ------->|                  |
+    |-- "RELOAD\n" --&gt;|                    |                  |
+    |                 |-- 指令分发 -------&gt;|                  |
     |                 |                    |-- 重读配置       |
-    |                 |                    |-- 重读 CSS ----->|
-    |                 |                    |<-- 变量生效 -----|
+    |                 |                    |-- 重读 CSS -----&gt;|
+    |                 |                    |&lt;-- 变量生效 -----|
 </code></pre>
 
 <h3 id="sec-5-4">5.4. 托盘右键菜单</h3>
 <pre><code>
   用户          breadknife UI           breadpan          托盘 Item
     |                 |                     |                  |
-    |-- 右键 -------->|                     |                  |
-    |                 |-- interact -------->|
+    |-- 右键 --------&gt;|                     |                  |
+    |                 |-- interact --------&gt;|
     |                 |   (RightClick 信号)
-    |                 |                     |-- AboutToShow -->|（路由 Menu 流程）
-    |                 |                     |<-- 需要更新? -----|
-    |                 |                     |-- GetLayout ---->|
-    |                 |                     |<-- 最新全量布局 -|
-    |                 |<-- Outcome::Menu ---|
+    |                 |                     |-- AboutToShow --&gt;|（路由 Menu 流程）
+    |                 |                     |&lt;-- 需要更新? -----|
+    |                 |                     |-- GetLayout ----&gt;|
+    |                 |                     |&lt;-- 最新全量布局 -|
+    |                 |&lt;-- Outcome::Menu ---|
     |                 |== GTK 渲染弹出 =====|                  |
-    |-- 点条目 ------>|                     |                  |
-    |                 |-- menu_activate --->|-- Event -------->|
-    |                 |<-- 受理结论 --------|<-- 异步回执 -----|
-    |                 |<-- 受理结论 --------|<-- 异步回执 -----|
-    |                 |<-- 受理结论 --------|<-- 异步回执 -----|
+    |-- 点条目 ------&gt;|                     |                  |
+    |                 |-- menu_activate ---&gt;|-- Event --------&gt;|
+    |                 |&lt;-- 受理结论 --------|&lt;-- 异步回执 -----|
+    |                 |&lt;-- 受理结论 --------|&lt;-- 异步回执 -----|
+    |                 |&lt;-- 受理结论 --------|&lt;-- 异步回执 -----|
 </code></pre>
 
 <h3 id="sec-5-5">5.5. 通知到达</h3>
 <pre><code>
   任意应用        DBus               breadknife            通知中心 UI
     |               |                     |                     |
-    |-- Notify ---->|                     |                     |
-    |               |-- 通知参数 -- ----->|                     |
+    |-- Notify ----&gt;|                     |                     |
+    |               |-- 通知参数 -- -----&gt;|                     |
     |               |   (org.freedesktop  |                     |
     |               |    .Notifications)  |                     |
-    |               |                     |-- 缓存入列表 ------>|
+    |               |                     |-- 缓存入列表 ------&gt;|
     |               |                     |== 入口计数刷新 =====|
 </code></pre>
 
