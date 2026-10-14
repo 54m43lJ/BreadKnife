@@ -17,24 +17,36 @@ pub enum TrayEvent {
     Snapshot { items: Vec<TrayItem> },
     /// 出现：数据现场读取（`item(id)`）。
     Added(crate::TrayItemId),
-    /// 服务名消失；同名重现（应用重启）视为新 Item。
+    /// 服务名消失（`NameOwnerChanged` 且 new_owner 为空）；名字腾空后重现（应用重启）
+    /// 视为新 Item（Added）；名字未腾空的属主直接更替 → OwnerChanged。
     Removed(crate::TrayItemId),
     /// 变更通告（窗口合并，不携带数据）：重读 `item()`/`items()` 取最新。
     Changed(crate::TrayItemId),
-    /// dbusmenu 布局/属性变更信号到达；不代为重拉，是否重取由消费方决定。
+    /// dbusmenu 布局/属性变更信号到达（窗口合并）；不代为重拉，是否重取由消费方决定。
     MenuChanged(crate::TrayItemId),
+    /// 双注册并入：临时唯一名 id 升级为知名名 id——同一对象 id 重键，
+    /// 对象生死不变（旧 id 不发 Removed）；是否重载数据由消费方裁断。
+    NameChanged {
+        old: crate::TrayItemId,
+        new: crate::TrayItemId,
+    },
+    /// 同名换主：Item 服务名的属主更替（`NameOwnerChanged` 新属主非空）——
+    /// id 与对象生死不变，簿记属主重绑定、路由字段就地重探；
+    /// 属主更替对消费方无可感知影响：信息性事件，无必做动作。
+    OwnerChanged(crate::TrayItemId),
     /// 交互调用的异步回执。
     InteractionResult {
         id: crate::TrayItemId,
         op: InteractionOp,
         result: Result<(), String>,
     },
-    /// 登记中心所有权丢失（被其它 Watcher 取代，ARCHITECTURE §2.8）：
+    /// 登记中心所有权丢失（被其它 Watcher 取代）——触发与终局语义见 ARCHITECTURE §3.7：
     /// 极罕见边缘路径；终局报错，待遇同 Fatal；不重试不夺回。
     Displaced,
     /// 内部过程叙述（反向发现、重扫描等）。
     Narration(String),
-    /// 终止宣告：最后一个事件，此后 Handle 方法一律返回 Stopped。
+    /// 终止宣告：总线断连（触发与时序见 ARCHITECTURE §3.7）；最后一个事件，
+    /// 此后 Handle 方法一律返回 Stopped。
     Fatal(String),
 }
 

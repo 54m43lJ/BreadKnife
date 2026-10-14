@@ -26,6 +26,7 @@ pub(crate) struct BusParts {
     pub(crate) tracker: Arc<RwLock<ItemTracker>>,
     pub(crate) events: Arc<EventQueue>,
     pub(crate) pending: Arc<Mutex<HashSet<TrayItemId>>>,
+    pub(crate) pending_menu: Arc<Mutex<HashSet<TrayItemId>>>,
     pub(crate) config: TrayConfig,
     pub(crate) stopping: Arc<AtomicBool>,
     pub(crate) stopped: Arc<AtomicBool>,
@@ -45,6 +46,7 @@ impl BusParts {
             tracker: Arc::new(RwLock::new(ItemTracker::default())),
             events,
             pending: Arc::new(Mutex::new(HashSet::new())),
+            pending_menu: Arc::new(Mutex::new(HashSet::new())),
             config,
             stopping: Arc::new(AtomicBool::new(false)),
             stopped: Arc::new(AtomicBool::new(false)),
@@ -63,9 +65,12 @@ pub(crate) struct BusCenter {
     pub(crate) rt: Handle,
     /// 逐调用超时（= config.timeout_ms）。
     pub(crate) timeout: Duration,
+    /// 同步桥阻塞守卫上限（= config.sync_guard_ms）。
+    sync_guard: Duration,
     pub(crate) tracker: Arc<RwLock<ItemTracker>>,
     pub(crate) events: Arc<EventQueue>,
     pub(crate) pending: Arc<Mutex<HashSet<TrayItemId>>>,
+    pub(crate) pending_menu: Arc<Mutex<HashSet<TrayItemId>>>,
     pub(crate) config: TrayConfig,
     stopping: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
@@ -83,11 +88,13 @@ impl BusCenter {
     pub(crate) fn new(parts: BusParts, conn: zbus::Connection, rt: Handle) -> Self {
         Self {
             timeout: Duration::from_millis(parts.config.timeout_ms.max(1)),
+            sync_guard: Duration::from_millis(parts.config.sync_guard_ms.max(1)),
             conn,
             rt,
             tracker: parts.tracker,
             events: parts.events,
             pending: parts.pending,
+            pending_menu: parts.pending_menu,
             config: parts.config,
             stopping: parts.stopping,
             stopped: parts.stopped,
@@ -170,7 +177,8 @@ impl BusCenter {
     // ── 同步桥：公开同步方法 → 运行时受理 ──
 
     /// 把异步指令投递进库内运行时执行，调用线程阻塞等待。
-    /// 内部各 DBus 调用已带超时；此处另设宽松守护上限，防意外悬挂。
+    /// 内部各 DBus 调用已带 timeout_ms；此处另按 sync_guard_ms 设阻塞守卫上限，
+    /// 守卫到期 → Hung（运行时楔死或守卫配置过低）。
     pub(crate) fn cmd<T, F>(&self, f: F) -> Result<T, TrayError>
     where
         T: Send + 'static,
@@ -183,14 +191,14 @@ impl BusCenter {
         self.rt.spawn(async move {
             let _ = tx.send(f.await);
         });
-        let guard = self.timeout.mul_f64(4.0) + Duration::from_secs(10);
+        let guard = self.sync_guard;
         match rx.recv_timeout(guard) {
             Ok(v) => v,
-            // 通道断开 + 已停机 → Stopped；否则视为守护超时
+            // 通道断开 + 已停机 → Stopped；否则视为守卫到期（无进展）
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) if self.is_stopped() => {
                 Err(TrayError::Stopped)
             }
-            Err(_) => Err(TrayError::Timeout {
+            Err(_) => Err(TrayError::Hung {
                 ms: guard.as_millis() as u64,
             }),
         }

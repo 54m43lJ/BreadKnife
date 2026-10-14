@@ -8,6 +8,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use zbus::fdo::RequestNameFlags;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 use zbus::{interface, Connection};
@@ -15,8 +16,8 @@ use zbus::{interface, Connection};
 use crate::dbus::menu::{assemble, menu_item_from_props, parse_mnemonic, NodeRaw};
 use crate::dbus::split_service_arg;
 use crate::events::{InteractionOp, TrayEvent};
-use crate::props::{icon_source, tray_item_from_props};
-use crate::tracker::ItemEntry;
+use crate::props::{icon_source, menu_path_of, tray_item_from_props};
+use crate::tracker::{ItemEntry, ItemTracker, Upsert};
 use crate::{
     IconSource, InteractionOutcome, MenuItemType, ToggleState, ToggleType, Tray, TrayConfig,
     TrayError, TrayItem, TrayStatus,
@@ -33,7 +34,86 @@ const WATCHER_IFACE: &str = "org.kde.StatusNotifierWatcher";
 fn config_defaults() {
     let c = TrayConfig::default();
     assert_eq!(c.timeout_ms, 2000);
+    assert_eq!(c.sync_guard_ms, 30_000);
     assert_eq!(c.debounce_ms, 50);
+}
+
+#[test]
+fn tracker_upsert_merge_and_rename() {
+    let entry = |service: &str, unique: &str, path: &str, menu: Option<&str>| ItemEntry {
+        service: service.to_string(),
+        unique: unique.to_string(),
+        path: path.to_string(),
+        alive: true,
+        menu: menu.map(str::to_string),
+        menu_only: false,
+    };
+    let mut t = ItemTracker::default();
+
+    // 新建
+    assert_eq!(
+        t.upsert(entry(":1.5", ":1.5", "/a", None)),
+        Upsert::Inserted
+    );
+
+    // ② 同连接唯一名命中 + 知名名报到 → id 升级（重键，属主不变）
+    assert_eq!(
+        t.upsert(entry("org.kde.X-1-1", ":1.5", "/b", Some("/menu"))),
+        Upsert::Renamed {
+            old: ":1.5".to_string(),
+            new: "org.kde.X-1-1".to_string(),
+        }
+    );
+    assert!(t.get(&":1.5".to_string()).is_none());
+    let e = t.get(&"org.kde.X-1-1".to_string()).unwrap();
+    assert_eq!(
+        (e.path.as_str(), e.menu.as_deref(), e.alive),
+        ("/b", Some("/menu"), true)
+    );
+
+    // ① 注册名命中 → 原地刷新（id 不变）
+    assert_eq!(
+        t.upsert(entry("org.kde.X-1-1", ":1.5", "/c", None)),
+        Upsert::Refreshed
+    );
+    let e = t.get(&"org.kde.X-1-1".to_string()).unwrap();
+    assert_eq!((e.path.as_str(), e.menu.as_deref()), ("/c", None));
+
+    // ② 已知名名 id 被唯一名重复报到 → 原地刷新（不发 Renamed）
+    assert_eq!(
+        t.upsert(entry(":1.5", ":1.5", "/d", None)),
+        Upsert::Refreshed
+    );
+    assert!(t.get(&"org.kde.X-1-1".to_string()).is_some());
+    assert!(t.get(&":1.5".to_string()).is_none());
+
+    // 同名换主：属主唯一名重绑定；不在册 → false
+    assert!(t.rebind_owner("org.kde.X-1-1", ":1.9"));
+    assert_eq!(t.get(&"org.kde.X-1-1".to_string()).unwrap().unique, ":1.9");
+    assert!(!t.rebind_owner("nope", ":1.9"));
+}
+
+#[test]
+fn menu_path_parsing() {
+    let sv = |s: &str| OwnedValue::try_from(Value::from(s)).unwrap();
+    // 对象路径形态
+    let obj = OwnedValue::try_from(Value::new(ObjectPath::from_static_str_unchecked(
+        "/org/mock/Menu",
+    )))
+    .unwrap();
+    assert_eq!(menu_path_of(&obj).as_deref(), Some("/org/mock/Menu"));
+    // 字符串形态（以字符串送达亦可解析）
+    assert_eq!(
+        menu_path_of(&sv("/org/mock/Menu2")).as_deref(),
+        Some("/org/mock/Menu2")
+    );
+    // 非路径文本 / 空串 / 非字符串类变体 → None
+    assert_eq!(menu_path_of(&sv("not-a-path")), None);
+    assert_eq!(menu_path_of(&sv("")), None);
+    assert_eq!(
+        menu_path_of(&OwnedValue::try_from(Value::from(3u32)).unwrap()),
+        None
+    );
 }
 
 #[test]
@@ -540,7 +620,7 @@ fn lifecycle() {
         other => panic!("expected Snapshot as first event, got {other:?}"),
     }
 
-    // mock Item 上线
+    // mock Item 上线（暂不持有知名名）
     let rt = TestRt::new();
     let calls = Arc::new(MockCalls::default());
     let title = Arc::new(Mutex::new("Mock Tray Item".to_string()));
@@ -571,35 +651,14 @@ fn lifecycle() {
             )
             .await
             .unwrap();
-        conn.request_name(MOCK_ID).await.unwrap();
         conn
     });
+    let mock_unique = conn.unique_name().unwrap().to_string();
 
+    // ① Ayatana 风格报到：参数为纯对象路径 → 服务名取注册方唯一名（临时唯一名 id）
     let reg_conn = conn.clone();
     rt.block_on(async move {
         reg_conn
-            .call_method(
-                Some("org.kde.StatusNotifierWatcher"),
-                "/StatusNotifierWatcher",
-                Some(WATCHER_IFACE),
-                "RegisterStatusNotifierItem",
-                &MOCK_ID,
-            )
-            .await
-            .unwrap();
-    });
-
-    // Added（数据现场读取）
-    assert!(
-        eventually_recv(&mut rx, 3000, |ev| is_mock_event(ev, "added")),
-        "expected Added({MOCK_ID})"
-    );
-
-    // Ayatana 风格报到：参数为纯对象路径 → 服务名取注册方唯一名
-    let mock_unique = conn.unique_name().unwrap().to_string();
-    let ayatana_conn = conn.clone();
-    rt.block_on(async move {
-        ayatana_conn
             .call_method(
                 Some("org.kde.StatusNotifierWatcher"),
                 "/StatusNotifierWatcher",
@@ -619,6 +678,73 @@ fn lifecycle() {
         "expected Added({mock_unique}) for ayatana-style path registration"
     );
     assert!(handle.item(&mock_unique).is_some());
+
+    // ② 申请知名名（AllowReplacement，供换主测试），再以知名名报到 →
+    //    同一对象 id 升级：NameChanged{old: 唯一名, new: 知名名}，旧 id 不发 Removed
+    let name_conn = conn.clone();
+    rt.block_on(async move {
+        name_conn
+            .request_name_with_flags(MOCK_ID, RequestNameFlags::AllowReplacement.into())
+            .await
+            .unwrap();
+    });
+    let reg_conn = conn.clone();
+    rt.block_on(async move {
+        reg_conn
+            .call_method(
+                Some("org.kde.StatusNotifierWatcher"),
+                "/StatusNotifierWatcher",
+                Some(WATCHER_IFACE),
+                "RegisterStatusNotifierItem",
+                &MOCK_ID,
+            )
+            .await
+            .unwrap();
+    });
+    assert!(
+        eventually_recv(&mut rx, 3000, |ev| matches!(
+            ev,
+            TrayEvent::NameChanged { old, new } if old == &mock_unique && new == MOCK_ID
+        )),
+        "expected NameChanged({mock_unique} -> {MOCK_ID})"
+    );
+    assert!(handle.item(&mock_unique).is_none());
+    assert!(handle.item(&MOCK_ID.to_string()).is_some());
+
+    // ③ 同一对象重复报到（纯路径形态）→ 并入同一 id：无 Added / NameChanged / OwnerChanged
+    let reg_conn = conn.clone();
+    rt.block_on(async move {
+        reg_conn
+            .call_method(
+                Some("org.kde.StatusNotifierWatcher"),
+                "/StatusNotifierWatcher",
+                Some(WATCHER_IFACE),
+                "RegisterStatusNotifierItem",
+                &MOCK_ITEM_PATH,
+            )
+            .await
+            .unwrap();
+    });
+    let deadline = Instant::now() + Duration::from_millis(400);
+    while Instant::now() < deadline {
+        if let Some(ev) = recv_within(&mut rx, 50) {
+            assert!(
+                !matches!(&ev, TrayEvent::Added(id) if id == MOCK_ID || id == &mock_unique)
+                    && !matches!(&ev, TrayEvent::NameChanged { .. })
+                    && !matches!(&ev, TrayEvent::OwnerChanged(_)),
+                "duplicate registration must merge silently, got {ev:?}"
+            );
+        }
+    }
+    assert_eq!(
+        handle
+            .items()
+            .iter()
+            .filter(|i| i.id == MOCK_ID || i.id == mock_unique)
+            .count(),
+        1,
+        "double registration must collapse into a single id"
+    );
 
     // 协议面：在册清单包含 mock；Host 桩恒真
     let props_conn = conn.clone();
@@ -710,8 +836,11 @@ fn lifecycle() {
         Err(TrayError::ItemNotFound(_))
     ));
 
-    // menu_activate：受理 + 回执
-    handle.menu_activate(&MOCK_ID.to_string(), 31).unwrap();
+    // menu_activate：受理即返回 Dispatched + 回执
+    match handle.menu_activate(&MOCK_ID.to_string(), 31) {
+        Ok(InteractionOutcome::Dispatched) => {}
+        other => panic!("menu_activate should dispatch, got {other:?}"),
+    }
     assert!(eventually_recv(&mut rx, 3000, |ev| matches!(
         ev,
         TrayEvent::InteractionResult { id, op: InteractionOp::MenuActivate, result: Ok(()) } if id == MOCK_ID
@@ -741,8 +870,8 @@ fn lifecycle() {
     assert!(wait_until(3000, || calls.contains("scroll 1 horizontal")));
 
     // 变更通告：New* 信号与 PropertiesChanged 同窗口合并为单次 Changed
-    // （同一对象双注册：规范名 / Ayatana 唯一名，Changed 落点任一）
-    let mock_ids = [MOCK_ID.to_string(), mock_unique.clone()];
+    // （双注册已并入同一 id：信号按（属主唯一名, 对象路径）命中 MOCK_ID）
+    let mock_ids = [MOCK_ID.to_string()];
     *title.lock().unwrap() = "Mock v2".to_string();
     let sig_conn = conn.clone();
     rt.block_on(async move {
@@ -769,7 +898,6 @@ fn lifecycle() {
     assert_eq!(updated.title.as_deref(), Some("Mock v2"));
 
     // ItemIsMenu 随 PropertiesChanged 就地更新：左键路由转入 Menu 流程
-    // （路由标记更新在收到 Changed 的那个 id 的条目上）
     *menu_only.lock().unwrap() = true;
     let mi_conn = conn.clone();
     rt.block_on(async move {
@@ -783,24 +911,46 @@ fn lifecycle() {
         .await
         .unwrap();
     });
-    let routing_id = match recv_matching(&mut rx, 3000, |ev| {
-        matches!(
-            ev,
-            TrayEvent::Changed(id) if mock_ids.contains(id)
-        )
-    }) {
-        Some(TrayEvent::Changed(id)) => id,
-        other => panic!("expected Changed after ItemIsMenu update, got {other:?}"),
-    };
+    assert!(recv_matching(&mut rx, 3000, |ev| matches!(
+        ev,
+        TrayEvent::Changed(id) if id == MOCK_ID
+    ))
+    .is_some());
     assert!(
         matches!(
-            handle.left_click(&routing_id),
+            handle.left_click(&MOCK_ID.to_string()),
             Ok(InteractionOutcome::Menu(_))
         ),
-        "left_click on {routing_id} must route to Menu after ItemIsMenu update"
+        "left_click must route to Menu after ItemIsMenu update"
     );
 
-    // 菜单变更信号 → MenuChanged（不代为重拉；落点 id 任一）
+    // Menu 取值宽容化：非路径变体更新不覆盖旧值（右键仍命中 Menu 流程而非 fallback）
+    let bad_menu_conn = conn.clone();
+    rt.block_on(async move {
+        let emitter = SignalEmitter::new(&bad_menu_conn, MOCK_ITEM_PATH).unwrap();
+        zbus::fdo::Properties::properties_changed(
+            &emitter,
+            "org.kde.StatusNotifierItem".try_into().unwrap(),
+            HashMap::from([("Menu", Value::from(7u32))]),
+            std::borrow::Cow::Borrowed(&[]),
+        )
+        .await
+        .unwrap();
+    });
+    assert!(recv_matching(&mut rx, 3000, |ev| matches!(
+        ev,
+        TrayEvent::Changed(id) if id == MOCK_ID
+    ))
+    .is_some());
+    assert!(
+        matches!(
+            handle.right_click(&MOCK_ID.to_string()),
+            Ok(InteractionOutcome::Menu(_))
+        ),
+        "invalid Menu update must keep the previous routing"
+    );
+
+    // 菜单变更信号 → MenuChanged（窗口合并，不代为重拉）
     let menu_sig_conn = conn.clone();
     rt.block_on(async move {
         let emitter = SignalEmitter::new(&menu_sig_conn, MOCK_MENU_PATH).unwrap();
@@ -809,7 +959,7 @@ fn lifecycle() {
     assert!(
         recv_matching(&mut rx, 3000, |ev| matches!(
             ev,
-            TrayEvent::MenuChanged(id) if mock_ids.contains(id)
+            TrayEvent::MenuChanged(id) if id == MOCK_ID
         ))
         .is_some(),
         "expected MenuChanged after LayoutUpdated"
@@ -821,13 +971,69 @@ fn lifecycle() {
         Err(TrayError::NameTaken(_))
     ));
 
-    // mock 下线（服务名消失）→ Removed
-    drop(conn);
+    // 同名换主：新连接 ReplaceExisting 顶名 → OwnerChanged（id 与对象生死不变）
+    let rt2 = TestRt::new();
+    let calls2 = Arc::new(MockCalls::default());
+    let title2 = Arc::new(Mutex::new("Mock B".to_string()));
+    let menu_only2 = Arc::new(Mutex::new(false));
+    let calls2_for_item = calls2.clone();
+    let calls2_for_menu = calls2.clone();
+    let title2_for_item = title2.clone();
+    let menu_only2_for_item = menu_only2.clone();
+    let conn2 = rt2.block_on(async move {
+        let conn2 = Connection::session().await.expect("session bus");
+        conn2
+            .object_server()
+            .at(
+                MOCK_ITEM_PATH,
+                MockItem {
+                    calls: calls2_for_item,
+                    title: title2_for_item,
+                    menu_only: menu_only2_for_item,
+                },
+            )
+            .await
+            .unwrap();
+        conn2
+            .object_server()
+            .at(
+                MOCK_MENU_PATH,
+                MockMenu {
+                    calls: calls2_for_menu,
+                },
+            )
+            .await
+            .unwrap();
+        conn2
+    });
+    let name_conn2 = conn2.clone();
+    rt2.block_on(async move {
+        name_conn2
+            .request_name_with_flags(MOCK_ID, RequestNameFlags::ReplaceExisting.into())
+            .await
+            .unwrap();
+    });
+    assert!(
+        eventually_recv(&mut rx, 3000, |ev| matches!(
+            ev,
+            TrayEvent::OwnerChanged(id) if id == MOCK_ID
+        )),
+        "expected OwnerChanged({MOCK_ID}) after owner replacement"
+    );
+    assert_eq!(
+        handle.item(&MOCK_ID.to_string()).unwrap().title.as_deref(),
+        Some("Mock B"),
+        "live read must follow the replacing owner"
+    );
+
+    // 新属主下线（服务名消失）→ Removed
+    drop(conn2);
     assert!(
         eventually_recv(&mut rx, 3000, |ev| is_mock_event(ev, "removed")),
-        "expected Removed after mock leaves the bus"
+        "expected Removed after the replacing owner leaves the bus"
     );
     assert_eq!(handle.item(&MOCK_ID.to_string()), None);
+    drop(conn);
 
     // 停机：幂等；此后一律 Stopped；排空残余事件后通道关闭（recv → None）
     handle.shutdown();
@@ -841,7 +1047,7 @@ fn lifecycle() {
         Err(TrayError::Stopped)
     ));
     assert_eq!(handle.items(), Vec::<TrayItem>::new());
-    // 双注册（规范名 + Ayatana 唯一名）可能残留队列事件：先排空再确认关闭
+    // 排空残余队列事件后再确认通道关闭
     while recv_within(&mut rx, 1000).is_some() {}
     assert!(
         matches!(

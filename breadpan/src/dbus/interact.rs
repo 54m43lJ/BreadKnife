@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::dbus::bus::BusCenter;
 use crate::dbus::menu;
-use crate::dbus::{DBUSMENU_IFACE, ITEM_IFACE_FD, ITEM_IFACE_KDE};
+use crate::dbus::{DBUSMENU_IFACE, ITEM_IFACE_KDE};
 use crate::events::{InteractionOp, TrayEvent};
 use crate::tracker::ItemEntry;
 use crate::{InteractionOutcome, TrayError};
@@ -103,8 +103,12 @@ pub(crate) async fn route(
 }
 
 /// 延续方法：提交 Outcome::Menu 弹出中的条目点击（dbusmenu Event("clicked")）。
-/// 受理即返回 Ok；调用结果经 InteractionResult 事件交付。
-pub(crate) fn menu_activate(bus: &BusCenter, id: &str, menu_item_id: i32) -> Result<(), TrayError> {
+/// VOID 受理即返回 InteractionOutcome::Dispatched；调用结果经 InteractionResult 事件交付。
+pub(crate) fn menu_activate(
+    bus: &BusCenter,
+    id: &str,
+    menu_item_id: i32,
+) -> Result<InteractionOutcome, TrayError> {
     let entry = bus.entry_of(&id.to_string())?;
     let Some(menu_path) = entry.menu.clone() else {
         return Err(TrayError::ItemNotFound(format!(
@@ -132,7 +136,7 @@ pub(crate) fn menu_activate(bus: &BusCenter, id: &str, menu_item_id: i32) -> Res
             .await
         },
     );
-    Ok(())
+    Ok(InteractionOutcome::Dispatched)
 }
 
 /// 派发一次 VOID 交互（运行时后台执行，回执入队 InteractionResult）。
@@ -149,11 +153,8 @@ where
     });
 }
 
-/// SNI 定位方法（Activate / SecondaryActivate / ContextMenu）：org.kde 前缀优先，
-/// 失败回退 org.freedesktop 前缀；双前缀俱败时合并上报两侧错误
-/// （只报末次会掩盖 kde 侧真因——如 item 端 Activate 无处理器）。
-/// 超时即止：对端失联时另一前缀与后续回退注定同耗（menu 与 Activate
-/// 同一主循环分发，Activate 超时则菜单亦不可读），不做任何重试。
+/// SNI 定位方法（Activate / SecondaryActivate / ContextMenu）：发起请求一律只用
+/// org.kde 前缀（ARCHITECTURE §2）；超时即止，不做重试。
 async fn invoke_xy(
     bus: &BusCenter,
     entry: &ItemEntry,
@@ -161,59 +162,23 @@ async fn invoke_xy(
     x: i32,
     y: i32,
 ) -> Result<(), TrayError> {
-    match bus
-        .call::<(), _>(&entry.service, &entry.path, ITEM_IFACE_KDE, method, &(x, y))
+    bus.call::<(), _>(&entry.service, &entry.path, ITEM_IFACE_KDE, method, &(x, y))
         .await
-    {
-        Ok(()) => Ok(()),
-        Err(e @ TrayError::Timeout { .. }) => Err(e),
-        Err(kde) => match bus
-            .call::<(), _>(&entry.service, &entry.path, ITEM_IFACE_FD, method, &(x, y))
-            .await
-        {
-            Ok(()) => Ok(()),
-            Err(e @ TrayError::Timeout { .. }) => Err(e),
-            Err(fd) => Err(TrayError::Protocol(format!(
-                "{method} failed on both prefixes: org.kde: {kde}; org.freedesktop: {fd}"
-            ))),
-        },
-    }
 }
 
-/// Scroll(delta, orientation)：同前缀回退。
+/// Scroll(delta, orientation)：同前缀策略。
 async fn invoke_scroll(
     bus: &BusCenter,
     entry: &ItemEntry,
     delta: i32,
     orient: &str,
 ) -> Result<(), TrayError> {
-    match bus
-        .call::<(), _>(
-            &entry.service,
-            &entry.path,
-            ITEM_IFACE_KDE,
-            "Scroll",
-            &(delta, orient),
-        )
-        .await
-    {
-        Ok(()) => Ok(()),
-        Err(e @ TrayError::Timeout { .. }) => Err(e),
-        Err(kde) => match bus
-            .call::<(), _>(
-                &entry.service,
-                &entry.path,
-                ITEM_IFACE_FD,
-                "Scroll",
-                &(delta, orient),
-            )
-            .await
-        {
-            Ok(()) => Ok(()),
-            Err(e @ TrayError::Timeout { .. }) => Err(e),
-            Err(fd) => Err(TrayError::Protocol(format!(
-                "Scroll failed on both prefixes: org.kde: {kde}; org.freedesktop: {fd}"
-            ))),
-        },
-    }
+    bus.call::<(), _>(
+        &entry.service,
+        &entry.path,
+        ITEM_IFACE_KDE,
+        "Scroll",
+        &(delta, orient),
+    )
+    .await
 }

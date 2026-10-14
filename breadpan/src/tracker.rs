@@ -1,4 +1,4 @@
-//! Item 登记簿记（最小集）：报到 / 反向发现 / 死亡清理。
+//! Item 登记簿记（最小集）：报到 / 反向发现 / 换主重绑定 / 死亡清理。
 //!
 //! 只存唯一名 + 对象路径 + 存活字段（alive）+ DBusMenu 支持/路径 + 整项即菜单标记；
 //! SNI 详情不经手、不落册，由消费方现场读取（零详情缓存）。
@@ -29,22 +29,66 @@ pub(crate) struct ItemTracker {
     items: HashMap<TrayItemId, ItemEntry>,
 }
 
+/// upsert 结果：新条目 / 原地刷新 / id 升级（CODE §4.3.1）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Upsert {
+    Inserted,
+    Refreshed,
+    Renamed { old: TrayItemId, new: TrayItemId },
+}
+
 impl ItemTracker {
-    /// 最小集入册：新服务名 → 插入并返回 true；已存在 → 原地刷新属主与路由标记，返回 false。
-    pub(crate) fn upsert(&mut self, entry: ItemEntry) -> bool {
-        match self.items.get_mut(&entry.service) {
-            Some(existing) => {
-                existing.unique = entry.unique;
-                existing.path = entry.path;
-                existing.alive = true;
-                existing.menu = entry.menu;
-                existing.menu_only = entry.menu_only;
-                false
+    /// 报到入册：双注册并入的落点——字段匹配两轮 lookup 自愈并入
+    /// （同一对象/连接不允许双条目）：①注册名 == service ②发送者唯一名 == unique；
+    /// 命中 → 原地刷新（path/menu/menu_only/alive 以最新报到为准），两轮未命中 → 新建。
+    /// 临时唯一名 id 被知名名报到命中且属主唯一名不变 → id 升级（重键）。
+    pub(crate) fn upsert(&mut self, entry: ItemEntry) -> Upsert {
+        // ① 注册名 == service（知名名同名重启竞态；唯一名形态 == 临时条目）
+        if let Some(existing) = self.items.get_mut(&entry.service) {
+            existing.unique = entry.unique;
+            existing.path = entry.path;
+            existing.alive = true;
+            existing.menu = entry.menu;
+            existing.menu_only = entry.menu_only;
+            return Upsert::Refreshed;
+        }
+        // ② 发送者唯一名 == unique（同连接先前以唯一名临时注册）
+        let via_unique = self
+            .items
+            .iter()
+            .find(|(_, e)| e.unique == entry.unique)
+            .map(|(id, _)| id.clone());
+        if let Some(old_id) = via_unique {
+            if old_id.starts_with(':') && !entry.service.starts_with(':') {
+                // 临时唯一名 → 知名名：id 升级（重键，属主唯一名不变）
+                self.items.remove(&old_id);
+                self.items.insert(entry.service.clone(), entry.clone());
+                return Upsert::Renamed {
+                    old: old_id,
+                    new: entry.service,
+                };
             }
-            None => {
-                self.items.insert(entry.service.clone(), entry);
+            // 已在册的知名名 id 被重复报到：原地刷新，id 不变
+            let existing = self.items.get_mut(&old_id).unwrap();
+            existing.unique = entry.unique;
+            existing.path = entry.path;
+            existing.alive = true;
+            existing.menu = entry.menu;
+            existing.menu_only = entry.menu_only;
+            return Upsert::Refreshed;
+        }
+        self.items.insert(entry.service.clone(), entry);
+        Upsert::Inserted
+    }
+
+    /// 同名换主：属主唯一名重绑定（条目保留、id 不变；不在册 → false，CODE §4.3.2）。
+    pub(crate) fn rebind_owner(&mut self, name: &str, new_owner: &str) -> bool {
+        match self.items.get_mut(name) {
+            Some(entry) => {
+                entry.unique = new_owner.to_string();
                 true
             }
+            None => false,
         }
     }
 

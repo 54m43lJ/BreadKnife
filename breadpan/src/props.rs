@@ -7,7 +7,7 @@ use std::ops::Deref;
 
 use zbus::zvariant::{OwnedValue, Value};
 
-use crate::dbus::{bus::BusCenter, ITEM_IFACE_FD, ITEM_IFACE_KDE, PROPS_IFACE};
+use crate::dbus::{bus::BusCenter, ITEM_IFACE_KDE, PROPS_IFACE};
 use crate::tracker::ItemEntry;
 use crate::{IconSource, Pixmap, ToolTip, TrayCategory, TrayError, TrayItem, TrayStatus};
 
@@ -20,27 +20,19 @@ pub(crate) async fn fetch_item(bus: &BusCenter, entry: &ItemEntry) -> Result<Tra
     Ok(tray_item_from_props(entry, &props))
 }
 
-/// GetAll（org.kde 前缀优先，失败回退 org.freedesktop 前缀）。
+/// GetAll（前缀策略见 ARCHITECTURE §2：发起请求一律只用 org.kde 前缀）。
 pub(crate) async fn read_all(
     bus: &BusCenter,
     service: &str,
     path: &str,
 ) -> Result<HashMap<String, OwnedValue>, TrayError> {
     let kde = ITEM_IFACE_KDE.to_string();
-    match bus
-        .call::<HashMap<String, OwnedValue>, _>(service, path, PROPS_IFACE, "GetAll", &kde)
+    bus.call::<HashMap<String, OwnedValue>, _>(service, path, PROPS_IFACE, "GetAll", &kde)
         .await
-    {
-        Ok(props) => Ok(props),
-        Err(_) => {
-            let fd = ITEM_IFACE_FD.to_string();
-            bus.call::<HashMap<String, OwnedValue>, _>(service, path, PROPS_IFACE, "GetAll", &fd)
-                .await
-        }
-    }
 }
 
-/// 注册期路由探测：Menu 属性（对象路径）与 ItemIsMenu。读取失败按无菜单/非菜单处理。
+/// 注册期路由探测：Menu 属性（对象路径/字符串两形态）与 ItemIsMenu。
+/// 读取失败按无菜单/非菜单处理。
 pub(crate) async fn probe_routing(
     bus: &BusCenter,
     service: &str,
@@ -50,10 +42,7 @@ pub(crate) async fn probe_routing(
         .await
         .ok()
         .flatten()
-        .and_then(|v| {
-            let p: zbus::zvariant::ObjectPath<'_> = v.try_into().ok()?;
-            Some(p.to_string())
-        });
+        .and_then(|v| menu_path_of(&v));
     let menu_only = read_prop(bus, service, path, "ItemIsMenu")
         .await
         .ok()
@@ -107,10 +96,7 @@ pub(crate) fn tray_item_from_props(
         overlay_icon: optional_icon(overlay_name.as_deref(), overlay_pixmaps.as_deref()),
         attention_icon: optional_icon(attention_name.as_deref(), attention_pixmaps.as_deref()),
         tooltip: props.get("ToolTip").and_then(tooltip_from),
-        menu: props
-            .get("Menu")
-            .and_then(|v| as_object_path(v).or_else(|| as_string(v)))
-            .filter(|s| !s.is_empty()),
+        menu: props.get("Menu").and_then(menu_path_of),
     }
 }
 
@@ -211,9 +197,18 @@ fn as_u32(v: &OwnedValue) -> Option<u32> {
     }
 }
 
-fn as_object_path(v: &OwnedValue) -> Option<String> {
-    let path: zbus::zvariant::ObjectPath<'static> = v.try_clone().ok()?.try_into().ok()?;
-    Some(path.to_string())
+/// Menu 属性宽容取值（CODE §4.2）：对象路径/字符串两形态取文本，文本经
+/// ObjectPath 规范校验；非字符串类变体或校验失败 → None。
+pub(crate) fn menu_path_of(v: &OwnedValue) -> Option<String> {
+    match v.deref() {
+        Value::ObjectPath(p) => Some(p.to_string()),
+        Value::Str(s) => {
+            let text = s.as_str();
+            zbus::zvariant::ObjectPath::try_from(text).ok()?;
+            Some(text.to_string())
+        }
+        _ => None,
+    }
 }
 
 fn as_pixmaps(v: &OwnedValue) -> Option<Vec<PixmapTuple>> {

@@ -132,6 +132,21 @@ fn handle_event(handle: &TrayHandle, cards: &Cards, ev: TrayEvent) {
         TrayEvent::MenuChanged(id) => {
             println!("\n[event] menu-changed: {id} (use 'menu' to re-pull if desired)");
         }
+        TrayEvent::NameChanged { old, new } => {
+            // 同一对象 id 重键：卡片迁移到新 id；数据未变，无需重读
+            let mut c = cards.lock().unwrap();
+            let card = c.remove(&old);
+            c.insert(new.clone(), card.unwrap_or(None));
+            println!("\n[event] name-changed: {old} -> {new} (id re-keyed)");
+        }
+        TrayEvent::OwnerChanged(id) => {
+            // 信息性事件：属主更替，对象与 id 不变；需要最新数据时重读即可
+            let fetched = handle.item(&id);
+            if fetched.is_some() {
+                cards.lock().unwrap().insert(id.clone(), fetched);
+            }
+            println!("\n[event] owner-changed: {id} (new owner; re-read for fresh data)");
+        }
         TrayEvent::InteractionResult { id, op, result } => {
             println!("\n[event] interaction: {id} {op:?} => {result:?}");
         }
@@ -218,9 +233,7 @@ fn repl(handle: &TrayHandle, cards: &Cards, t: &[&str]) -> bool {
                 return;
             };
             match handle.menu_activate(id, entry_id) {
-                Ok(()) => {
-                    println!("menu_activate({id}, {entry_id}) accepted (receipt arrives as event)")
-                }
+                Ok(outcome) => print_outcome("menu_activate", outcome),
                 Err(e) => println!("menu_activate({id}, {entry_id}) failed: {e}"),
             }
         }),

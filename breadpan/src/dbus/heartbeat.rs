@@ -8,11 +8,11 @@ use crate::dbus::{DBUS_IFACE, DBUS_PATH, DBUS_SERVICE, ITEM_IFACE_KDE, PROPS_IFA
 /// 探测周期（库内定值）。
 pub(crate) const HEARTBEAT_PERIOD: Duration = Duration::from_secs(5);
 
-/// 存活探测循环：
+/// 存活探测循环（`period` 由调用点传入库内定值）：
 /// - 总线自身断连 → 上报 Fatal（终局）；
 /// - 对每个在册 Item 做轻量属性读取（超时 timeout_ms）→ 覆盖 tracker 的 alive 字段。
-pub(crate) async fn heartbeat_task(bus: BusCenter) {
-    let mut tick = tokio::time::interval(HEARTBEAT_PERIOD);
+pub(crate) async fn heartbeat_task(bus: BusCenter, period: Duration) {
+    let mut tick = tokio::time::interval(period);
     loop {
         tick.tick().await;
 

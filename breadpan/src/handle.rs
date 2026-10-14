@@ -19,11 +19,13 @@ use crate::{InteractionOutcome, MenuSnapshot, TrayError, TrayItem, TrayItemId};
 
 // ── 配置 ──
 
-/// 服务发现/调用/现场读取超时与属性变更合并窗口。
+/// 服务发现/调用/现场读取超时、同步桥守卫与属性变更合并窗口。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrayConfig {
     /// 服务发现/调用/现场读取超时（ms），默认 2000。
     pub timeout_ms: u64,
+    /// 同步方法阻塞守卫上限（ms），默认 30000；推荐 ≥ timeout_ms×4 + 10s。
+    pub sync_guard_ms: u64,
     /// 属性变更合并窗口（ms），默认 50。
     pub debounce_ms: u64,
 }
@@ -32,6 +34,7 @@ impl Default for TrayConfig {
     fn default() -> Self {
         Self {
             timeout_ms: 2000,
+            sync_guard_ms: 30_000,
             debounce_ms: 50,
         }
     }
@@ -307,9 +310,13 @@ impl TrayHandle {
     }
 
     /// 延续方法：提交 Outcome::Menu 弹出中的条目点击（dbusmenu Event("clicked")）。
-    /// 不是打开菜单的入口——打开与 DBusMenu / ContextMenu 的路由内置于
-    /// right_click() / left_click()。
-    pub fn menu_activate(&self, id: &TrayItemId, menu_item_id: i32) -> Result<(), TrayError> {
+    /// VOID 受理即返回（InteractionOutcome::Dispatched，回执经事件流）；不是打开菜单的入口——
+    /// 打开与 DBusMenu / ContextMenu 的路由内置于 right_click() / left_click()。
+    pub fn menu_activate(
+        &self,
+        id: &TrayItemId,
+        menu_item_id: i32,
+    ) -> Result<InteractionOutcome, TrayError> {
         let bus = self.live()?;
         interact::menu_activate(bus, id, menu_item_id)
     }

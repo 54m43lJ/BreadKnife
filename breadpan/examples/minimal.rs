@@ -29,6 +29,12 @@ fn main() {
             TrayEvent::Removed(id) => println!("[removed] {id}"),
             TrayEvent::Changed(id) => println!("[changed] {id} (re-read item() for fresh data)"),
             TrayEvent::MenuChanged(id) => println!("[menu-changed] {id}"),
+            TrayEvent::NameChanged { old, new } => {
+                println!("[name-changed] {old} -> {new} (same object, id re-keyed)")
+            }
+            TrayEvent::OwnerChanged(id) => {
+                println!("[owner-changed] {id} (same item object, new owner)")
+            }
             TrayEvent::InteractionResult { id, op, result } => {
                 println!("[interaction] {id} {op:?} => {result:?}")
             }

@@ -152,6 +152,9 @@ pub enum TrayError {
     NameTaken(String),
     #[error("operation timed out after {ms} ms")]
     Timeout { ms: u64 },
+    /// 同步命令在守卫上限（sync_guard_ms）内未完成——运行时楔死或守卫配置过低；处置为重建或调大守卫
+    #[error("internal runtime hung: no progress for {ms} ms")]
+    Hung { ms: u64 },
     #[error("item {0} not found")]
     ItemNotFound(String),
     #[error("dbus call failed: {0}")]
