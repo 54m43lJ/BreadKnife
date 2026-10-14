@@ -123,7 +123,7 @@
   <tr><td><code>scroll_up(id)</code> / <code>scroll_up_by(id, steps)</code>（四向各一对）</td><td>Scroll(∓steps, vertical / horizontal)；steps 缺省 1</td><td><code>InteractionOutcome::Dispatched</code> + 回执事件</td></tr>
 </table>
 <ul class="note">
-  <li>被路由到的 DBus 交互（Activate / SecondaryActivate / ContextMenu / Scroll / dbusmenu Event）均为 VOID 调用（无返回值）——SNI §3.2 原文："The application will perform any task it considers appropriate as an activation request"；</li>
+  <li>被路由到的 DBus 交互（Activate / SecondaryActivate / ContextMenu / Scroll / dbusmenu Event）均为 VOID 调用（无返回值）——SNI §3.2 原文："The application will perform any task is considered appropriate as an activation request"；</li>
   <li>DBus 应答仍被等待、仅代表送达，其后的动作是 Item 私有行为，协议无定义、总线不可见；</li>
   <li>Scroll 的 delta 规范未定义标度，符号约定 up/left 为负、down/right 为正，逐事件发送不聚合。</li>
 </ul>
@@ -420,7 +420,7 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
   <tr><td>MenuItem.id</td><td>条目数字 id（布局 (i, a{sv}, av) 的 i）；<code>Event</code>/<code>AboutToShow</code> 以它寻址</td><td>dbusmenu · GetLayout / Event / AboutToShow</td></tr>
   <tr><td>item_type</td><td>对应 dbusmenu <code>type</code>（type 为 Rust 保留字，字段就近取名 item_type）：Separator ← "separator"；Standard ← 其余（含缺省 "standard" 与 vendor <code>x-*</code> 值）</td><td>dbusmenu · type</td></tr>
   <tr><td>children_display</td><td><code>children-display</code>="submenu" → true；空/其它值 → false。子菜单指示物渲染与 <code>menu_expand</code> 展开行为的判断依据</td><td>dbusmenu · children-display</td></tr>
-  <tr><td>label</td><td>已解析助记符：<code>__</code> 显示为 <code>_</code>，第一个剩余 <code>_</code> 后字符为访问键</td><td>dbusmenu · label</td></tr>
+  <tr><td>label</td><td>已解析助记符：<code>__</code> 显示为 <code>_</code>，其余 <code>_</code> 不显示；剩余 <code>_</code> 的第一个（不在串尾时）标记其后字符为访问键</td><td>dbusmenu · label</td></tr>
   <tr><td>raw_label</td><td>label 原始值（逃生门）</td><td>dbusmenu · label</td></tr>
   <tr><td>enabled / visible</td><td>可用 / 可见；官方缺省 true——仅非默认值的属性才会上报，组装时按默认值补全</td><td>dbusmenu · enabled / visible</td></tr>
   <tr><td>toggle_type</td><td><code>toggle-type</code> ∈ {checkmark, radio}；未上报 → None（非可勾选条目）</td><td>dbusmenu · toggle-type</td></tr>
@@ -456,7 +456,7 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
 </p>
 <table>
   <tr><th>DBus 成员</th><th>类型</th><th>语义</th></tr>
-  <tr><td><code>RegisterStatusNotifierItem</code></td><td>方法</td><td>Item 报到：登记服务名（知名名或唯一名）+ 对象路径；报到即拉取跟踪（<a href="#sec-3-4">§3.4</a>）；同名重复报到幂等；同一对象以不同形态重复报到并入同一 id——升级机制见 <a href="#sec-4-2">§4.2</a> NameChanged</td></tr>
+  <tr><td><code>RegisterStatusNotifierItem</code></td><td>方法</td><td>Item 报到：登记服务名 + 对象路径（报到参数现实取值多为知名名或唯一名，可能带对象路径）；报到即拉取跟踪（<a href="#sec-3-4">§3.4</a>）；同名重复报到幂等；同一对象以不同形态重复报到并入同一 id——升级机制见 <a href="#sec-4-2">§4.2</a> NameChanged</td></tr>
   <tr><td><code>RegisteredStatusNotifierItems</code></td><td>属性</td><td>读取：当前在册 Item 清单</td></tr>
   <tr><td><code>RegisterStatusNotifierHost</code></td><td>方法</td><td>兼容桩：受理即忘——自包含设计不对进程外 Host 负责（<a href="#sec-1">§1 术语 Host</a>）</td></tr>
   <tr><td><code>IsStatusNotifierHostRegistered</code></td><td>属性</td><td>兼容桩：恒真——逻辑 Host 进程内在位；个别 Item 探测此接口后才报到</td></tr>

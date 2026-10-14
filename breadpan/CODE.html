@@ -248,7 +248,7 @@ impl BusCenter {
 }</code></pre>
 
 <h4 id="sec-3-dbus-watcher">3.6.3. watcher.rs（登记中心服务：名持有 / 所有权丢失上报 / 停机）</h4>
-<pre><code>/// 挂载协议面（两前缀挂同一路径；bootstrap 首步，§4.1.1）
+<pre><code>/// 挂载协议面（两前缀挂同一路径 /StatusNotifierWatcher；bootstrap 首步，§4.1.1）
 pub(crate) async fn mount_interfaces(bus: &amp;BusCenter) -&gt; Result&lt;(), TrayError&gt;;
 pub(crate) struct WatcherService;
 impl WatcherService {
@@ -274,12 +274,13 @@ impl WatcherIface {
     fn register_status_notifier_host(&amp;self, service: &amp;str);     // 兼容桩：受理即忘
     #[zbus(property)]
     fn is_status_notifier_host_registered(&amp;self) -&gt; bool;       // 兼容桩：恒真
+    // Watcher 两信号：SNI 原文（纸面标准）写作 BOOL 返回；zbus（库事实标准）按 void 信号声明，线上签名 s
     #[zbus(signal)]
     pub async fn status_notifier_item_registered(
-        emitter: &amp;SignalEmitter&lt;'_&gt;, service: &amp;str) -&gt; zbus::Result&lt;()&gt;;
+        emitter: &amp;zbus::object_server::SignalEmitter&lt;'_&gt;, service: &amp;str) -&gt; zbus::Result&lt;()&gt;;
     #[zbus(signal)]
     pub async fn status_notifier_item_unregistered(
-        emitter: &amp;SignalEmitter&lt;'_&gt;, service: &amp;str) -&gt; zbus::Result&lt;()&gt;;
+        emitter: &amp;zbus::object_server::SignalEmitter&lt;'_&gt;, service: &amp;str) -&gt; zbus::Result&lt;()&gt;;
 }
 /// 广播：Item 报到 / 离开（只走 org.kde 前缀，避免双前缀订阅方重复通告）
 pub(crate) async fn emit_registered(bus: &amp;BusCenter, service: &amp;str);
@@ -315,7 +316,7 @@ pub(crate) fn parse_mnemonic(raw: &amp;str) -&gt; String;</code></pre>
 /// 语义输入路由（§4.5.1 §4.5.2）
 pub(crate) async fn route(bus: &amp;BusCenter, id: &amp;str,
                           input: Input) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
-/// 延续方法：dbusmenu Event(menu_item_id, "clicked", Value::I32(0), ts: u32) 提交（ts 为当前时间 timestamp，Unix 毫秒）；
+/// 延续方法：dbusmenu Event(menu_item_id, "clicked", Value::I32(0), ts: u32) 提交；
 /// VOID 受理即返回 InteractionOutcome::Dispatched；回执入队 InteractionResult（§4.5.2）
 pub(crate) async fn menu_activate(bus: &amp;BusCenter, id: &amp;str, menu_item_id: i32) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
 /// VOID 交互后台派发，回执入队 InteractionResult（§4.5.2）
@@ -337,7 +338,7 @@ pub use paintable::icon_paintable;   // 公开面出口（渲染直出；主线�
 <h4 id="sec-3-gtk-paintable">3.7.2. paintable.rs（渲染直出：GTK 主线程）</h4>
 <pre><code>pub fn icon_paintable;   //见 ARCHITECTURE §4.1
 fn lookup_theme_icon(name: &amp;str) -&gt; Option&lt;gdk::Paintable&gt;;   // Icon Theme Spec 命中判定
-fn missing_icon() -&gt; gdk::Paintable;                          // image-missing 占位（规范保留名，保证存在）
+fn missing_icon() -&gt; gdk::Paintable;                          // image-missing 占位（Icon Naming Spec 保留名）
 fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 → 纹理的色彩处理在此完成</code></pre>
 
 <h2 id="sec-4">4. 关键流程调用栈（伪码）</h2>
@@ -613,7 +614,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │    └── theme.has_icon(name)？
 │         ├── 是 → theme.lookup_icon(name, [], LOOKUP_SIZE=48, scale=1, Ltr, IconLookupFlags::empty())
 │         └── 否 → missing_icon()
-│              // image-missing 占位：Icon Naming Spec 保留名，主题规范保证存在
+│              // image-missing 占位：Icon Naming Spec 保留名
 ├── IconSource::Path？ → gdk::Texture::from_filename(path)
 │    ├── Ok(texture) → 文件纹理
 │    └── Err → missing_icon()
