@@ -35,7 +35,13 @@
     └── assets/
         └── bread.css     # 默认主题（变量定义）</code></pre>
 
-<h2 id="sec-2">2. 类型与方法签名</h2>
+<h2 id="sec-2">2. 通用约定</h2>
+
+<h2 id="sec-3">3. 内部类型与方法签名</h2>
+<ul class="note">
+  <li>收录标准：只列关键内部类型与方法；条目只承载签名与一行用途，方法内部步骤归 <a href="#sec-4">§4</a> 调用栈，未列出者皆为局部实现细节；</li>
+  <li>协议语义（IPC 事件、控制指令、数据模型与转换）见 <a href="ARCHITECTURE.html#sec-4">ARCHITECTURE.html §4</a>，此处不重复。</li>
+</ul>
 <pre><code>pub struct Daemon {
     windows: HashMap&lt;MonitorId, MainWindow&gt;,
     // IPC / socket 连接、托盘组装句柄
@@ -53,7 +59,7 @@ pub enum HyprlandEvent {
     ConfigReloaded,
 }
 
-pub struct MainWindow { /* layer-shell 锚定 Top|Left|Right, 高 30px */ }
+pub struct MainWindow;          // 每显示器一个（见 ARCHITECTURE §1「主窗口」）
 
 pub struct WorkspaceMap { by_monitor: HashMap&lt;MonitorId, Vec&lt;u32&gt;&gt; }
 
@@ -66,7 +72,7 @@ pub struct NotificationRecord {
 }
 
 pub struct TrayUi {
-    tray: breadpan::TrayHandle,   // Tray::start 一次组装（登记中心内置）
+    tray: breadpan::TrayHandle,   // 进程级托盘服务句柄（组装见 ARCHITECTURE §4.3）
 }
 
 impl Daemon {
@@ -82,52 +88,51 @@ impl Daemon {
 // notify.rs：通知守护角色的 DBus 面向方法（签名按 zbus service 形态）
 impl Notifications { /* Notify / CloseNotification / GetCapabilities 等 */ }</code></pre>
 
-<h2 id="sec-3">3. 关键流程调用栈（伪码）</h2>
+<h2 id="sec-4">4. 关键流程调用栈（伪码）</h2>
 
-<h3 id="sec-3-1">3.1. 启动</h3>
+<h3 id="sec-4-1">4.1. 启动</h3>
 <pre><code>启动
-├── 连接 DBus 会话总线（应用自身服务：通知守护；托盘连接由 Tray::start 内置）
-├── Tray::start → (Handle, 事件通道)（登记中心就位 + 存量 Item 反向发现）
-├── glib::spawn_future_local 异步消费托盘事件流（并入主循环）
-├── 连接 Hyprland IPC（只读监听）
-├── 扫描已连接显示器
-│    └── 对每台显示器
-│         ├── 创建主窗口（layer-shell 锚定 Top|Left|Right）
-│         └── 装配模块（workspace / window-info / tray / center）
-├── 启动控制 Socket 监听（bread.sock）
-├── 写 PID 文件
-└── 进入事件循环</code></pre>
+├── dbus::connect()（通知守护注册）
+├── Tray::start() → (handle, 事件通道)（登记中心就位 + 存量 Item 反向发现）
+├── glib::spawn_future_local()（消费托盘事件流）
+├── hyprland::listen()（.socket2.sock 只读监听）
+├── 扫描显示器 → 对每台显示器
+│    ├── spawn_window(mon)（layer-shell 锚定 Top|Left|Right）
+│    └── build_modules(window)（workspace / window-info / tray / center）
+├── control::listen()（bread.sock 行协议服务）
+├── write_pid()
+└── run()（事件循环）</code></pre>
 
-<h3 id="sec-3-2">3.2. 显示器插拔</h3>
+<h3 id="sec-4-2">4.2. 显示器插拔</h3>
 <pre><code>on_hyprland_event(MonitorAdded)
-└── 创建主窗口
-     ├── layer-shell 锚定
-     ├── 装配四个模块
-     └── 登记映射表[显示器] = 窗口
+└── spawn_window(mon)
+     ├── window_create()（layer-shell 锚定）
+     ├── build_modules(window)
+     └── 显示器映射表[mon] = window
 
 on_hyprland_event(MonitorRemoved)
-└── 销毁映射表[显示器] 指向的窗口
-     └── 移除映射表条目</code></pre>
+└── destroy_window(mon)
+     └── 移除显示器映射表条目</code></pre>
 
-<h3 id="sec-3-3">3.3. 控制指令</h3>
-<pre><code>on_control(指令)
-├── Exit    → 销毁全部窗口 → 释放托盘句柄（shutdown：释放 Watcher 名、停内部线程）→ 退出进程
-├── Toggle  → 切换全部窗口可见性
-└── Reload  → 重读配置 → 重读 CSS 变量 → 应用到全部窗口</code></pre>
+<h3 id="sec-4-3">4.3. 控制指令</h3>
+<pre><code>on_control(cmd)
+├── Exit    → tray.shutdown() → destroy_windows() → 退出进程（释放 Watcher 名、停内部线程）
+├── Toggle  → toggle_windows()（全部窗口可见性）
+└── Reload  → reload()（重读配置与 CSS → 应用到全部窗口）</code></pre>
 
-<h3 id="sec-3-4">3.4. 托盘右键（与 breadpan 协作）</h3>
+<h3 id="sec-4-4">4.4. 托盘右键（与 breadpan 协作）</h3>
 <pre><code>用户右键托盘图标
-├── right_click() → Outcome::Menu(快照)（Menu 流程内含 AboutToShow）
-│    └── Outcome::Dispatched → ContextMenu fallback（Item 自绘，宿主无渲染参与）
-├── GTK 渲染弹出菜单
-├── 用户点击条目 → menu_activate 下发 → 受理结论
-└── popup 打开期间收到 MenuChanged → 重取 menu() → 刷新菜单</code></pre>
+├── right_click(id) → Outcome::Menu(快照)（内含 AboutToShow）
+│    └── Outcome::Dispatched → ContextMenu fallback（Item 自绘，宿主不渲染）
+├── popup::show(快照)（GTK 渲染弹出）
+├── 点击条目 → menu_activate(id, entry_id) → 受理结论
+└── MenuChanged → menu() 重取 → 刷新弹出</code></pre>
 
-<h3 id="sec-3-5">3.5. 通知到达</h3>
+<h3 id="sec-4-5">4.5. 通知到达</h3>
 <pre><code>DBus Notify 调用
-├── 组装通知记录（应用名/图标/摘要/正文/ID）
-├── 缓存入通知列表
-└── 刷新标题区计数/入口呈现</code></pre>
+├── on_notify()（组装通知记录：应用名/图标/摘要/正文/ID）
+├── notification_list.push(record)
+└── refresh_indicator()（标题区计数与入口呈现）</code></pre>
 
 </main>
 </body>

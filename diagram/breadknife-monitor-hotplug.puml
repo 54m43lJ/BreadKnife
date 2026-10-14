@@ -1,0 +1,11 @@
+@startuml breadknife-monitor-hotplug
+participant Hyprland
+participant "bread（daemon）" as daemon
+participant "GTK 窗口" as win
+
+Hyprland -> daemon: monitoradded
+daemon -> win: 创建 Window（锚定 Top|Left|Right，宽度 = 屏宽）
+Hyprland -> daemon: monitorremoved
+daemon -> win: 销毁 Window
+daemon -> daemon: 更新显示器映射表
+@enduml

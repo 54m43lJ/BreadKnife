@@ -1,0 +1,12 @@
+@startuml breadknife-control-reload
+participant 调用方
+participant "bread.sock" as sock
+participant "bread（daemon）" as daemon
+participant "样式系统" as style
+
+调用方 -> sock: "RELOAD\n"
+sock -> daemon: 指令分发
+daemon -> daemon: 重读配置
+daemon -> style: 重读 CSS 变量
+style --> daemon: 变量生效
+@enduml

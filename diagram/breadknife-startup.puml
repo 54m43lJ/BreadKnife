@@ -1,0 +1,21 @@
+@startuml breadknife-startup
+participant 启动者
+participant "bread（daemon）" as daemon
+participant breadpan
+participant Hyprland
+
+启动者 -> daemon: 启动
+daemon -> daemon: 连接会话总线（通知守护注册）
+daemon -> breadpan: Tray::start()
+note right of daemon
+  登记中心就位 + 存量 Item 反向发现
+end note
+breadpan --> daemon: (handle, 事件通道)
+daemon -> daemon: glib::spawn_future_local()（消费托盘事件流）
+daemon -> Hyprland: 建立只读监听（.socket2.sock）
+daemon -> Hyprland: 扫描显示器
+Hyprland --> daemon: 显示器清单
+daemon -> daemon: 逐屏创建 Window（layer-shell 锚定）
+daemon -> daemon: 启动控制 Socket 监听（bread.sock）
+daemon -> daemon: 进入事件循环
+@enduml

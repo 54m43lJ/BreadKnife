@@ -1,0 +1,11 @@
+@startuml breadknife-notification
+participant "任意应用" as app
+participant DBus
+participant breadknife
+participant "通知中心 UI" as ui
+
+app -> DBus: Notify
+DBus -> breadknife: 通知参数（org.freedesktop.Notifications）
+breadknife -> ui: 缓存入列表
+ui -> ui: 入口计数刷新
+@enduml

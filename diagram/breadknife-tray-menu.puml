@@ -1,0 +1,20 @@
+@startuml breadknife-tray-menu
+participant 用户
+participant "breadknife UI" as ui
+participant breadpan
+participant "托盘 Item" as item
+
+用户 -> ui: 右键托盘图标
+ui -> breadpan: right_click()
+breadpan -> item: AboutToShow（Menu 流程路由）
+item --> breadpan: 需要更新？
+breadpan -> item: GetLayout
+item --> breadpan: 最新全量布局
+breadpan --> ui: Outcome::Menu（菜单快照）
+ui -> ui: GTK 渲染弹出
+用户 -> ui: 点击条目
+ui -> breadpan: menu_activate()
+breadpan -> item: Event
+item --> breadpan: 异步回执
+breadpan --> ui: 受理结论
+@enduml

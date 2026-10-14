@@ -46,18 +46,19 @@
 </table>
 
 <h3>控制指令</h3>
-<p>通过 Unix Socket <code>/run/user/$UID/bread.sock</code> 发送文本指令（一行一条，<code>\n</code> 结尾）：</p>
+<p>
+  通过 Unix Socket <code>/run/user/$UID/bread.sock</code> 发送文本指令（一行一条，<code>\n</code> 结尾）；
+  示例：<code>printf 'TOGGLE\n' | socat - /run/user/$UID/bread.sock</code>。
+</p>
 <pre><code>EXIT    # 退出守护进程
 TOGGLE  # 切换任务栏显示/隐藏
 RELOAD  # 热重载配置与 CSS 样式（改完即生效，无需重启）</code></pre>
-<p>示例：</p>
-<pre><code>printf 'TOGGLE\n' | socat - /run/user/$UID/bread.sock</code></pre>
 
 <h3>个性化</h3>
 <p>
   一份 CSS 变量文件定义整套外观（底板色、文字色、强调色、语义色、边框），组件样式全部基于这些变量；
   修改变量文件后发送 <code>RELOAD</code> 指令即可"改色即见"。变量清单见
-  <a href="ARCHITECTURE.html#sec-8">ARCHITECTURE.html §样式系统</a>。
+  <a href="ARCHITECTURE.html#sec-6">ARCHITECTURE.html §6</a>。
 </p>
 
 <h3>运行管理</h3>
@@ -68,9 +69,9 @@ RELOAD  # 热重载配置与 CSS 样式（改完即生效，无需重启）</cod
 
 <h2>明确不做</h2>
 <table>
-  <tr><th>不做</th><th>理由</th></tr>
+  <tr><th>不做</th><th>说明</th></tr>
   <tr><td>通用任务栏框架 / 面向其它合成器</td><td>定位是 Hyprland 专属精品应用，不做 X11、不做跨平台抽象</td></tr>
-  <tr><td>工作区跨显示器移动</td><td>遵循"严格预分配"原则：每屏固定管理连续的工作区 ID，映射关系稳定可预期</td></tr>
+  <tr><td>工作区跨显示器移动</td><td>每屏固定管理连续 Workspace ID（原则定义见 <a href="ARCHITECTURE.html#sec-1">ARCHITECTURE.html §1「严格预分配」</a>）</td></tr>
   <tr><td>WiFi 连接交互 / 蓝牙配对</td><td>仅显示状态；连接与配对交互为后续扩展项</td></tr>
 </table>
 
@@ -78,7 +79,7 @@ RELOAD  # 热重载配置与 CSS 样式（改完即生效，无需重启）</cod
 
 <h2>项目群</h2>
 <p>
-  成员清单见下表；仓库结构与依赖视角见 <a href="ARCHITECTURE.html#sec-1">ARCHITECTURE.html §仓库结构</a>；
+  成员清单见下表；仓库结构与依赖视角见 <a href="ARCHITECTURE.html#sec-3-2">ARCHITECTURE.html §3.2</a>；
   各成员边界以各自 README 为权威。
 </p>
 <table>
@@ -86,13 +87,10 @@ RELOAD  # 热重载配置与 CSS 样式（改完即生效，无需重启）</cod
   <tr><td><code>breadknife</code>（本目录）</td><td>Hyprland Wayland 任务栏（二进制 <code>bread</code>）；项目群根</td><td>应用，消费者是人</td></tr>
   <tr><td><code>breadpan</code></td><td>SNI 托盘协议栈单库：内置 Watcher 登记中心 + 逻辑 Host API + GTK 深度整合</td><td>库，消费者是开发者</td></tr>
 </table>
-<p>
-  命名逻辑：breadknife = 面包刀（切面包的最终应用）；breadpan = 烤盘（承放、供取用）。
-</p>
-<p>
-  组装约定：消费方进程内一次 <code>Tray::start</code> 组装（登记中心就位、存量 Item 反向发现、事件通道建立）；
-  仓库结构与依赖视角见 <a href="ARCHITECTURE.html#sec-1">ARCHITECTURE.html §1</a>。
-</p>
+<ul class="note">
+  <li>命名逻辑：breadknife = 面包刀（切面包的最终应用）；breadpan = 烤盘（承放、供取用）。</li>
+  <li>托盘组装契约见 <a href="ARCHITECTURE.html#sec-4-3">ARCHITECTURE.html §4.3</a>。</li>
+</ul>
 
 <h2>文档地图</h2>
 <table>
@@ -101,6 +99,7 @@ RELOAD  # 热重载配置与 CSS 样式（改完即生效，无需重启）</cod
   <tr><td><a href="ARCHITECTURE.html">ARCHITECTURE.html</a></td><td>仓库结构、时序图、接口契约、数据模型与转换</td></tr>
   <tr><td><a href="CODE.html">CODE.html</a></td><td>实现骨架：文件树、类型与签名、伪码调用栈</td></tr>
   <tr><td><a href="BUILD.html">BUILD.html</a></td><td>构建依赖、构建与本地运行</td></tr>
+  <tr><td><a href="breadpan/README.html">breadpan/</a></td><td>成员项目文档（库 README 起）</td></tr>
 </table>
 
 <h2>Credits</h2>
