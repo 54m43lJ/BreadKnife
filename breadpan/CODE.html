@@ -86,7 +86,6 @@ impl TrayHandle {
         T: Send + 'static,
         F: FnOnce(BusCenter) -&gt; Fut + Send + 'static,
         Fut: Future&lt;Output = Result&lt;T, TrayError&gt;&gt; + Send + 'static;
-    // 同步桥：命令 future 派发内部运行时 + std::sync::mpsc 阻塞等待，守卫上限 sync_guard_ms（语义见 ARCHITECTURE §4.2）；阻塞等待一律走 std——tokio blocking 访问器在异步上下文 panic；禁 rt.block_on（§4.5.1）
 }
 impl Drop for TrayHandle {
     fn drop(&amp;mut self);
@@ -100,6 +99,10 @@ impl RuntimeShared {
     /// 优雅停机（幂等，§4.7.2）
     fn shutdown(&amp;self);
 }</code></pre>
+<ul class="note">
+  <li>同步桥：命令 future 派发内部运行时 + <code>std::sync::mpsc</code> 阻塞等待，守卫上限 <code>sync_guard_ms</code>（语义见 ARCHITECTURE §4.2）；</li>
+  <li>阻塞等待一律走 std——tokio blocking 访问器在异步上下文 panic；禁 <code>rt.block_on</code>（§4.5.1）。</li>
+</ul>
 
 <h3 id="sec-3-events">3.3. events.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub enum TrayEvent;          //见 ARCHITECTURE §4.2（含 NameChanged / OwnerChanged）
@@ -120,8 +123,8 @@ impl EventQueue {
 <h3 id="sec-3-tracker">3.4. tracker.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub(crate) struct ItemEntry {
     pub service: String,   // 服务名（= TrayItemId；知名名或唯一名皆可，§4.3.1）
-    pub unique: String,    // 属主唯一名（信号发送者恒为唯一名、与服务名可能不一致——注册时
-                           // GetNameOwner 把服务名解析为属主唯一名存此，即信号归属匹配键，§4.3.1）
+    pub unique: String,    // 属主唯一名（信号归属匹配键；与服务名可能不一致，
+                           // 注册时 GetNameOwner 解析，§4.3.1）
     pub path: String,      // Item 对象路径（交互寻址用）
     pub alive: bool,       // 最近一次存活探测结论
     pub menu: Option&lt;String&gt;, // dbusmenu 对象路径；None = 无 DBusMenu
@@ -162,7 +165,7 @@ pub(crate) async fn fetch_item(bus: &amp;BusCenter, entry: &amp;ItemEntry)
 /// 枚举；空 Title → None；§4.1.3）
 pub(crate) fn tray_item_from_props(entry: &amp;ItemEntry, props: &amp;HashMap&lt;String, OwnedValue&gt;)
     -&gt; TrayItem;
-/// GetAll（kde → fd 前缀回退；双级探测第二级，§4.1.2）
+/// GetAll（前缀策略见 ARCHITECTURE §2；双级探测第二级，§4.1.2）
 pub(crate) async fn read_all(bus: &amp;BusCenter, service: &amp;str, path: &amp;str)
     -&gt; Result&lt;HashMap&lt;String, OwnedValue&gt;, TrayError&gt;;
 /// 注册期路由探测 → (menu, menu_only)（§4.3.1）
@@ -223,24 +226,27 @@ async fn debounce_task(bus: BusCenter);</code></pre>
 impl BusParts {
     pub(crate) fn new(config: TrayConfig, events: Arc&lt;EventQueue&gt;) -&gt; Self;
 }
-pub(crate) struct BusCenter { /* conn（zbus tokio 特性）+ rt（内部运行时 Handle）+ timeout + BusParts 共享件 */ }
+pub(crate) struct BusCenter {
+    pub(crate) conn: zbus::Connection,   // zbus tokio 特性
+    pub(crate) rt: Handle,               // 内部运行时；任务经 spawn / cmd 派发
+    pub(crate) timeout: Duration,        // = config.timeout_ms
+    // 其余字段：BusParts 共享件 + 启动期状态 snapshot_done / deferred_removed（见下方法组）
+}
 impl BusCenter {
     /// 内部线程 + CurrentThread 运行时启动，ready 交付装配结果（§4.1.1）
     pub(crate) fn spawn_runtime(parts: BusParts)
         -&gt; (mpsc::Receiver&lt;Result&lt;BusCenter, TrayError&gt;&gt;, thread::JoinHandle&lt;()&gt;);
-    /// DBus 方法调用（逐调用 timeout_ms 约束；前缀回退由调用方完成）
+    /// DBus 方法调用（逐调用 timeout_ms 约束；接口名前缀策略见 ARCHITECTURE §2）
     pub(crate) async fn call&lt;T, B&gt;(&amp;self, dest: &amp;str, path: &amp;str, iface: &amp;str,
                                    method: &amp;str, body: &amp;B) -&gt; Result&lt;T, TrayError&gt;;
     /// 同步桥（§4.5）
     pub(crate) fn cmd&lt;T, F&gt;(&amp;self, f: F) -&gt; Result&lt;T, TrayError&gt;;
-    /// 内部运行时后台任务派发
+    /// 运行时上派发后台任务（受理即忘）；需 JoinHandle 的并发扇出直接用 rt.spawn（§4.1.3 §4.6）
     pub(crate) fn spawn&lt;F&gt;(&amp;self, f: F);
-    // ── 快照栅栏（§4.1.3）──
-    snapshot_done: Arc&lt;AtomicBool&gt;,                  // 置位后事件源走增量路径
-    deferred_removed: Arc&lt;Mutex&lt;Vec&lt;TrayItemId&gt;&gt;&gt;,   // 启动期 Removed 缓冲
+    // ── 快照栅栏（§4.1.3）：置位前入册的 Item 由快照承载，其后走增量事件 ──
     fn is_snapshot_done(&amp;self) -&gt; bool;
     fn mark_snapshot_done(&amp;self);
-    fn defer_removed(&amp;self, id: TrayItemId);
+    fn defer_removed(&amp;self, id: TrayItemId);          // 启动期 Removed 缓冲
     fn take_deferred_removed(&amp;self) -&gt; Vec&lt;TrayItemId&gt;;
     // ── 停机标记（原子/守卫通道）：is_stopping / begin_stopping / is_stopped /
     //    set_stopped / request_stop / report_fatal / report_displaced /
@@ -260,7 +266,7 @@ pub(crate) async fn release(bus: &amp;BusCenter);</code></pre>
 
 <h4 id="sec-3-dbus-iface">3.6.4. iface.rs（协议面：成员语义见 ARCHITECTURE §4.4）</h4>
 <pre><code>pub(crate) struct WatcherIface { bus: BusCenter }
-// org.freedesktop 前缀（规范原文拼写）协议面：成员与 WatcherIface 等价，挂同一路径（见 ARCHITECTURE §4.4）
+// org.freedesktop 前缀（规范原文拼写）协议面：成员与 WatcherIface 等价，挂同一路径（策略与语义见 ARCHITECTURE §2、§4.4）
 pub(crate) struct FreedesktopWatcherIface { bus: BusCenter }
 #[interface(name = "org.kde.StatusNotifierWatcher")]
 impl WatcherIface {
@@ -324,9 +330,9 @@ fn dispatch_void&lt;F, Fut&gt;(bus: &amp;BusCenter, entry: ItemEntry, id: String
 where
     F: FnOnce(BusCenter, ItemEntry) -&gt; Fut + Send + 'static,
     Fut: Future&lt;Output = Result&lt;(), TrayError&gt;&gt; + Send + 'static;
-/// SNI 定位方法调用（kde → fd 前缀回退，§4.5.1 §4.5.2）
+/// SNI 定位方法调用（前缀策略见 ARCHITECTURE §2，§4.5.1 §4.5.2）
 async fn invoke_xy(bus: &amp;BusCenter, entry: &amp;ItemEntry, method: &amp;str, x: i32, y: i32) -&gt; Result&lt;(), TrayError&gt;;
-/// Scroll(delta, orientation) 调用（同前缀回退）
+/// Scroll(delta, orientation) 调用（前缀策略见 ARCHITECTURE §2）
 async fn invoke_scroll(bus: &amp;BusCenter, entry: &amp;ItemEntry, delta: i32, orient: &amp;str) -&gt; Result&lt;(), TrayError&gt;;</code></pre>
 
 <h3 id="sec-3-gtk">3.7. gtk/ <a href="#sec-1">↑ 文件树</a></h3>
@@ -360,7 +366,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │              ├── watcher::mount_interfaces(bus)?
 │              │    // org.kde / org.freedesktop 两前缀挂同一路径；名未在位则报到无从发生
 │              ├── spawn_signal_tasks(bus)
-│              │    // 6 条 match rule 常驻任务（NOC / New*×2 / PropertiesChanged×2 / dbusmenu，经 pump_signal_stream 订阅，§4.2 §4.3.2 §4.4.2）
+│              │    // 6 条 match rule 常驻任务（经 pump_signal_stream 订阅，§4.2 §4.3.2 §4.4.2）
 │              ├── bus.spawn(heartbeat::heartbeat_task(bus, HEARTBEAT_PERIOD))（§4.6）
 │              ├── discover_existing(bus)（§4.1.2）
 │              ├── queue_snapshot(bus)（§4.1.3）
@@ -368,13 +374,13 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │              └── watcher::WatcherService::start(bus)?
 │                   ├── bus.conn.request_name_with_flags(WATCHER_NAME, RequestNameFlags::DoNotQueue.into())
 │                   │    // 名申请必须经 Connection API——raw RequestName 不建立该名入站调用路由
-│                   └── 已被他人持有？ → NameTaken
+│                   └── 已被他人持有？
+│                        // NameTaken 返回
 ├── ready_rx.try_recv()（轮询至 bootstrap 结果）
-│    // 引导总时限 max(10×timeout_ms, 10s) 守护；超时/失败 → join 内部线程并返回 Err
-└── return (TrayHandle{shared: Arc&lt;RuntimeShared&gt;}, 事件通道 Receiver)</code></pre>
+│    // 引导总时限 max(10×timeout_ms, 10s) 守护；超时/失败 → join 内部线程</code></pre>
 
 <ul class="note">
-  <li>Watcher 名最后申请——申请前报到无从发生，快照投递后所有报到以增量事件衔接；若先申请名，等待 Watcher 出现的 Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> 抢在快照之前——实测复现；</li>
+  <li>Watcher 名最后申请——申请前报到无从发生，快照投递后所有报到以增量事件衔接；若先申请名，等待 Watcher 出现的 Item（如 clash-verge）会在快照收集前报到，其 <code>Added</code> 抢在快照之前；</li>
   <li>订阅（spawn_signal_tasks）与存活探测（heartbeat_task）先于申请名同理：名在位即可能收到信号与超时，须先就位才不丢；</li>
   <li>节流任务（debounce_task）不在此列——其交付始于快照之后，随栅栏置位启动（§4.2）；</li>
   <li>总线上未跟踪对象的信号被空过滤（可忽略）。</li>
@@ -430,7 +436,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 
 <h4 id="sec-4-3-1">4.3.1. 报到（RegisterStatusNotifierItem 受理）</h4>
 <pre><code>内部: WatcherIface::register_status_notifier_item(service)
-     // org.kde / org.freedesktop 两前缀等价：两接口挂同一路径（§3.6.4）
+     // org.kde / org.freedesktop 两接口挂同一路径（§3.6.4；前缀策略见 ARCHITECTURE §2）
 ├── header.sender() → Option&lt;UniqueName&gt;
 │    // 调用方唯一名，#[zbus(header)] 注入
 └── dbus::register_item(bus, service, sender, announce=true) → Result&lt;bool, TrayError&gt;
@@ -478,8 +484,8 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │    // dispatch 同步桥
 ├── bus.entry_of(id) → ItemEntry
 │    // 不在册 → ItemNotFound
-├── entry.menu == None？ → Err
-│    // dbusmenu 对象路径取自登记簿记（注册时探测 Menu 属性）；None = 无菜单，不可拉取
+├── entry.menu == None？
+│    // dbusmenu 对象路径取自登记簿记（注册时探测 Menu 属性）；None = 无菜单，不可拉取（Err 返回）
 └── menu::read_layer(bus, entry, parent)
      // 根层 parent=0，展开层 = entry_id；GetLayout 子树逐项转换，失败静默丢弃
      ├── bus.call(AboutToShow(parent))
@@ -502,18 +508,20 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 <h4 id="sec-4-5-1">4.5.1. 左键（同步路径与 Menu 回退）</h4>
 <pre><code>流程 left_click(id) / left_click_at(id, 0, 0)
 ├── input(id, Input::Left) → bus.cmd(interact::route)
-│    // 同步桥：rt.spawn 派发命令 future 至内部运行时 + std::sync::mpsc 阻塞等待（守卫 sync_guard_ms，超时语义见下方）；禁 rt.block_on（CurrentThread 运行时由内部线程驱动，跨线程并发 block_on 属未定义行为）
+│    // 同步桥（机制见 §3.2）
 ├── bus.entry_of(id) → ItemEntry
 │    // 不在册 → ItemNotFound
-├── menu_only &amp;&amp; DBusMenu 在册？ → menu::read_layer(...)（§4.4.1）→ return InteractionOutcome::Menu
+├── menu_only &amp;&amp; DBusMenu 在册？ → menu::read_layer(...)（§4.4.1）
+│    // 交付 InteractionOutcome::Menu
 └── interact::invoke_xy(entry, Activate, (x, y))
      // 就地等待往返
-     ├── Ok → events.send(InteractionResult{Activate, Ok})；return InteractionOutcome::Dispatched
-     ├── Err(超时)？ → return Err
-     │    // 超时即止：不跨前缀重试、不回退
-     ├── Err(非超时) &amp;&amp; DBusMenu 在册？ → menu::read_layer(...)（§4.4.1）→ return InteractionOutcome::Menu
-     │    // 回退无回执事件
-     └── Err(非超时) 无菜单 → return Err</code></pre>
+     ├── Ok → events.send(InteractionResult{Activate, Ok})
+     ├── Err(超时)？
+     │    // 超时即止，Err 返回
+     ├── Err(非超时) &amp;&amp; DBusMenu 在册？ → menu::read_layer(...)（§4.4.1）
+     │    // 回退无回执事件；交付 InteractionOutcome::Menu
+     └── Err(非超时) 无菜单
+          // Err 返回</code></pre>
 
 <ul class="note">
   <li>回退分支的失败形态为同步快失败，与超时无关。</li>
@@ -539,28 +547,27 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │    │    └── 否则 → invoke_xy(entry, ContextMenu, (x, y))
 │    ├── middle_click → invoke_xy(entry, SecondaryActivate, (x, y))
 │    └── scroll_up / scroll_down / scroll_left / scroll_right → invoke_scroll(entry, ∓steps, vertical / horizontal)
-│         // invoke_*：org.kde 前缀优先，非超时失败回退 org.freedesktop；任一侧超时 → 立即报错；双前缀俱败 → 合并上报两侧错误
-├── Menu 流程？ → return InteractionOutcome::Menu
+│         // invoke_*：发起只用 org.kde 前缀（ARCHITECTURE §2）；超时即止
+├── Menu 流程？
+│    // 交付 InteractionOutcome::Menu
 └── events.send(InteractionResult{op, result})
-     // VOID 调用（含延续方法 menu_activate）受理即返回 InteractionOutcome::Dispatched，回执经事件异步交付</code></pre>
+     // VOID 调用（含延续方法 menu_activate）受理即返回，回执经事件异步交付</code></pre>
 
 <h3 id="sec-4-6">4.6. 存活探测循环</h3>
 <pre><code>内部: heartbeat_task(bus, HEARTBEAT_PERIOD)
 ├── bus.conn.call_method(GetNameOwner(自身唯一名))
 │    // 探测总线，受 timeout_ms 约束；经 conn.call_method 直取 zbus 错误分类（bus.call 已归一化）——IO 类错误（InputOutput / Handshake / Connection）→ bus.report_fatal()（Fatal 分支 §4.7.3）；超时 → 视作繁忙，跳过本拍
-├── bus.rt.spawn 逐条 bus.call(Get(Status))（PROPS_IFACE，超时 timeout_ms）
+├── bus.rt.spawn 逐条 bus.call(Get(Status))（PROPS_IFACE，kde 接口，超时 timeout_ms）
 │    ├── Ok → ItemTracker::set_alive(service, true)
 │    └── Err → ItemTracker::set_alive(service, false)
-│         // 均为覆盖最近一次结论
-└── return
-     // 结论仅写登记簿记，不产生事件——消费方经 is_alive(id) / item(id) 读取</code></pre>
+│         // 均为覆盖最近一次结论；不产生事件——消费方经 is_alive(id) / item(id) 读取</code></pre>
 
 <h3 id="sec-4-7">4.7. 三终局与停机（Displaced / Fatal / 优雅退出）</h3>
 
 <h4 id="sec-4-7-1">4.7.1. 所有权丢失（Displaced）</h4>
 <pre><code>内部: name_owner_changed_task 收到 NameOwnerChanged(Watcher 名, 属主 → "")
      // 极罕见边缘路径（触发条件见 ARCHITECTURE §3.7）
-├── bus.is_stopping() || bus.is_stopped()？ → 忽略本信号
+├── bus.is_stopping() || bus.is_stopped()？
 │    // 停机路径主动释放名引发的 NOC 在此吞掉，不产生 Displaced
 ├── bus.report_displaced()
 │    // displaced watch 通道通知 mod::run
@@ -568,16 +575,15 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
      ├── ItemTracker::clear() → Vec&lt;ItemEntry&gt;
      ├── bus.set_stopped()
      │    // 服务转停止形态，不再受理登记
-     ├── events.send(Displaced)；events.close()
-     └── return
+     └── events.send(Displaced)；events.close()
           // 终局报错（语义见 ARCHITECTURE §3.7）</code></pre>
 
 <h4 id="sec-4-7-2">4.7.2. 停机（shutdown）</h4>
 <pre><code>流程 shutdown()（TrayHandle::shutdown() / 最后一个实例的 TrayHandle::drop() → RuntimeShared::shutdown）
 ├── Arc::strong_count(&amp;self.shared) == 1？（Drop 路径）
-│    // self.shared: Arc&lt;RuntimeShared&gt;——RuntimeShared 仅由 TrayHandle 持有（内部任务只持子 Arc）；计数 == 1 即最后一个实例
-├── bus.is_stopped()？ → return
-│    // 幂等守卫
+│    // 计数 == 1 即最后一个实例（RuntimeShared 仅由 TrayHandle 持有；内部任务只持子 Arc）
+├── bus.is_stopped()？
+│    // 幂等守卫——已停机直接结束
 ├── bus.set_stopped()
 ├── bus.begin_stopping()
 │    // 名释放引发的 NameOwnerChanged 不得触发 Displaced（§4.7.1）
@@ -599,9 +605,8 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
      │    // 释放 Watcher 名——尽力而为：断连时名可能已随总线不可达
      ├── ItemTracker::clear()
      ├── bus.set_stopped()
-     ├── events.send(Fatal(msg))；events.close()
-     │    // 终止宣告（投递语义见 ARCHITECTURE §4.2）
-     └── 终局：不重试</code></pre>
+     └── events.send(Fatal(msg))；events.close()
+          // 终止宣告（投递语义见 ARCHITECTURE §4.2）；终局不重试</code></pre>
 
 <h3 id="sec-4-8">4.8. 渲染直出（icon_paintable）</h3>
 <pre><code>流程 icon_paintable(&amp;IconSource) → gdk::Paintable
@@ -612,7 +617,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │    ├── IconTheme::for_display(display)
 │    │    // 逐显示连接取用
 │    └── theme.has_icon(name)？
-│         ├── 是 → theme.lookup_icon(name, [], LOOKUP_SIZE=48, scale=1, Ltr, IconLookupFlags::empty())
+│         ├── 是 → theme.lookup_icon(name, [], size, scale, Ltr, IconLookupFlags::empty())
 │         └── 否 → missing_icon()
 │              // image-missing 占位：Icon Naming Spec 保留名
 ├── IconSource::Path？ → gdk::Texture::from_filename(path)

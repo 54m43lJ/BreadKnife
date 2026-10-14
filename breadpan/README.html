@@ -47,7 +47,9 @@
   <tr><td>菜单读取</td><td><code>menu()</code>：内置 AboutToShow 前置通知，随后现场拉取根层单层布局；子层经 <code>menu_expand(id, entry_id)</code> 按需逐层展开</td></tr>
   <tr><td>GTK 渲染直出</td><td><code>icon_paintable(icon) -&gt; gdk::Paintable</code>：主题名 → 主题图标；文件路径 → 文件纹理（Ayatana 生态事实扩展，加载失败回退 image-missing）；位图 → 内存纹理</td></tr>
 </table>
-<p>渲染与交互呈现由你（消费方）负责。</p>
+<ul class="note">
+  <li>渲染与交互呈现由你（消费方）负责。</li>
+</ul>
 
 <h3>上手指引</h3>
 <ol>
@@ -66,11 +68,13 @@
   <tr><td>不对进程外 Host 负责</td><td>自包含设计：逻辑 Host 是进程内下游；总线上 Host 相关成员仅保留兼容桩（受理即忘 / 恒真），零簿记</td></tr>
   <tr><td>不做外部 Watcher 客户端模式</td><td>多个 Watcher 不能共存——拒绝与终局语义、建议动作见 <a href="ARCHITECTURE.html#sec-3-7">ARCHITECTURE.html §3.7</a>、<a href="ARCHITECTURE.html#sec-4-2">§4.2</a></td></tr>
   <tr><td>不做 XEmbed/X11 传统托盘</td><td>场景钉死 Wayland + SNI（传统规范原文：<a href="https://specifications.freedesktop.org/systemtray-spec/latest/">Freedesktop System Tray Specification</a>）</td></tr>
-  <tr><td>不提供移除/强制退出 Item 的通路</td><td>移除权专属服务名消失；官方未定义任何强制退出方法，pid 仅能从官方服务名的 PID 段解析</td></tr>
+  <tr><td>不提供移除/强制退出 Item 的通路</td><td>移除权专属服务名消失；官方未定义任何强制退出方法，pid 仅能从服务名的 PID 段解析</td></tr>
   <tr><td>不泄漏 tokio 运行时</td><td>运行时为库内私有，消费方无需装配；公开面无 async fn——异步只出现在事件通道消费端（<code>recv().await</code>，由 <code>glib::spawn_future_local</code> 承载），入口与交互方法均为同步签名</td></tr>
 </table>
-<p>字段级透传取舍（AttentionMovieName、菜单 shortcut、vendor 属性等）见
-<a href="ARCHITECTURE.html#sec-4-3">ARCHITECTURE.html §4.3 数据模型字段表</a>。</p>
+<ul class="note">
+  <li>字段级透传取舍（AttentionMovieName、菜单 shortcut、vendor 属性等）见
+  <a href="ARCHITECTURE.html#sec-4-3">ARCHITECTURE.html §4.3 数据模型字段表</a>。</li>
+</ul>
 
 <h2>适用前提</h2>
 <ul>
@@ -85,7 +89,7 @@
 <table>
   <tr><th>示例</th><th>演示内容</th></tr>
   <tr><td><code>minimal</code></td><td>最小消费方：启动 → 消费事件流 → 打印快照与全部事件</td></tr>
-  <tr><td><code>interactions</code></td><td>交互与菜单：activate / 滚轮 / <code>menu()</code> 现场读取 / <code>menu_activate</code></td></tr>
+  <tr><td><code>interactions</code></td><td>交互与菜单：activate / 滚轮 / <code>menu()</code>·<code>menu_expand</code> 现场读取 / <code>menu_activate</code></td></tr>
 </table>
 
 <footer>

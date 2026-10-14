@@ -1,8 +1,10 @@
 # Documentation Guidelines
-Each project should contain 3 documents in HTML:
+Each project should contain the following documents in HTML:
 1. README.html
-3. ARCHITECTURE.html
-4. CODE.html
+2. ARCHITECTURE.html
+3. CODE.html
+4. BUILD.html — produced once development is complete: it guides other developers in using and building on
+   the project; it is not written during the design phase, but it is a document the project keeps.
 
 The end goal is a comprehensive set of design constraints that is immediately useful to any developer implementing the code. 
 
@@ -18,6 +20,8 @@ Other constraints:
 - Do not keep any record of amendments to previous versions because it only add confusion to the context.
 - Escape `&`, `<` and `>` as `&amp;`, `&lt;` and `&gt;` wherever they are content rather than markup — code blocks (`<pre>/<code>`) especially. Browsers parse unescaped angle brackets as tags and silently delete them (generics like `Result<T, E>` lose everything from `<` on; ASCII-diagram arrows like `<--` vanish too). Only real HTML tags stay unescaped.
 - Supplementary text (notes under diagrams, tables, file trees and call-stack blocks) is always a bulleted list in a darker gray: `<ul class="note"><li>…</li></ul>` (color token `--note` in style.css) — never flowing prose.
+- Section layout applies to every document: the opening may carry paragraph-form qualifying text (when structured representation is not possible); the middle must be structured content — code blocks/diagrams/tables — never prose; the end may carry bulleted-point supplements (`ul.note`) only.
+- An in-code comment carrying more than three points of information becomes a trailing supplement list (`ul.note`) after its code block; the comment itself keeps only what the signature or the call needs.
 - ARCHITECTURE and CODE each keep a dedicated chapter for conventions shared across interfaces — placed right after the first chapter; it may stay empty. A convention is stated once there and referenced from the affected sections instead of being repeated.
 
 ## Readme
@@ -31,7 +35,6 @@ RULES:
 - **mermaid graph is to be completely avoided. sequence and activity diagrams are drawn with PlantUML (see "Diagrams: PlantUML" below); ASCII graph or actual pictures for everything else.**
 - **Architecture document should be customer-facing. Everything a customer (app that depends on it, user of this application, etc.) would directly interact with should be documented here. The remaining internal structure and mechanisms should be in CODE.html instead.**
 - Optionally, any finer requirement that cannot be described by straightforward mechanisms should be attached to the end of that section as complement. This part should always be the last resort, prefer mechanism over specific constraint whenever possible.
-- **Section layout: the opening may carry paragraph-form qualifying text (when structured representation is not possible); the middle must be structured content — code blocks/diagrams/tables — never prose; the end may carry bulleted-point supplements (`ul.note`) only.**
 
 -----
 

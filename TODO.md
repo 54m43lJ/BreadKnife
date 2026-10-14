@@ -5,3 +5,4 @@
 - [ ] breadpan 同步桥守卫可配置化：`TrayConfig` 新增 `sync_guard_ms`（默认 30000），`BusCenter::cmd` 守卫改读该值（单次 `recv_timeout(sync_guard_ms)`）；守卫到期返回 `TrayError::Hung`（新增 variant，语义：内部未在守卫内完成——运行时楔死或守卫配置过低；与 Timeout「对端慢可重试」区分）；ARCHITECTURE §4.1 §4.2 / CODE §4.5.1
 - [ ] breadpan MenuChanged 并入节流合并：`dbusmenu_signals_task` 由 `events.send(MenuChanged(id))` 改 `pending_menu.insert(id)`（栅栏前丢弃保留）；`BusParts`/`BusCenter` 增 `pending_menu`；`debounce_task` 双集合冲洗（与「节流任务后移」同函数，可一并做）——MenuChanged 为速率放大器，与 Changed 同为重读触发器，窗口合并安全（ARCHITECTURE §4.2、CODE §4.2 §4.4.2）
 - [ ] breadpan 心跳间隔显式化：`heartbeat_task` 增 `period` 参数，调用点传入常量（`bus.spawn(heartbeat::heartbeat_task(bus, HEARTBEAT_PERIOD))`；常量 `HEARTBEAT_PERIOD` 已在 heartbeat.rs 定义）（CODE §4.1.1 §3.6.5 §4.6）
+- [ ] breadpan 前缀策略对齐：`props::read_all` / `interact::invoke_xy` / `invoke_scroll` 去除 `org.freedesktop` 回退——发起请求一律只用 `org.kde` 前缀（ARCHITECTURE §2 前缀策略、CODE §3.5 §4.5.2；dev 现状为 kde → fd 回退）
