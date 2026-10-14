@@ -115,14 +115,12 @@ src/
    自愈并入单一 id（临时唯一名 id 升级为知名名时投递 `NameChanged`），不再出两张
    图标；迁移后按事件语义处理 `NameChanged` 重键即可（见
    [breadpan/ARCHITECTURE.html §4.2](breadpan/ARCHITECTURE.html#sec-4-2)）。
-8. demo-tray 目前只有文档、无实现（示例仅 `breadpan/examples/*`）；不影响本迁移，
-   但"验收基准"操作矩阵可借鉴其 ARCHITECTURE §7。
 
 ## 7. 验证计划
 
 - 构建：`cargo check/build`（不再需要 libastal 系统依赖）；`cd breadpan &&
   dbus-run-session -- cargo test`（库全量测试）。
-- 真机矩阵（Hyprland + DBus，对照 demo-tray/ARCHITECTURE §7 验收表与旧 astal 版行为）：
+- 真机矩阵（Hyprland + DBus，对照旧 astal 版行为；操作台可借 breadpan 的 interactions 示例 REPL）：
   - 启动：快照一次到位，多显示器图标一致；
   - 生命周期：启停应用 → `Added/Removed`；状态/图标变更 → `Changed` 重读生效；
   - 交互：左键（含 menu_only 项）、中键、右键（DBusMenu 菜单与 ContextMenu 两路）、
