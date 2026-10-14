@@ -11,25 +11,12 @@ note right of breadpan
 end note
 breadpan -> item: AboutToShow(parent)
 note right of item
-  常规前置：告知弹出在即，
-  触发 Item 惰性构建 / 刷新
+  常规前置：触发 Item 惰性构建 / 刷新
 end note
 item --> breadpan: 需要更新?
 breadpan -> item: GetLayout(parent, 1 层)
-note right of item
-  懒加载：每次一层
-  （recursionDepth = 1）
-end note
 breadpan -> item: GetGroupProperties
 item --> breadpan: 布局 + 属性
-breadpan -> breadpan: 组装该层快照（助记符解析 + raw 逃生门）
+breadpan -> breadpan: 组装该层快照
 breadpan --> 消费方: InteractionOutcome::Menu
-note over 消费方
-  子层展开 → menu_expand(id, entry_id)，
-  深层按需逐层加载
-end note
-note over breadpan
-  Item 侧 LayoutUpdated / ItemsPropertiesUpdated →
-  仅转发 MenuChanged 事件，是否重取由消费方决定
-end note
 @enduml

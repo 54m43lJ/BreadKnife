@@ -44,10 +44,6 @@ examples/                # 唯一示例目录：可运行的用法实例（READM
 </ul>
 
 <h2 id="sec-2">2. 通用约定</h2>
-<ul>
-  <li>通用约定（列表输出按 id 排序、零缓存 · 现场读取、公开面全同步）统一见
-  <a href="ARCHITECTURE.html#sec-2">ARCHITECTURE.html §2</a>；本文件不复述，各章按需引用。</li>
-</ul>
 
 <h2 id="sec-3">3. 内部类型与方法签名</h2>
 <ul class="note">
@@ -274,7 +270,7 @@ impl WatcherIface {
         service: &amp;str,
     );   // #[zbus(header)] 取消息头 sender → dbus::register_item（§4.3.1）
     #[zbus(property)]
-    fn registered_status_notifier_items(&amp;self) -&gt; Vec&lt;String&gt;;  // → 在册清单（排序见 §2）
+    fn registered_status_notifier_items(&amp;self) -&gt; Vec&lt;String&gt;;  // → 在册清单（排序见 <a href="ARCHITECTURE.html#sec-2">ARCHITECTURE §2</a>）
     fn register_status_notifier_host(&amp;self, service: &amp;str);     // 兼容桩：受理即忘
     #[zbus(property)]
     fn is_status_notifier_host_registered(&amp;self) -&gt; bool;       // 兼容桩：恒真
@@ -401,7 +397,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 ├── bus.rt.spawn(|| props::fetch_item(bus, entry))（逐条并发）
 │    // fetch_item = read_all + tray_item_from_props（宽容取值归一化，§3.5）；单个读取失败 → 记过程叙述，该 Item 不入快照
 ├── items.sort_by_key(id)
-│    // 列表输出按 id 排序（§2）
+│    // 列表输出按 id 排序（<a href="ARCHITECTURE.html#sec-2">ARCHITECTURE §2</a>）
 ├── events.send(TrayEvent::Snapshot{items})
 ├── bus.mark_snapshot_done()
 │    // 与入队之间无 await：单线程运行时内不可分割，不存在「快照已入队、栅栏未置位」中间态
