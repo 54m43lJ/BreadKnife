@@ -18,6 +18,7 @@ Other constraints:
 - Do not keep any record of amendments to previous versions because it only add confusion to the context.
 - Escape `&`, `<` and `>` as `&amp;`, `&lt;` and `&gt;` wherever they are content rather than markup — code blocks (`<pre>/<code>`) especially. Browsers parse unescaped angle brackets as tags and silently delete them (generics like `Result<T, E>` lose everything from `<` on; ASCII-diagram arrows like `<--` vanish too). Only real HTML tags stay unescaped.
 - Supplementary text (notes under diagrams, tables, file trees and call-stack blocks) is always a bulleted list in a darker gray: `<ul class="note"><li>…</li></ul>` (color token `--note` in style.css) — never flowing prose.
+- ARCHITECTURE and CODE each keep a dedicated chapter for conventions shared across interfaces — placed right after the first chapter; it may stay empty. A convention is stated once there and referenced from the affected sections instead of being repeated.
 
 ## Readme
 1. WHAT & WHY

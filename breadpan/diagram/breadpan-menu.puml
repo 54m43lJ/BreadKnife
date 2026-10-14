@@ -5,7 +5,7 @@ participant "Item（dbusmenu）" as item
 
 消费方 -> breadpan: 入口
 note right of breadpan
-  right_click / left_click(menu_only) 路由命中（§2.7）；
+  right_click / left_click(menu_only) 路由命中（§3.6）；
   或 menu() / menu_expand()
   （弹窗打开期间 MenuChanged 重取）
 end note
@@ -23,7 +23,7 @@ end note
 breadpan -> item: GetGroupProperties
 item --> breadpan: 布局 + 属性
 breadpan -> breadpan: 组装该层快照（助记符解析 + raw 逃生门）
-breadpan --> 消费方: Outcome::Menu
+breadpan --> 消费方: InteractionOutcome::Menu
 note over 消费方
   子层展开 → menu_expand(id, entry_id)，
   深层按需逐层加载

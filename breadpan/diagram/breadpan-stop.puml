@@ -22,7 +22,7 @@ note right of bp
 end note
 bp -> bp: graceful_shutdown：清空簿记；通道 close
 ch --> app: recv() → None
-bp -> bp: join_handle.join()
+bp -> bp: self.join.take() → JoinHandle::join()
 
 == Displaced（异常丢失，极罕见）==
 note over bus

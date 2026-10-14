@@ -10,10 +10,11 @@ note right of bp
   挂载协议面（org.kde / org.freedesktop 两前缀）——
   名未在位，报到无从发生
 end note
-bp -> 会话总线: 订阅变更 / 死亡清理信号（全局 match rule）\n+ 启动心跳 / 节流周期任务
+bp -> 会话总线: 订阅变更 / 死亡清理信号（全局 match rule）\n+ 启动心跳任务
 bp -> item: 反向发现：ListNames 扫描 + 探测
-bp -> bp: 登记最小集入册（唯一名 + 对象路径）
+bp -> bp: 登记最小集入册（服务名 + 对象路径 + 属主唯一名）
 bp -> bp: 逐个现场读取 → 入队 Snapshot（全部 Item）
+bp -> bp: 快照栅栏置位 → 启动节流任务
 bp -> 会话总线: 申请 Watcher 名（最后申请）
 note right of 会话总线
   已被持有 → NameTaken（多 Watcher 不能共存）；
