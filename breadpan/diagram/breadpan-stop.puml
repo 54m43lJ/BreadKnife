@@ -5,9 +5,9 @@ participant "会话总线" as bus
 participant "事件通道" as ch
 
 == 优雅退出（正常路径）==
-app -> bp: Handle::shutdown()
+app -> bp: TrayHandle::shutdown()
 note right of app
-  或最后一个 Handle drop 自动触发
+  或最后一个实例的 TrayHandle::drop() 自动触发
 end note
 bp -> bp: set_stopped；begin_stopping
 note right of bp

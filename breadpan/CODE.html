@@ -569,7 +569,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
           // 终局报错：被其它 Watcher 取代；不重试、不强制夺回</code></pre>
 
 <h4 id="sec-3-7-2">3.7.2. 停机（shutdown）</h4>
-<pre><code>流程 shutdown()（Handle::shutdown / 最后一个 Handle drop → RuntimeShared::shutdown）
+<pre><code>流程 shutdown()（TrayHandle::shutdown() / 最后一个实例的 TrayHandle::drop() → RuntimeShared::shutdown）
 ├── bus.is_stopped()？ → return
 │    // 幂等守卫
 ├── bus.set_stopped()
