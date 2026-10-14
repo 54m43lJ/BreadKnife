@@ -547,7 +547,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │    │    └── 否则 → invoke_xy(entry, ContextMenu, (x, y))
 │    ├── middle_click → invoke_xy(entry, SecondaryActivate, (x, y))
 │    └── scroll_up / scroll_down / scroll_left / scroll_right → invoke_scroll(entry, ∓steps, vertical / horizontal)
-│         // invoke_*：发起只用 org.kde 前缀（ARCHITECTURE §2）；超时即止
+│         // invoke_*：寻址 fallback——kde 优先、fd 回退（ARCHITECTURE §2）
 ├── Menu 流程？
 │    // 交付 InteractionOutcome::Menu
 └── events.send(InteractionResult{op, result})
@@ -557,7 +557,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 <pre><code>内部: heartbeat_task(bus, HEARTBEAT_PERIOD)
 ├── bus.conn.call_method(GetNameOwner(自身唯一名))
 │    // 探测总线，受 timeout_ms 约束；经 conn.call_method 直取 zbus 错误分类（bus.call 已归一化）——IO 类错误（InputOutput / Handshake / Connection）→ bus.report_fatal()（Fatal 分支 §4.7.3）；超时 → 视作繁忙，跳过本拍
-├── bus.rt.spawn 逐条 bus.call(Get(Status))（PROPS_IFACE，kde 接口，超时 timeout_ms）
+├── bus.rt.spawn 逐条 bus.call(Get(Status))（PROPS_IFACE，寻址 fallback §2，超时 timeout_ms）
 │    ├── Ok → ItemTracker::set_alive(service, true)
 │    └── Err → ItemTracker::set_alive(service, false)
 │         // 均为覆盖最近一次结论；不产生事件——消费方经 is_alive(id) / item(id) 读取</code></pre>
