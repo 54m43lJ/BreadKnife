@@ -30,7 +30,7 @@
 <ul>
   <li><strong>一次启动即用</strong>：<code>Tray::start</code> 一行，登记中心就位、存量 Item 就绪；</li>
   <li><strong>零协议词汇</strong>：SNI/DBusMenu 细节不出现在消费方代码里；</li>
-  <li><strong>零详情缓存</strong>：登记只存唯一名 + 对象路径 + 存活字段（alive），其余信息一律 DBus 即时读取，交付即最新；</li>
+  <li><strong>零详情缓存</strong>：登记簿记只存最小集（定义见 <a href="ARCHITECTURE.html#sec-4-3">ARCHITECTURE.html §4.3</a>），其余信息一律 DBus 即时读取，交付即最新；</li>
   <li><strong>原子一致</strong>：首事件即完整快照，其后增量事件无重叠无缺口；</li>
   <li><strong>异步交付</strong>：事件流走单实例 tokio mpsc（<code>start</code> 交付唯一通道），主线程经 <code>glib::spawn_future_local</code> await 消费，不阻塞 UI；</li>
   <li><strong>渲染直出</strong>：图标一次性转成可绘制对象，直接上屏。</li>
@@ -61,7 +61,7 @@
 <p>能力级边界以本节为权威。</p>
 <table>
   <tr><th>不做</th><th>说明</th></tr>
-  <tr><td>不缓存 SNI 详情</td><td>登记簿记仅存唯一名 + 对象路径 + 存活字段（alive）；属性/图标/菜单等详情一律 DBus 即时读取（zvariant/serde 反序列化为原生结构），变更以轻量事件通告、不推数据</td></tr>
+  <tr><td>不缓存 SNI 详情</td><td>登记簿记仅存最小集（定义见 <a href="ARCHITECTURE.html#sec-4-3">ARCHITECTURE.html §4.3</a>）；属性/图标/菜单等详情一律 DBus 即时读取（zvariant/serde 反序列化为原生结构），变更以轻量事件通告、不推数据</td></tr>
   <tr><td>不拥有任何 UI</td><td>无窗口/布局/事件循环；菜单渲染与弹出定位归消费方</td></tr>
   <tr><td>不对进程外 Host 负责</td><td>自包含设计：逻辑 Host 是进程内下游；总线上 Host 相关成员仅保留兼容桩（受理即忘 / 恒真），零簿记</td></tr>
   <tr><td>不做外部 Watcher 客户端模式</td><td>多个 Watcher 不能共存：启动期总线名已被持有 → <code>NameTaken</code> 报错（建议整体退出或隐藏托盘功能）；持有期不可被替换（切换须先手动终止本程序）；所有权异常丢失 → <code>Displaced</code> 终局报错，不重试、不夺回</td></tr>
@@ -70,12 +70,12 @@
   <tr><td>不泄漏 tokio 运行时</td><td>运行时为库内私有，消费方无需装配；公开面无 async fn——异步只出现在事件通道消费端（<code>recv().await</code>，由 <code>glib::spawn_future_local</code> 承载），入口与交互方法均为同步签名</td></tr>
 </table>
 <p>字段级透传取舍（AttentionMovieName、菜单 shortcut、vendor 属性等）见
-<a href="ARCHITECTURE.html#sec-3-3">ARCHITECTURE.html §3.3 数据模型字段表</a>。</p>
+<a href="ARCHITECTURE.html#sec-4-3">ARCHITECTURE.html §4.3 数据模型字段表</a>。</p>
 
 <h2>适用前提</h2>
 <ul>
   <li>Wayland 会话 + GTK 框架；</li>
-  <li>DBus session bus 可用，且 Watcher 总线名未被他人持有——多个 Watcher 不能共存，已被持有则 <code>NameTaken</code>（定义见 <a href="ARCHITECTURE.html#sec-1">ARCHITECTURE.html §1 术语表</a>）。</li>
+  <li>DBus session bus 可用，且 Watcher 总线名未被他人持有——多个 Watcher 不能共存，已被持有则 <code>NameTaken</code>（定义见 <a href="ARCHITECTURE.html#sec-4-2">ARCHITECTURE.html §4.2 错误表</a>）。</li>
 </ul>
 
 <h2>实例代码</h2>

@@ -319,8 +319,9 @@ pub(crate) fn parse_mnemonic(raw: &amp;str) -&gt; String;</code></pre>
 /// 语义输入路由（§4.5.1 §4.5.2）
 pub(crate) async fn route(bus: &amp;BusCenter, id: &amp;str,
                           input: Input) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
-/// 延续方法：dbusmenu Event(menu_item_id, "clicked", Value::I32(0), ts: u32) 提交（ts 为当前时间 timestamp，Unix 毫秒）
-pub(crate) fn menu_activate(bus: &amp;BusCenter, id: &amp;str, menu_item_id: i32) -&gt; Result&lt;(), TrayError&gt;;
+/// 延续方法：dbusmenu Event(menu_item_id, "clicked", Value::I32(0), ts: u32) 提交（ts 为当前时间 timestamp，Unix 毫秒）；
+/// VOID 受理即返回 InteractionOutcome::Dispatched；回执入队 InteractionResult（§4.5.2）
+pub(crate) async fn menu_activate(bus: &amp;BusCenter, id: &amp;str, menu_item_id: i32) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
 /// VOID 交互后台派发，回执入队 InteractionResult（§4.5.2）
 fn dispatch_void&lt;F, Fut&gt;(bus: &amp;BusCenter, entry: ItemEntry, id: String, op: InteractionOp, f: F)
 where
@@ -546,7 +547,7 @@ fn pixmap_to_paintable(p: &amp;Pixmap) -&gt; gdk::Paintable;         // ARGB32 �
 │         // invoke_*：org.kde 前缀优先，非超时失败回退 org.freedesktop；任一侧超时 → 立即报错；双前缀俱败 → 合并上报两侧错误
 ├── Menu 流程？ → return InteractionOutcome::Menu
 └── events.send(InteractionResult{op, result})
-     // VOID 调用受理即返回 InteractionOutcome::Dispatched，回执经事件异步交付</code></pre>
+     // VOID 调用（含延续方法 menu_activate）受理即返回 InteractionOutcome::Dispatched，回执经事件异步交付</code></pre>
 
 <h3 id="sec-4-6">4.6. 存活探测循环</h3>
 <pre><code>内部: heartbeat_task(bus, HEARTBEAT_PERIOD)

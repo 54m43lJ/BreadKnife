@@ -97,7 +97,7 @@
   <tr><th>阶段</th><th>触发</th><th>库内动作</th><th>交付</th></tr>
   <tr><td>报到</td><td><code>RegisterStatusNotifierItem</code></td><td>最小集入册（幂等；探测 Menu 属性；最小集定义见 <a href="#sec-4-3">§4.3</a>）</td><td><code>Added(id)</code></td></tr>
   <tr><td>变更</td><td><code>PropertiesChanged</code>（<a href="https://dbus.freedesktop.org/doc/dbus-specification.html#standard-interfaces-properties">D-Bus 规范 · 标准接口</a>）/ 官方 <code>New*</code> 信号（<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item-signals">SNI 规范 §3.3</a>）</td><td>信号入待通告集合，窗口内按 Item 合并</td><td><code>Changed(id)</code>——零详情缓存：只报「该 Item 有变化」，不携带数据（投递语义 <a href="#sec-4-2">§4.2</a>）</td></tr>
-  <tr><td>同名换主</td><td><code>NameOwnerChanged</code> 且新旧属主均非空（应用重启直接顶名）</td><td>属主唯一名重绑定 + 路由字段就地重探；id 与对象生死不变——不拆 Removed + Added</td><td><code>OwnerChanged(id)</code>（信息性，无必做动作）</td></tr>
+  <tr><td>同名换主</td><td><code>NameOwnerChanged</code> 且新属主非空（应用重启直接顶名）</td><td>属主唯一名重绑定 + 路由字段就地重探；id 与对象生死不变——不拆 Removed + Added</td><td><code>OwnerChanged(id)</code>（信息性，无必做动作）</td></tr>
   <tr><td>死亡</td><td><code>NameOwnerChanged</code> 且 new_owner 为空（进程退出 / 崩溃）</td><td>簿记移除</td><td><code>Removed(id)</code></td></tr>
 </table>
 <ul class="note">
@@ -130,7 +130,7 @@
   <li>Scroll 的 delta 规范未定义标度，符号约定 up/left 为负、down/right 为正，逐事件发送不聚合。</li>
 </ul>
 <ul class="note">
-  <li>坐标与步数经 _at/_by 变体传入（缺省 (0,0) / 1）——输入事件与「哪个 Item 被点击」的映射只存在于消费方 UI，本库核心不接入 GTK 输入上下文（零 GTK 依赖）；</li>
+  <li>坐标与步数经 _at/_by 变体传入（缺省 (0,0) / 1）——输入事件与「哪个 Item 被点击」的映射只存在于消费方 UI，本库核心不接入 GTK 输入上下文（GTK 依赖仅存在于 gtk 整合层）；</li>
   <li>Wayland 协议不向客户端提供全局坐标、GTK4 亦无 root 坐标 API，双方都只能得到近似值，而规范将 x/y 定位为 hint（Item 可忽略），缺省值即符合协议。</li>
 </ul>
 
@@ -208,8 +208,9 @@ impl TrayHandle {
     pub fn scroll_right(&amp;self, id: &amp;TrayItemId) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
     pub fn scroll_right_by(&amp;self, id: &amp;TrayItemId, steps: i32) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
     /// 延续方法：提交 InteractionOutcome::Menu 弹出中的条目点击（dbusmenu Event("clicked")）。
-    /// 不是打开菜单的入口——打开与 DBusMenu / ContextMenu 的路由内置于 right_click() / left_click()
-    pub fn menu_activate(&amp;self, id: &amp;TrayItemId, menu_item_id: i32) -&gt; Result&lt;(), TrayError&gt;;
+    /// VOID 受理即返回（InteractionOutcome::Dispatched，回执经事件流）；不是打开菜单的入口——
+    /// 打开与 DBusMenu / ContextMenu 的路由内置于 right_click() / left_click()
+    pub fn menu_activate(&amp;self, id: &amp;TrayItemId, menu_item_id: i32) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
 
     // ── 停机 ──
     /// 优雅停机：释放 Watcher 总线名、清空簿记、停内部运行时；幂等
@@ -253,7 +254,7 @@ pub fn icon_paintable(icon: &amp;IconSource) -&gt; gdk::Paintable;
     /// 双注册并入：临时唯一名 id 升级为知名名 id——同一对象 id 重键，
     /// 对象生死不变（旧 id 不发 Removed）；是否重载数据由消费方裁断
     NameChanged { old: TrayItemId, new: TrayItemId },
-    /// 同名换主：Item 服务名的属主更替（NameOwnerChanged 新旧属主均非空，
+    /// 同名换主：Item 服务名的属主更替（NameOwnerChanged 新属主非空，
     /// 时序见 §3.4）——id 与对象生死不变，簿记属主重绑定、路由字段就地重探；
     /// 属主更替对消费方无可感知影响：信息性事件，无必做动作
     OwnerChanged(TrayItemId),
@@ -282,7 +283,7 @@ pub enum InteractionOp { Activate, SecondaryActivate, ContextMenu, Scroll, MenuA
   <tr><td>Changed</td><td>变更通告（窗口合并，不携带数据——零详情缓存）</td><td>重读 <code>item()/items()</code> 后更新卡片</td></tr>
   <tr><td>MenuChanged</td><td>dbusmenu 布局/属性变更信号到达（窗口合并；<code>LayoutUpdated</code> / <code>ItemsPropertiesUpdated</code>，<a href="reference/com.canonical.dbusmenu.xml">接口定义原文</a>；AboutToShow 是宿主→Item 的方法，见 <a href="#sec-3-5">§3.5</a>）</td><td>决定何时重新 <code>menu()</code></td></tr>
   <tr><td>NameChanged</td><td>同一对象的登记 id 变更：临时唯一名 id 在知名名报到到达时升级；对象生死不变——旧 id 不发 Removed</td><td>以 new 重建 id 映射；是否重读数据由消费方裁断（对象未变）</td></tr>
-  <tr><td>OwnerChanged</td><td>同名换主：Item 服务名的属主更替（<code>NameOwnerChanged</code> 新旧属主均非空，应用重启直接顶名）——id 与对象生死不变，簿记属主唯一名重绑定、路由字段就地重探（时序 <a href="#sec-3-4">§3.4</a>）</td><td>无必做动作；需要时重读 <code>item(id)</code>（读即最新）</td></tr>
+  <tr><td>OwnerChanged</td><td>同名换主：Item 服务名的属主更替（<code>NameOwnerChanged</code> 新属主非空，应用重启直接顶名）——id 与对象生死不变，簿记属主唯一名重绑定、路由字段就地重探（时序 <a href="#sec-3-4">§3.4</a>）</td><td>无必做动作；需要时重读 <code>item(id)</code>（读即最新）</td></tr>
   <tr><td>Displaced</td><td>极罕见边缘路径：持有期不可被替换，所有权丢失仅由总线层异常触发（如总线守护重启），发生即被其它 Watcher 取代；不重试、不夺回（时序 <a href="#sec-3-7">§3.7</a>）</td><td>提示用户已被取代；整体退出或隐藏托盘功能，重建由消费方决定</td></tr>
   <tr><td>InteractionResult</td><td>交互调用的异步回执</td><td>提示或日志</td></tr>
   <tr><td>Narration</td><td>内部过程性说明（反向发现、重扫描等）</td><td>日志/调试</td></tr>
@@ -447,7 +448,6 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
 <h4>转换总表</h4>
 <table>
   <tr><th>输入</th><th>转换</th><th>输出</th></tr>
-  <tr><td>报到受理 / 反向发现 / 变更信号 → 各 Item 的 DBus 属性集</td><td>拉取 + 窗口合并</td><td>TrayItem；TrayEvent::Snapshot / Added / Changed</td></tr>
   <tr><td>dbusmenu AboutToShow + GetLayout(单层) + GetGroupProperties</td><td>前置通知 + 单层组装 + 助记符解析</td><td>MenuSnapshot（<code>menu()</code> / <code>menu_expand()</code> 返回值，非缓存）</td></tr>
   <tr><td>IconSource</td><td>主题命中判定（Icon Theme Spec）；文件位图加载与解码</td><td>gdk::Paintable（主题图标 / 文件纹理 / 位图纹理）</td></tr>
   <tr><td>DBus 交互调用回执</td><td>归一化</td><td>TrayEvent::InteractionResult</td></tr>
@@ -466,9 +466,9 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
 <table>
   <tr><th>DBus 成员</th><th>类型</th><th>语义</th></tr>
   <tr><td><code>RegisterStatusNotifierItem</code></td><td>方法</td><td>Item 报到：登记服务名（知名名或唯一名）+ 对象路径；报到即拉取跟踪（<a href="#sec-3-4">§3.4</a>）；同名重复报到幂等；同一对象以不同形态重复报到并入同一 id——临时唯一名 id 在知名名报到时经 <code>NameChanged</code> 升级（<a href="#sec-4-3">§4.3</a> id）</td></tr>
-  <tr><td><code>RegisteredStatusNotifierItems</code></td><td>方法</td><td>查询：当前在册 Item 清单</td></tr>
+  <tr><td><code>RegisteredStatusNotifierItems</code></td><td>属性</td><td>读取：当前在册 Item 清单</td></tr>
   <tr><td><code>RegisterStatusNotifierHost</code></td><td>方法</td><td>兼容桩：受理即忘——自包含设计不对进程外 Host 负责（<a href="#sec-1">§1 术语 Host</a>）</td></tr>
-  <tr><td><code>IsStatusNotifierHostRegistered</code></td><td>方法</td><td>兼容桩：恒真——逻辑 Host 进程内在位；个别 Item 探测此接口后才报到</td></tr>
+  <tr><td><code>IsStatusNotifierHostRegistered</code></td><td>属性</td><td>兼容桩：恒真——逻辑 Host 进程内在位；个别 Item 探测此接口后才报到</td></tr>
   <tr><td><code>StatusNotifierItemRegistered</code></td><td>信号</td><td>广播：Item 报到（协议面保真，供总线观察方）</td></tr>
   <tr><td><code>StatusNotifierItemUnregistered</code></td><td>信号</td><td>广播：Item 离开（死亡清理，<a href="#sec-3-4">§3.4</a>）</td></tr>
 </table>
