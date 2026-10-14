@@ -102,9 +102,18 @@ src/
    clash-verge）已端到端支持（`IconSource::Path` → 文件纹理，见
    [breadpan/ARCHITECTURE.html §4.3](breadpan/ARCHITECTURE.html#sec-4-3)）；
    迁移无此项工作量，真机联调时顺带确认即可。
-3. **同步接口阻塞 GTK 主线程**：`items()/_click()/menu()` 经内部同步桥等待 DBus，
-   单次受 `timeout_ms`（默认 2s）约束；病态 Item 可能短暂卡 UI。启动期可接受，
-   后续可把交互卸载到工作线程（`TrayHandle` 是 Send+Sync）。
+3. **同步接口阻塞范围（源码核查结论）**：公开方法在**调用线程**经同步桥等待；库内
+   **无跨 Item 阻塞**（每次调用独立派发为异步任务；全部 std 锁均为语句级、不跨 await；
+   事件 try_send 满则丢弃计数）。阻塞窗口 = 该调用链，单次上限 = `sync_guard_ms`
+   （默认 30s，运行时未推进的兜底；正常路径不可达）：
+   - 受理即返回（不阻塞）：`middle_click` / `scroll_*` / 右键无菜单（ContextMenu fallback）/
+     `menu_activate`——DBus 调用在内部后台执行，结果走 `InteractionResult` 事件；
+   - 左键：超时即止 ≈2s；非超时失败自动回退菜单链（≤2 次前缀尝试 + 3 次菜单调用）≈10s 上限；
+   - `menu()` / `menu_expand()` / 右键有菜单：`read_layer` 三次串行调用，病态 ≈4s、慢 ≈6s；
+   - `item(id)`：GetAll（≤2 次尝试）≈2–4s；`items()`：并发取数、等最慢一项 ≈2–4s（不随项数线性）。
+   应用侧从 GTK 信号回调同步调用时，冻结范围为**整条任务栏**（单进程单主循环、全部窗口与图标）；
+   按"整条任务栏冻结不可接受"标准，迁移时应把交互与重读（`Changed`→`item()`、`MenuChanged`→
+   `menu()`）放到工作线程发起、结果回投主上下文（`TrayHandle` 是 Clone + Send + Sync）。
 4. **单 Receiver、单 Watcher 名**：多显示器需要应用内扇出；同会话不可与其他 SNI
    host 并存（旧 astal 版本进程未退出时会 `NameTaken`），联调时注意。
 5. **Fatal/Displaced 无自动重连**：breadpan 语义为终局（不重试不夺回）。需决策：
@@ -115,6 +124,12 @@ src/
    自愈并入单一 id（临时唯一名 id 升级为知名名时投递 `NameChanged`），不再出两张
    图标；迁移后按事件语义处理 `NameChanged` 重键即可（见
    [breadpan/ARCHITECTURE.html §4.2](breadpan/ARCHITECTURE.html#sec-4-2)）。
+8. **启动兜底路径悬挂（源码核查发现的库侧缺陷）**：`Tray::start` 的整体超时分支先
+   `join.join()` 再返回；此时就绪通道接收端仍被其持有，运行线程完成引导后
+   `ready_tx.send(Ok)` 仍会成功并转入驻停（不退出），join 遂无限等待——
+   `bus.rs` 的"消费端放弃 → 发送失败 → 转停机"兜底被 join 顺序绕过。触发条件为引导
+   总耗时超过兜底（`max(timeout_ms×10, 10s)`，默认 20s；多个病态存量 Item 逐个探测
+   累积即可能触发）。修法方向：deadline 分支先释放就绪通道（drop `ready_rx`）再 join。
 
 ## 7. 验证计划
 
