@@ -7,7 +7,7 @@
 ## 待拍板
 
 1. **术语表（ARCHITECTURE §1）——已决：全部删除**。6 条术语无约束力，已移除；§1 仅保留指向 breadpan 定义的引用。连带修正：§5.1 与 README 中「严格预分配」的引用改为就地表述。
-2. **通用约定（ARCHITECTURE §2）——已决并落地**：「主线程约束」作废，替换为「分层与单一信息源」——bread daemon＝Model（无 GTK；信息源与全部映射唯一持有者），窗口进程＝View（GTK；渲染与本地交互）；有副作用（有状态）操作必走 daemon，不影响 daemon 追踪状态的操作允许（不强制）直通。「缺失降级」保留。④ 已澄清：daemon 只回数据、不碰 GTK（菜单快照交窗口渲染）。全部细则（IPC＝Unix socket、托盘链路、生命周期、入口、通知、CSS 路径跟踪）已并入 ARCHITECTURE / CODE / README。
+2. **通用约定（ARCHITECTURE §2）——已决并落地**：「主线程约束」作废，替换为「分层」（daemon＝Model，无 GTK；窗口进程＝View，GTK）与「操作执行原则」（有副作用操作必走 daemon；不影响 daemon 追踪状态的操作允许直通）两条。「缺失降级」保留。④ 已澄清：daemon 只回数据、不碰 GTK（菜单快照交窗口渲染）。全部细则（IPC＝Unix socket、托盘链路、生命周期、入口、通知、CSS 路径跟踪）已并入 ARCHITECTURE / CODE / README。
 3. **章外内容去向**：模块规格（§5）、样式系统（§6）、路线图（§7）在 GUIDELINES 骨架（术语 → 架构图 → 接口）之外，暂保留原位——是否需要调整（如样式并入接口、路线图移交 README）？
 4. **文档地图归属**：旧 ARCHITECTURE §10 与 README 重复，已从 ARCHITECTURE 删除；README 保留并补 breadpan 行。确认此归属。
 5. **组装约定裁剪（README）**：原段落与 ARCHITECTURE §4.3 重复，已裁为注记指向 §4.3。确认。

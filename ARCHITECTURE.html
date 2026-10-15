@@ -23,7 +23,8 @@
 
 <h2 id="sec-2">2. 通用约定</h2>
 <ul>
-  <li><strong>分层与单一信息源</strong>：bread daemon＝Model（无 GTK；信息源与全部映射的唯一持有者），窗口进程＝View（GTK；只渲染与本地交互）。有副作用（有状态）的操作必走 daemon；不影响 daemon 追踪状态的操作允许（不强制）直通。</li>
+  <li><strong>分层</strong>：bread daemon＝Model（无 GTK；信息源与全部映射的唯一持有者）；窗口进程＝View（GTK；只渲染与本地交互）。</li>
+  <li><strong>操作执行原则</strong>：有副作用（有状态）的操作必走 daemon；不影响 daemon 追踪状态的操作允许（不强制）直通。</li>
   <li><strong>缺失降级</strong>：服务 / 后端缺失时——入口组件自动隐藏（如无电池设备的电池、服务缺席的网络），弹出面板内操作项灰置并提示。</li>
 </ul>
 
@@ -247,7 +248,7 @@
   <tr><td>日历</td><td>GTK Calendar 组件（窗口本地）</td></tr>
 </table>
 <ul class="note">
-  <li>音量 / 亮度 / 媒体操作为有副作用操作，经 daemon 执行（见 <a href="#sec-2">§2「分层与单一信息源」</a>）；</li>
+  <li>音量 / 亮度 / 媒体操作为有副作用操作，经 daemon 执行（见 <a href="#sec-2">§2「操作执行原则」</a>）；</li>
   <li>入口组件与操作项的缺失降级见 <a href="#sec-2">§2「缺失降级」</a>。</li>
 </ul>
 
