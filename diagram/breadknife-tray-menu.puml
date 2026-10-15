@@ -1,20 +1,18 @@
 @startuml breadknife-tray-menu
 participant 用户
-participant "breadknife UI" as ui
-participant breadpan
+participant "窗口进程" as win
+participant "bread daemon（breadpan）" as daemon
 participant "托盘 Item" as item
 
-用户 -> ui: 右键托盘图标
-ui -> breadpan: right_click()
-breadpan -> item: AboutToShow（Menu 流程路由）
-item --> breadpan: 需要更新？
-breadpan -> item: GetLayout
-item --> breadpan: 最新全量布局
-breadpan --> ui: Outcome::Menu（菜单快照）
-ui -> ui: GTK 渲染弹出
-用户 -> ui: 点击条目
-ui -> breadpan: menu_activate()
-breadpan -> item: Event
-item --> breadpan: 异步回执
-breadpan --> ui: 受理结论
+用户 -> win: 右键托盘图标
+win -> daemon: tray.interact(right)（IPC）
+daemon -> item: AboutToShow → GetLayout → GetGroupProperties
+item --> daemon: 最新全量布局
+note right of daemon: 同步等待发生在此进程；窗口主循环不受影响
+daemon --> win: Outcome::Menu（菜单快照）
+win -> win: GTK 渲染弹出
+用户 -> win: 点击条目
+win -> daemon: tray.menu_activate（IPC）
+daemon -> item: Event
+daemon --> win: 受理结论
 @enduml
