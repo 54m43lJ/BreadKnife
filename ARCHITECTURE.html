@@ -16,15 +16,6 @@
 </blockquote>
 
 <h2 id="sec-1">1. 术语</h2>
-<table>
-  <tr><th>术语</th><th>含义</th></tr>
-  <tr><td>任务栏</td><td>每台显示器一条、屏幕顶部的常驻栏窗口；承载工作区、窗口信息、系统托盘与控制中心四类模块</td></tr>
-  <tr><td>主窗口</td><td>任务栏对应的 GTK Window 实例，每台活动显示器一个（显示器 → 主窗口映射见 <a href="#sec-4-4">§4.4</a>）</td></tr>
-  <tr><td>通知中心</td><td>窗口信息模块中经标题区弹出、缓存并展示桌面通知的列表（见 <a href="#sec-5-2">§5.2</a>）</td></tr>
-  <tr><td>控制中心</td><td>任务栏的状态入口与弹出面板：电池 / 网络 / 时钟入口，媒体 / 音量 / 亮度 / 日历面板（见 <a href="#sec-5-4">§5.4</a>）</td></tr>
-  <tr><td>严格预分配</td><td>每台显示器固定管理一段连续 Workspace ID 的绑定原则：映射关系稳定可预期，不支持跨显示器移动（见 <a href="#sec-5-1">§5.1</a>）</td></tr>
-  <tr><td>控制指令</td><td>经 <code>bread.sock</code> 发送的单行文本指令：<code>EXIT</code> / <code>TOGGLE</code> / <code>RELOAD</code>（契约见 <a href="#sec-4-2">§4.2</a>）</td></tr>
-</table>
 <ul class="note">
   <li>托盘域术语（Watcher、Item、渲染直出等）沿用成员库定义，见
   <a href="breadpan/ARCHITECTURE.html#sec-1">breadpan/ARCHITECTURE.html §1</a>，本文档不重复定义。</li>
@@ -162,7 +153,7 @@
 <h3 id="sec-5-1">5.1. Workspace 模块</h3>
 <table>
   <tr><th>环节</th><th>规格</th></tr>
-  <tr><td>绑定（反向映射）</td><td>启动与显示器插拔时，按各 Workspace 的 <code>monitor</code> 属性反向建表（原则见 <a href="#sec-1">§1「严格预分配」</a>）</td></tr>
+  <tr><td>绑定（反向映射）</td><td>启动与显示器插拔时，按各 Workspace 的 <code>monitor</code> 属性反向建表；每屏固定管理一段连续 Workspace ID，不支持跨显示器移动</td></tr>
   <tr><td>状态呈现</td><td>激活、空置、紧急三态；样式见 <a href="#sec-6-2">§6.2</a>（空置 = 该 ID 存在但无窗口）</td></tr>
   <tr><td>左键</td><td>切换至对应 Workspace</td></tr>
   <tr><td>滚轮</td><td>在当前显示器的 Workspace 列表中顺序切换</td></tr>
