@@ -10,7 +10,7 @@
   其余代码（daemon / hyprland / workspace / title）与托盘无关。
 - 结构性差距一条：astal 的 `Tray` 当前按显示器各建一个实例；breadpan 的 `Tray::start`
   是**进程级单实例**（Watcher 总线名独占、单 Receiver、无追加订阅），需要把托盘组装
-  上移为进程级服务，再向每个显示器的 UI 扇出事件。
+  上移为 daemon 的进程级服务，再经 IPC 向各窗口扇出数据（架构见 ARCHITECTURE §3）。
 - 最大工作量在右键菜单：astal 直接交付 `GMenuModel + GActionGroup`，
   `PopoverMenu::from_model` 一行渲染；breadpan 交付 `MenuSnapshot`，
   **GTK 弹出菜单由消费方组装**（含子层 `menu_expand` 懒加载与 `menu_activate` 下发）。
@@ -47,33 +47,21 @@
 
 ## 4. 目标结构与工作分解
 
-建议的最小结构（不为迁移做无关的模块重组，文档规划的 `src/modules/*` 属于后续任务）：
-
-```
-src/
-├── tray.rs                 # 新增：进程级托盘服务（组装 + 事件泵 + 多显示器扇出 + 停机）
-├── bar/
-│   ├── mod.rs              # 小改：把托盘服务传给每屏 ControlCenter
-│   ├── control_center.rs   # 重写：订阅事件、图标增删改、手势接线
-│   ├── tray_menu.rs        # 新增：MenuSnapshot → GTK 弹出菜单
-│   └── style.css           # 小改：菜单行/分隔符/toggle 样式
-├── daemon.rs               # 小改：退出路径触发 tray 停机
-└── main.rs                 # 小改：启动组装时序（如需）
-```
+目标结构见 [ARCHITECTURE.html §3](ARCHITECTURE.html) 与 [CODE.html §1](CODE.html)：daemon（breadpan 组装、Hyprland、系统服务、IPC 服务端）与窗口进程（GTK 渲染）两端。
 
 | 阶段 | 内容 | 估时（人日) |
 |---|---|---|
 | P0 依赖切换 | `Cargo.toml` 换为 `breadpan = { path = "breadpan" }`、锁文件更新、`cargo check` 通过 | 0.25–0.5 |
-| P1 托盘服务 | 进程级 `Tray::start` 一次组装；`glib::spawn_future_local` 事件泵；多显示器订阅/扇出；daemon 退出时 `shutdown()`；start 失败的降级（空托盘 + 日志） | 0.75–1.25 |
-| P2 Item 生命周期 | `Snapshot/Added/Removed/Changed` → 每屏图标增删改；`gtk::icon_paintable(&item.icon)` 渲染直出；`Changed` 重读 `item(id)`（替代 astal 的 gicon 推送） | 0.5–0.75 |
-| P3 交互接线 | 左/中/右键与四向滚轮手势 → `left_click_at` / `middle_click_at` / `right_click_at` / `scroll_*`；`InteractionOutcome::Menu` 分流到菜单弹窗 | 0.5–0.75 |
-| P4 菜单弹窗 | `MenuSnapshot` → GTK 弹出：子层 `menu_expand` 懒加载、toggle/图标/禁用/可见/分隔行、点击 `menu_activate`、弹窗打开期间 `MenuChanged` 重取刷新 | 1.5–2.5 |
+| P1 托盘服务（daemon） | daemon 内 `Tray::start` 一次组装；事件泵；经 IPC 向窗口扇出；daemon 退出时 `shutdown()`；start 失败的降级（空托盘 + 日志） | 0.75–1.25 |
+| P2 Item 生命周期 | `Snapshot/Added/Removed/Changed` → daemon 推送窗口；窗口 `gtk::icon_paintable(&item.icon)` 渲染直出；`Changed` 由 daemon 重读后推送（替代 astal 的 gicon 推送） | 0.5–0.75 |
+| P3 交互接线 | 窗口手势 → IPC → daemon 执行 `left_click_at` / `middle_click_at` / `right_click_at` / `scroll_*`；`InteractionOutcome::Menu` 回窗口分流到菜单弹窗 | 0.5–0.75 |
+| P4 菜单弹窗（窗口） | `MenuSnapshot`（来自 daemon）→ GTK 弹出：子层 `menu_expand` 懒加载、toggle/图标/禁用/可见/分隔行、点击 `menu_activate`、弹窗打开期间 `MenuChanged` 重取刷新 | 1.5–2.5 |
 | P5 真机联调 | Hyprland + 真实 Item（QQ 音乐、clash-verge）对照旧版验收；多屏插拔；退出清理；Fatal/Displaced 降级 | 0.75–1.25 |
 | P6 文档清理 | `README.md` 去 Astal/libastal 说明；样式与死代码；CI（另行合回 main 时删除 astal / appmenu-glib-translator 构建步骤） | 0.25–0.5 |
 | **合计** | | **4.5–7.5（较可能 5–6.5）** |
 
-代码量估算：新增/重写约 600–800 行（`tray.rs` ≈120–160，`tray_menu.rs` ≈250–350，
-`control_center.rs` 重写后 ≈150–190，接线与样式 ≈60–90），净增约 450–650 行。
+代码量估算（单进程形态下的托盘替换）：新增/重写约 600–800 行（daemon 托盘服务 ≈120–160、
+窗口菜单弹窗 ≈250–350、窗口托盘 UI 与接线 ≈200–290）；daemon / 窗口拆分与 IPC 的工作量另计。
 
 ## 5. API 对照（替换映射）
 
@@ -111,9 +99,8 @@ src/
    - 左键：超时即止 ≈2s；非超时失败自动回退菜单链（≤2 次前缀尝试 + 3 次菜单调用）≈10s 上限；
    - `menu()` / `menu_expand()` / 右键有菜单：`read_layer` 三次串行调用，病态 ≈4s、慢 ≈6s；
    - `item(id)`：GetAll（≤2 次尝试）≈2–4s；`items()`：并发取数、等最慢一项 ≈2–4s（不随项数线性）。
-   应用侧从 GTK 信号回调同步调用时，冻结范围为**整条任务栏**（单进程单主循环、全部窗口与图标）；
-   按"整条任务栏冻结不可接受"标准，迁移时应把交互与重读（`Changed`→`item()`、`MenuChanged`→
-   `menu()`）放到工作线程发起、结果回投主上下文（`TrayHandle` 是 Clone + Send + Sync）。
+   新架构下调用全部位于 daemon（无 GTK 主循环；阻塞不冻结任何窗口），窗口经 IPC 委托、
+   不受等待影响（daemon ↔ 窗口契约见 ARCHITECTURE §4.4）。
 4. **单 Receiver、单 Watcher 名**：多显示器需要应用内扇出；同会话不可与其他 SNI
    host 并存（旧 astal 版本进程未退出时会 `NameTaken`），联调时注意。
 5. **Fatal/Displaced 无自动重连**：breadpan 语义为终局（不重试不夺回）。需决策：
@@ -150,5 +137,5 @@ src/
 |---|---|
 | 最小等价迁移（图标+左右键+菜单，不加中键/滚轮） | 约 4–5 人日 |
 | 文档契约全量（含中键、四向滚轮、状态增强） | 约 5–6.5 人日（较可能值），上下限 4.5–7.5 |
-| 变化面 | 1 个文件重写、2 个新文件、4 处小接线；净增 450–650 行 |
+| 变化面 | 托盘替换本体：daemon 托盘服务 + 窗口渲染/菜单两端；净增约 600–800 行（另计架构拆分与 IPC） |
 | 库侧阻塞项 | 无；可选增强：文件路径图标（0.5 人日，breadpan 侧） |

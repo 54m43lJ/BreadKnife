@@ -7,7 +7,7 @@
 ## 待拍板
 
 1. **术语表（ARCHITECTURE §1）——已决：全部删除**。6 条术语无约束力，已移除；§1 仅保留指向 breadpan 定义的引用。连带修正：§5.1 与 README 中「严格预分配」的引用改为就地表述。
-2. **通用约定（ARCHITECTURE §2）——细则已定（1 项待澄清）**：「主线程约束」作废；改为分层——bread daemon＝Model（信息源与全部映射的唯一持有者），每窗口独立进程＝View（GTK；渲染与本地交互）。细则：① IPC＝Unix socket（请求应答＋推送；fd 传递留作增量升级）；② 托盘链路：窗口手势→IPC→daemon 执行 breadpan→结果回窗口，MenuChanged 定向推送；③ 命令原则：有副作用（有状态）操作必走 daemon，不影响 daemon 追踪状态的操作允许（不强制）直通；④ 【待澄清】daemon GTK 依赖与「GTK 元素生成」的确切含义（GTK 对象不可跨进程，需在两种可行读法中选定）；⑤ 生命周期：daemon 按显示器插拔 spawn/kill；崩溃重启＝延时＋重试上限；窗口惰性检测 daemon 死亡即退出；入口：`bread`（前台 daemon）/`bread daemon`（后台化）/`open-all`/`close-all`/`open|close <name> [-m monitor]`；⑥ 通知推全部窗口，弹窗在当前显示器；⑦ CSS 内容窗口加载、文件路径由 daemon 控制跟踪；⑧ 落地范围：ARCH/CODE/README＋breadpan 集成联动（已确认）。
+2. **通用约定（ARCHITECTURE §2）——已决并落地**：「主线程约束」作废，替换为「分层与单一信息源」——bread daemon＝Model（无 GTK；信息源与全部映射唯一持有者），窗口进程＝View（GTK；渲染与本地交互）；有副作用（有状态）操作必走 daemon，不影响 daemon 追踪状态的操作允许（不强制）直通。「缺失降级」保留。④ 已澄清：daemon 只回数据、不碰 GTK（菜单快照交窗口渲染）。全部细则（IPC＝Unix socket、托盘链路、生命周期、入口、通知、CSS 路径跟踪）已并入 ARCHITECTURE / CODE / README。
 3. **章外内容去向**：模块规格（§5）、样式系统（§6）、路线图（§7）在 GUIDELINES 骨架（术语 → 架构图 → 接口）之外，暂保留原位——是否需要调整（如样式并入接口、路线图移交 README）？
 4. **文档地图归属**：旧 ARCHITECTURE §10 与 README 重复，已从 ARCHITECTURE 删除；README 保留并补 breadpan 行。确认此归属。
 5. **组装约定裁剪（README）**：原段落与 ARCHITECTURE §4.3 重复，已裁为注记指向 §4.3。确认。
@@ -18,7 +18,7 @@
 10. **数据模型一处修正**：「工作区映射表」原表述（工作区 ID → 所属显示器）与 CODE `WorkspaceMap { by_monitor }` 方向相反，已统一为「显示器 → 工作区 ID 列表」。请确认以哪边为准。
 11. **README 单段小节**：「运行管理」「个性化」为单段散文——是否列表化，或「运行管理」移入将来的 BUILD.html？
 12. **悬空链接**：文档地图与 README 中的 BUILD.html 在当前分支尚不存在（按 GUIDELINES，BUILD 晚于实现）——保留指针即可？
-13. **托盘调用线程化（已决议）**：全同步公开面保留（异步彻底封装为同步、阻塞为正常现象）；爆炸半径由应用侧收敛——交互与重读（`Changed`/`MenuChanged`）一律工作线程发起、结果回投主上下文；库不提供线程设施。前提核查通过：公开数据面全 `Send`，唯一主线程例外为 `icon_paintable`。库侧条款已落（breadpan/ARCHITECTURE.html §2「同步封装」）；待办：应用侧按该模式实施（MIGRATION P1/P3）。
+13. **托盘调用线程化（已决议，随架构调整落位）**：全同步公开面保留；托盘调用整体位于 daemon（无 GTK——阻塞不冻结任何窗口），窗口经 IPC 委托、不受等待影响（见 ARCHITECTURE §4.4）。前提核查：公开数据面全 `Send`，唯一主线程例外为 `icon_paintable`（窗口侧渲染）。库侧条款已落（breadpan/ARCHITECTURE.html §2「同步封装」）；待办：应用侧按新架构实施（与 MIGRATION 联动）。
 14. **库侧缺陷待修**：`Tray::start` 兜底超时路径可能悬挂（启动卡死）——源码核查发现，修法方向见 MIGRATION §6.8。
 
 ## 已按规则执行（供抽查）
