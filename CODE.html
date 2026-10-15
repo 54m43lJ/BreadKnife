@@ -17,40 +17,89 @@
 </blockquote>
 
 <h2 id="sec-1">1. 文件树（规划）</h2>
-<pre><code>breadknife/               # 项目群根
+<pre><code>breadknife/               # 项目群根（单一二进制 bread：daemon / 窗口 / 客户端 三角色）
 ├── breadpan/             # 成员项目（内部结构见其 CODE.html）
-└── src/                  # breadknife 应用本体
-    ├── main.rs           # 入口：装配 daemon
-    ├── daemon.rs         # 生命周期；显示器 → 主窗口映射表
-    ├── ipc/
-    │   ├── hyprland.rs   # .socket2.sock 只读监听，事件解析分发
-    │   └── control.rs    # bread.sock 行协议服务（EXIT/TOGGLE/RELOAD）
-    ├── modules/
-    │   ├── workspace.rs  # 反向映射 + 三态工作区条
-    │   ├── window_info.rs # 活动窗口图标/标题 + 通知中心入口
-    │   ├── tray.rs       # breadpan 组装（Tray::start）+ 托盘 UI
-    │   └── center.rs     # 控制中心入口与弹出面板
-    ├── notify.rs         # org.freedesktop.Notifications 实现（通知守护角色）
-    ├── style.rs          # CSS 变量加载与 RELOAD 热重载
+└── src/
+    ├── main.rs           # 入口：子命令分发（daemon / open / close / …）
+    ├── daemon/           # bread daemon（Model，无 GTK）
+    │   ├── mod.rs        # 装配与事件循环；停机
+    │   ├── hyprland.rs   # Hyprland IPC 只读监听：显示器 / 工作区 / 活动窗口
+    │   ├── tray.rs       # breadpan 组装（Tray::start）+ 事件泵 + 交互执行 + 菜单读取
+    │   ├── system.rs     # UPower / NetworkManager / MPRIS；pamixer / brightnessctl / ddcutil
+    │   ├── notify.rs     # org.freedesktop.Notifications 实现（通知守护角色）
+    │   ├── windows.rs    # 窗口进程生命周期（spawn / kill / 崩溃重启）；显示器 → 窗口映射
+    │   └── ipc.rs        # Unix socket 服务端：请求应答 + 状态推送
+    ├── window/           # 窗口进程（View，GTK4）
+    │   ├── mod.rs        # 装配与 GTK 主循环；层壳窗口；模块组装
+    │   ├── ipc.rs        # IPC 客户端：快照 / 推送订阅、请求投递
+    │   ├── style.rs      # 按 daemon 跟踪的路径加载 CSS；reload 重读
+    │   ├── menu.rs       # MenuSnapshot → GTK 弹出菜单（自绘：懒加载 / 激活 / 刷新）
+    │   └── modules/
+    │       ├── workspace.rs    # 三态工作区条（渲染 + 手势捕获）
+    │       ├── window_info.rs  # 活动窗口图标 / 标题 + 通知中心弹窗
+    │       ├── tray.rs         # 托盘图标渲染（渲染直出）+ 手势捕获
+    │       └── center.rs       # 控制中心入口与弹出面板
+    ├── shared/           # daemon / 窗口共用
+    │   ├── protocol.rs   # IPC 消息类型（请求 / 应答 / 推送）
+    │   └── model.rs      # 共享数据模型（窗口切片、状态增量）
     └── assets/
         └── bread.css     # 默认主题（变量定义）</code></pre>
+<ul class="note">
+  <li>同一二进制承载三种角色：daemon、窗口（由 daemon spawn，<code>bread window --monitor …</code>）、客户端（指令转发）；</li>
+  <li>daemon/ 无 GTK 依赖；GTK 与 breadpan 渲染直出只在 window/。</li>
+</ul>
 
 <h2 id="sec-2">2. 通用约定</h2>
 
 <h2 id="sec-3">3. 内部类型与方法签名</h2>
 <ul class="note">
   <li>收录标准：只列关键内部类型与方法；条目只承载签名与一行用途，方法内部步骤归 <a href="#sec-4">§4</a> 调用栈，未列出者皆为局部实现细节；</li>
-  <li>协议语义（IPC 事件、控制指令、数据模型与转换）见 <a href="ARCHITECTURE.html#sec-4">ARCHITECTURE.html §4</a>，此处不重复。</li>
+  <li>协议语义（Hyprland 事件、控制指令、数据模型）见 <a href="ARCHITECTURE.html#sec-4">ARCHITECTURE.html §4</a>；IPC 消息与窗口切片的语义见 <a href="ARCHITECTURE.html#sec-4-4">ARCHITECTURE.html §4.4</a>，此处只列 Rust 形体（首版规划，随实现校准）。</li>
 </ul>
-<pre><code>pub struct Daemon {
-    windows: HashMap&lt;MonitorId, MainWindow&gt;,
-    // IPC / socket 连接、托盘组装句柄
+<pre><code>// shared/protocol.rs —— daemon ↔ 窗口 IPC（请求均有应答；推送无应答）
+pub enum Request {                       // 窗口 → daemon
+    TrayMenuRead { item: TrayItemId },
+    TrayMenuExpand { item: TrayItemId, entry: i32 },
+    TrayInteract { item: TrayItemId, input: InteractInput },   // left / middle / right / scroll_*（含坐标、步数）
+    TrayMenuActivate { item: TrayItemId, entry: i32 },
+    WorkspaceSwitch { id: u32 },
+    MediaControl { op: MediaOp },
+    VolumeSet { value: f64 },
+    BrightnessSet { value: f64 },
 }
 
+pub enum Response {
+    Menu(MenuSnapshot),                  // 菜单读取
+    Outcome(InteractionOutcome),         // 交互路由结果
+    Ack,                                 // 受理
+}
+
+pub enum Push {                          // daemon → 窗口
+    Snapshot(WindowSnapshot),            // 首连全量
+    State(StateDelta),                   // 工作区 / 活动窗口 / 系统状态增量
+    TrayState(TrayUpdate),               // 托盘项 增 / 删 / 改（携带 Item 数据）
+    MenuChanged { item: TrayItemId },    // 定向：弹窗打开期间的刷新触发
+    Notification(NotificationRecord),
+    Reload,                              // 按 daemon 跟踪的路径重读 CSS
+    Visibility(bool),
+}
+
+// shared/model.rs —— 跨进程共享数据
+pub struct WindowSnapshot {
+    monitor: String,
+    workspaces: Vec&lt;WorkspaceState&gt;,
+    active: Option&lt;ActiveWindow&gt;,
+    tray: Vec&lt;TrayItem&gt;,                 // breadpan 数据模型
+    notifications: Vec&lt;NotificationRecord&gt;,
+    css_path: String,
+}
+pub struct WorkspaceState { id: u32, phase: WorkspacePhase }    // 激活 / 空置 / 紧急
+pub struct ActiveWindow { class: String, title: String }
+pub struct TrayUpdate;                // 托盘项增删改 + breadpan TrayItem / IconSource
+pub struct NotificationRecord { id: u32, app_name: String, app_icon: String, summary: String, body: String }
+
+// daemon/hyprland.rs
 pub struct MonitorId(String);
-
-pub enum ControlCommand { Exit, Toggle, Reload }
-
 pub enum HyprlandEvent {
     MonitorAdded(MonitorId),
     MonitorRemoved(MonitorId),
@@ -59,80 +108,90 @@ pub enum HyprlandEvent {
     ConfigReloaded,
 }
 
-pub struct MainWindow;          // 每显示器一个（见 ARCHITECTURE §1「主窗口」）
-
-pub struct WorkspaceMap { by_monitor: HashMap&lt;MonitorId, Vec&lt;u32&gt;&gt; }
-
-pub struct NotificationRecord {
-    id: u32,
-    app_name: String,
-    app_icon: String,
-    summary: String,
-    body: String,
-}
-
-pub struct TrayUi {
-    tray: breadpan::TrayHandle,   // 进程级托盘服务句柄（组装见 ARCHITECTURE §4.3）
-}
-
+// daemon/mod.rs
+pub struct Daemon { /* Hyprland 连接、breadpan 句柄、系统服务、窗口表、IPC 服务端 */ }
 impl Daemon {
     pub fn start() -&gt; Result&lt;Self, Error&gt;;
-    pub fn run(self) -&gt; Result&lt;(), Error&gt;;   // 事件循环
+    pub fn run(self) -&gt; Result&lt;(), Error&gt;;              // 事件循环（Hyprland / DBus / 托盘 / IPC）
+    pub fn on_control(&amp;mut self, cmd: ControlCommand);
     fn on_hyprland_event(&amp;mut self, ev: HyprlandEvent);
-    fn on_control(&amp;mut self, cmd: ControlCommand);
-    fn spawn_window(&amp;mut self, mon: MonitorId);
-    fn destroy_window(&amp;mut self, mon: MonitorId);
-    fn reload(&amp;mut self);
+    fn spawn_window(&amp;mut self, monitor: &amp;str);
+    fn kill_window(&amp;mut self, monitor: &amp;str);
+    fn push(&amp;self, window: WindowId, msg: Push);        // 定向推送
+    fn broadcast(&amp;self, msg: Push);                     // 全窗口推送
 }
 
-// notify.rs：通知守护角色的 DBus 面向方法（签名按 zbus service 形态）
-impl Notifications { /* Notify / CloseNotification / GetCapabilities 等 */ }</code></pre>
+pub enum ControlCommand {                                // bread.sock 行协议（ARCHITECTURE §4.2）
+    Open { name: String, monitor: Option&lt;String&gt; },
+    Close { name: String, monitor: Option&lt;String&gt; },
+    OpenAll,
+    CloseAll,
+    Exit,
+    Reload,
+    Toggle,
+}
+
+// window/mod.rs
+pub struct WindowApp { /* IPC 客户端、层壳窗口、模块集 */ }
+impl WindowApp {
+    pub fn run(monitor: &amp;str) -&gt; Result&lt;(), Error&gt;;     // 连接 IPC → 取快照 → GTK 主循环
+    fn request(&amp;self, req: Request) -&gt; Result&lt;Response, Error&gt;;
+}</code></pre>
 
 <h2 id="sec-4">4. 关键流程调用栈（伪码）</h2>
 
 <h3 id="sec-4-1">4.1. 启动</h3>
-<pre><code>启动
+<pre><code>启动（bread [daemon]）
 ├── dbus::connect()（通知守护注册）
-├── Tray::start() → (handle, 事件通道)（登记中心就位 + 存量 Item 反向发现）
-├── glib::spawn_future_local()（消费托盘事件流）
 ├── hyprland::listen()（.socket2.sock 只读监听）
-├── 扫描显示器 → 对每台显示器
-│    ├── spawn_window(mon)（layer-shell 锚定 Top|Left|Right）
-│    └── build_modules(window)（workspace / window-info / tray / center）
-├── control::listen()（bread.sock 行协议服务）
-├── write_pid()
-└── run()（事件循环）</code></pre>
+├── Tray::start() → (handle, 事件通道)（登记中心就位 + 存量 Item 反向发现）
+├── ipc::listen()（Unix socket）
+├── 扫描显示器 → 对每台显示器 spawn_window(mon)
+│    └── 窗口连接 → push(snapshot)（工作区切片 / 托盘 / 系统状态 / CSS 路径）
+└── run()（事件循环）
 
-<h3 id="sec-4-2">4.2. 显示器插拔</h3>
+窗口进程启动（bread window --monitor …）
+├── ipc::connect()
+├── style::load(css_path)（路径来自快照）
+├── 创建层壳窗口 + 装配模块
+└── gtk::main()（渲染与交互循环）</code></pre>
+
+<h3 id="sec-4-2">4.2. 窗口进程生命周期（显示器插拔 / 崩溃）</h3>
 <pre><code>on_hyprland_event(MonitorAdded)
 └── spawn_window(mon)
-     ├── window_create()（layer-shell 锚定）
-     ├── build_modules(window)
-     └── 显示器映射表[mon] = window
+     ├── 登记 显示器 → 窗口 映射
+     └── 窗口连接 → push(snapshot)
 
 on_hyprland_event(MonitorRemoved)
-└── destroy_window(mon)
-     └── 移除显示器映射表条目</code></pre>
+└── kill_window(mon)
+     ├── 终止窗口进程
+     └── 移除映射条目
+
+窗口退出（含崩溃）
+└── 延时等待 → 重试 spawn（次数上限内）；超限放弃并记录</code></pre>
 
 <h3 id="sec-4-3">4.3. 控制指令</h3>
-<pre><code>on_control(cmd)
-├── Exit    → tray.shutdown() → destroy_windows() → 退出进程（释放 Watcher 名、停内部线程）
-├── Toggle  → toggle_windows()（全部窗口可见性）
-└── Reload  → reload()（重读配置与 CSS → 应用到全部窗口）</code></pre>
+<pre><code>bread open / close / open-all / close-all / exit / reload / toggle
+└── bread.sock → on_control(cmd)
+     ├── Open / Close（可带显示器）→ spawn_window / kill_window
+     ├── Reload → broadcast(Reload)（窗口按跟踪路径重读 CSS）
+     ├── Toggle → broadcast(Visibility)
+     └── Exit → 终止全部窗口进程 → tray.shutdown() → 退出进程</code></pre>
 
-<h3 id="sec-4-4">4.4. 托盘右键（与 breadpan 协作）</h3>
-<pre><code>用户右键托盘图标
-├── right_click(id) → Outcome::Menu(快照)（内含 AboutToShow）
-│    └── Outcome::Dispatched → ContextMenu fallback（Item 自绘，宿主不渲染）
-├── popup::show(快照)（GTK 渲染弹出）
-├── 点击条目 → menu_activate(id, entry_id) → 受理结论
-└── MenuChanged → menu() 重取 → 刷新弹出</code></pre>
+<h3 id="sec-4-4">4.4. 托盘右键（窗口 ↔ daemon）</h3>
+<pre><code>用户右键托盘图标（窗口进程）
+├── IPC: TrayInteract(right) → daemon
+│    └── right_click() → Outcome::Menu(快照)（阻塞在 daemon）
+│         └── Outcome::Dispatched → ContextMenu fallback（Item 自绘，宿主不渲染）
+├── 快照回窗口 → 渲染弹出
+├── 点击条目 → IPC: TrayMenuActivate → daemon → menu_activate
+└── 弹窗期间 MenuChanged → daemon 定向 push → 窗口重取刷新</code></pre>
 
 <h3 id="sec-4-5">4.5. 通知到达</h3>
-<pre><code>DBus Notify 调用
-├── on_notify()（组装通知记录：应用名/图标/摘要/正文/ID）
-├── notification_list.push(record)
-└── refresh_indicator()（标题区计数与入口呈现）</code></pre>
+<pre><code>DBus Notify 调用 → daemon（通知守护）
+├── 组装通知记录
+├── 缓存 + broadcast(Notification)（全部窗口）
+└── 各窗口：列表计数刷新；当前显示器弹窗</code></pre>
 
 </main>
 </body>
