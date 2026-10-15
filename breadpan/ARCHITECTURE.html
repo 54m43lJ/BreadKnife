@@ -47,7 +47,7 @@
   <li><strong>列表输出按 id 排序</strong>：在册条目的一切列表形态输出——快照 <code>Snapshot.items</code>、<code>items()</code>、协议面属性 <code>RegisteredStatusNotifierItems</code>——一律按 id 升序排列；顺序由内容唯一确定，与发现序 / 内部迭代序 / 并发完成序无关。</li>
   <li><strong>零缓存 · 现场读取</strong>：库不保存 Item/Menu 内容——一切数据现场读取、即时交付；事件只报事实、不携带数据。</li>
   <li><strong>前缀策略</strong>：本库自身命名（Watcher 服务名 / 协议面接口名 / 信号广播）只采用 <code>org.kde.*</code>（业界普遍实践）；寻址外部应用（属性读取 / 交互调用）采用 fallback——<code>org.kde.*</code> 优先、<code>org.freedesktop.*</code> 回退，且超时的调用不再重试另一前缀；解析入站消息（方法调用 / 信号匹配等）两前缀宽容处理。</li>
-  <li><strong>公开面全同步</strong>：全部方法为同步签名（无 async fn）、任意线程可调；异步收敛在事件消费端。</li>
+  <li><strong>同步封装</strong>：公开面全同步；异步收敛于实现（同步桥 + 库内运行时）。阻塞是契约的一部分。</li>
 </ul>
 
 <h2 id="sec-3">3. 架构图</h2>
