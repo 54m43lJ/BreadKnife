@@ -7,7 +7,7 @@
 ## 待拍板
 
 1. **术语表（ARCHITECTURE §1）——已决：全部删除**。6 条术语无约束力，已移除；§1 仅保留指向 breadpan 定义的引用。连带修正：§5.1 与 README 中「严格预分配」的引用改为就地表述。
-2. **通用约定（ARCHITECTURE §2）——方向已定（细则确认中）**：「主线程约束」作废；改为分层约定——bread daemon＝Model（无 GTK；信息源与全部映射的唯一持有者），每个窗口独立进程＝View（GTK；渲染与本地交互，数据与命令经 daemon）。「缺失降级」条保留、随新架构核位。待定：IPC 形态、托盘链路、命令方向、窗口生命周期、通知呈现。
+2. **通用约定（ARCHITECTURE §2）——细则已定（1 项待澄清）**：「主线程约束」作废；改为分层——bread daemon＝Model（信息源与全部映射的唯一持有者），每窗口独立进程＝View（GTK；渲染与本地交互）。细则：① IPC＝Unix socket（请求应答＋推送；fd 传递留作增量升级）；② 托盘链路：窗口手势→IPC→daemon 执行 breadpan→结果回窗口，MenuChanged 定向推送；③ 命令原则：有副作用（有状态）操作必走 daemon，不影响 daemon 追踪状态的操作允许（不强制）直通；④ 【待澄清】daemon GTK 依赖与「GTK 元素生成」的确切含义（GTK 对象不可跨进程，需在两种可行读法中选定）；⑤ 生命周期：daemon 按显示器插拔 spawn/kill；崩溃重启＝延时＋重试上限；窗口惰性检测 daemon 死亡即退出；入口：`bread`（前台 daemon）/`bread daemon`（后台化）/`open-all`/`close-all`/`open|close <name> [-m monitor]`；⑥ 通知推全部窗口，弹窗在当前显示器；⑦ CSS 内容窗口加载、文件路径由 daemon 控制跟踪；⑧ 落地范围：ARCH/CODE/README＋breadpan 集成联动（已确认）。
 3. **章外内容去向**：模块规格（§5）、样式系统（§6）、路线图（§7）在 GUIDELINES 骨架（术语 → 架构图 → 接口）之外，暂保留原位——是否需要调整（如样式并入接口、路线图移交 README）？
 4. **文档地图归属**：旧 ARCHITECTURE §10 与 README 重复，已从 ARCHITECTURE 删除；README 保留并补 breadpan 行。确认此归属。
 5. **组装约定裁剪（README）**：原段落与 ARCHITECTURE §4.3 重复，已裁为注记指向 §4.3。确认。
