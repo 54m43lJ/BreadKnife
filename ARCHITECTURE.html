@@ -102,7 +102,7 @@
   <tr><td>窗口管理</td><td>daemon 维护 显示器 → 窗口进程 映射；显示器插拔 spawn / kill；窗口崩溃延时重启（有重试上限）</td></tr>
   <tr><td>启动</td><td>daemon 建立 Hyprland 监听与托盘组装，逐屏 spawn 窗口进程；窗口连接 IPC、取全量快照后渲染</td></tr>
   <tr><td>运行</td><td>daemon 汇聚事件（Hyprland / DBus / 托盘）→ 状态推送；窗口本地交互 → 经 daemon 执行</td></tr>
-  <tr><td>退出</td><td>控制指令 <code>exit</code> → daemon 终止全部窗口进程并退出；窗口在通信失败（daemon 已退出）时自行退出</td></tr>
+  <tr><td>退出</td><td>daemon：控制指令 <code>exit</code> → 终止全部窗口进程 → 自身退出。窗口退出分两路：① daemon 主动终止（<code>exit</code> / <code>close</code> / 显示器移除）；② 面向 daemon 的互动失败时，经 PID 文件确认 daemon 已退出后自主退出</td></tr>
 </table>
 
 <h3 id="sec-3-5">3.5. 时序：启动</h3>
@@ -179,7 +179,7 @@
 </table>
 <ul class="note">
   <li>大对象（如位图图标）可经 fd 传递升级（memfd + <code>SCM_RIGHTS</code>），协议骨架不变；</li>
-  <li>断开重连：窗口重连后按首连流程再取全量快照。</li>
+  <li>断开处理：窗口经互动失败察觉断连——核 PID 文件确认 daemon 已退出则自主退出；daemon 仍在则重连，重连后按首连流程再取全量快照。</li>
 </ul>
 
 <h3 id="sec-4-5">4.5. 数据模型与转换</h3>

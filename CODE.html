@@ -141,6 +141,7 @@ impl WindowApp {
 <h2 id="sec-4">4. 关键流程调用栈（伪码）</h2>
 
 <h3 id="sec-4-1">4.1. 启动</h3>
+<h4 id="sec-4-1-1">4.1.1. daemon</h4>
 <pre><code>启动（bread [daemon]）
 ├── dbus::connect()（通知守护注册）
 ├── hyprland::listen()（.socket2.sock 只读监听）
@@ -148,26 +149,30 @@ impl WindowApp {
 ├── ipc::listen()（Unix socket）
 ├── 扫描显示器 → 对每台显示器 spawn_window(mon)
 │    └── 窗口连接 → push(snapshot)（工作区切片 / 托盘 / 系统状态 / CSS 路径）
-└── run()（事件循环）
-
-窗口进程启动（bread window --monitor …）
+└── run()（事件循环）</code></pre>
+<h4 id="sec-4-1-2">4.1.2. 窗口进程</h4>
+<pre><code>启动（bread window --monitor …）
 ├── ipc::connect()
 ├── style::load(css_path)（路径来自快照）
 ├── 创建层壳窗口 + 装配模块
 └── gtk::main()（渲染与交互循环）</code></pre>
 
-<h3 id="sec-4-2">4.2. 窗口进程生命周期（显示器插拔 / 崩溃）</h3>
+<h3 id="sec-4-2">4.2. 窗口进程生命周期</h3>
+<h4 id="sec-4-2-1">4.2.1. 上线（显示器增加）</h4>
 <pre><code>on_hyprland_event(MonitorAdded)
 └── spawn_window(mon)
      ├── 登记 显示器 → 窗口 映射
-     └── 窗口连接 → push(snapshot)
-
-on_hyprland_event(MonitorRemoved)
-└── kill_window(mon)
-     ├── 终止窗口进程
-     └── 移除映射条目
-
-窗口退出（含崩溃）
+     └── 窗口连接 → push(snapshot)</code></pre>
+<h4 id="sec-4-2-2">4.2.2. 退出路径①：daemon 终止窗口进程</h4>
+<pre><code>kill_window(mon)（exit / close / 显示器移除）
+├── 终止窗口进程
+└── 移除 显示器 → 窗口 映射条目</code></pre>
+<h4 id="sec-4-2-3">4.2.3. 退出路径②：窗口自主退出（daemon 死亡检测）</h4>
+<pre><code>互动失败（面向 daemon 的请求）
+└── 检查 PID 文件（/run/user/$UID/bread.pid）确认 daemon 已退出
+     └── 窗口自主退出</code></pre>
+<h4 id="sec-4-2-4">4.2.4. 崩溃重启</h4>
+<pre><code>窗口崩溃（daemon 仍存活）
 └── 延时等待 → 重试 spawn（次数上限内）；超限放弃并记录</code></pre>
 
 <h3 id="sec-4-3">4.3. 控制指令</h3>
