@@ -47,22 +47,28 @@
 
 <h3>控制指令</h3>
 <p>
-  通过 Unix Socket <code>/run/user/$UID/bread.sock</code> 发送文本指令（一行一条，<code>\n</code> 结尾）；
-  示例：<code>printf 'TOGGLE\n' | socat - /run/user/$UID/bread.sock</code>。
+  daemon 常驻运行后，通过 <code>bread</code> 客户端下达指令（底层为 Unix Socket 行协议，契约见
+  <a href="ARCHITECTURE.html#sec-4-2">ARCHITECTURE.html §4.2</a>）：
 </p>
-<pre><code>EXIT    # 退出守护进程
-TOGGLE  # 切换任务栏显示/隐藏
-RELOAD  # 热重载配置与 CSS 样式（改完即生效，无需重启）</code></pre>
+<pre><code>bread open-all                    # 打开全部窗口
+bread close-all                   # 关闭全部窗口
+bread open &lt;name&gt; [-m &lt;monitor&gt;]   # 打开指定窗口（可限定显示器）
+bread close &lt;name&gt; [-m &lt;monitor&gt;]  # 关闭指定窗口
+bread reload                      # 热重载配置与 CSS 样式（改完即生效，无需重启）
+bread exit                        # 退出 daemon</code></pre>
 
 <h3>个性化</h3>
 <p>
   一份 CSS 变量文件定义整套外观（底板色、文字色、强调色、语义色、边框），组件样式全部基于这些变量；
-  修改变量文件后发送 <code>RELOAD</code> 指令即可"改色即见"。变量清单见
+  修改变量文件后执行 <code>bread reload</code> 即可"改色即见"（CSS 文件路径由 daemon 跟踪）。变量清单见
   <a href="ARCHITECTURE.html#sec-6">ARCHITECTURE.html §6</a>。
 </p>
 
 <h3>运行管理</h3>
-<p>进程 ID 位于 <code>/run/user/$UID/bread.pid</code>，供脚本探测运行状态。</p>
+<p>
+  daemon 与窗口为独立进程：<code>bread</code> 前台启动 daemon，<code>bread daemon</code> 自动后台化；
+  daemon PID 位于 <code>/run/user/$UID/bread.pid</code>。每个显示器一个窗口进程，由 daemon 随显示器插拔自动创建与回收。
+</p>
 
 <h3>原型 / mock（占位）</h3>
 <p class="placeholder">待原型或 mock 实体出现后填充。</p>
