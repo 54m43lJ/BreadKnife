@@ -1,7 +1,7 @@
 @define-color bg_primary #1b1816;
 @define-color bg_secondary #24211e;
 @define-color bg_hover #302c29;
-@define-color bg_active #3d3835;
+@define-color bg_active #57504a;
 @define-color fg_primary #ecd9a8;
 @define-color fg_secondary #b8a078;
 @define-color fg_muted #6b5d48;
@@ -37,13 +37,16 @@ button:hover {
     background-color: @bg_hover;
 }
 
-/* ── 工作区条（形态：README「界面交互」；色彩：ARCHITECTURE §3.10）── */
+/* ── 工作区条（四要素：README「界面交互」；色彩：ARCHITECTURE §3.10）──
+   基底形态＝有窗口方形／无窗口圆点；基底色＝紧急高亮／否则背景；
+   叠加形态＝活跃圆点；叠加色＝高亮基底取背景色（高对比）／否则对比色 */
 .ws-btn {
     padding: 2px 3px;
     min-width: 22px;
     min-height: 22px;
 }
 
+/* 无窗口：基底小圆点 */
 .ws-base {
     min-width: 4px;
     min-height: 4px;
@@ -52,7 +55,7 @@ button:hover {
     transition: all 150ms ease;
 }
 
-/* 有窗口：胶囊基底 20×15px、圆角半径 10px */
+/* 有窗口：基底 20×15px，圆角半径 10px */
 .ws-base.square {
     min-width: 20px;
     min-height: 15px;
@@ -60,22 +63,22 @@ button:hover {
     background-color: @bg_active;
 }
 
-/* 紧急：高亮色（方形变色；无窗口小点取高亮色） */
+/* 紧急：基底取高亮色（无窗口不可紧急） */
 .ws-base.urgent {
     background-color: @warning;
 }
 
-/* 无窗口且活跃：对比色小圆点（紧急优先于活跃） */
-.ws-base.dot.active {
-    background-color: @fg_primary;
-}
-
-/* 有窗口且活跃：叠加对比色小圆点（紧急时不变色，保住活跃判断） */
+/* 活跃：叠加对比色小圆点（无窗口时与基底小圆点等大重叠） */
 .ws-ind {
     min-width: 4px;
     min-height: 4px;
     border-radius: 50%;
     background-color: @fg_primary;
+}
+
+/* 基底为高亮色时：叠加点取背景色（高对比） */
+.ws-ind.on-warning {
+    background-color: @bg_active;
 }
 
 /* ── 窗口信息 ── */

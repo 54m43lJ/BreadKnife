@@ -50,7 +50,10 @@ pub struct Daemon {
     monitors: Vec<hyprland::MonitorInfo>,
     ws_all: Vec<hyprland::WorkspaceInfo>,
     workspaces: HashMap<String, Vec<WorkspaceState>>,
+    /// 紧急位（持久）：Urgent 事件置位；仅"切换到该工作区"或"活跃时点击该工作区"清除。
     urgent: HashSet<i64>,
+    /// 各屏上次的活跃工作区 id（活跃跃迁 → 清除新活跃工作区的紧急位）。
+    last_active: HashMap<String, i64>,
     active_window: crate::shared::model::ActiveWindow,
     active_addr: String,
     notifications: VecDeque<NotificationRecord>,
@@ -104,6 +107,7 @@ pub fn run(control_path: &str) -> Result<(), String> {
         ws_all: Vec::new(),
         workspaces: HashMap::new(),
         urgent: HashSet::new(),
+        last_active: HashMap::new(),
         active_window: crate::shared::model::ActiveWindow::default(),
         active_addr: String::new(),
         notifications: VecDeque::new(),
@@ -224,17 +228,20 @@ impl Daemon {
                 self.kill_window(&name);
                 self.pending_resync = true;
             }
-            ActiveWindow { class, title, addr } => {
+            ActiveWindow { class, title } => {
+                // v1 载荷（class,title）；地址由随后的 activewindowv2 更新
                 self.active_window = crate::shared::model::ActiveWindow { class, title };
-                self.active_addr = addr;
                 self.broadcast(Push::State(StateDelta {
                     workspaces: None,
                     active: Some(self.active_window.clone()),
                     system: None,
                 }));
             }
+            ActiveWindowAddr(addr) => {
+                self.active_addr = hyprland::normalize_addr(&addr);
+            }
             WindowTitle { addr, title } => {
-                if !addr.is_empty() && addr == self.active_addr {
+                if !addr.is_empty() && hyprland::normalize_addr(&addr) == self.active_addr {
                     self.active_window.title = title;
                     self.broadcast(Push::State(StateDelta {
                         workspaces: None,
@@ -244,8 +251,10 @@ impl Daemon {
                 }
             }
             Urgent { addr } => {
+                // 即时上条：置位后立即重建并推送切片，不等下一次重同步
                 if let Some(ws) = hyprland::workspace_of_client(&addr) {
                     if self.urgent.insert(ws) {
+                        self.rebuild_workspace_slices();
                         self.push_workspace_slices();
                     }
                 }
@@ -267,36 +276,13 @@ impl Daemon {
             }
         }
 
-        // 紧急位从事实源重算：紧急窗口关闭后自然解除（激活的工作区不显示紧急）
-        self.urgent = hyprland::clients()
-            .iter()
-            .filter(|c| c.urgent)
-            .map(|c| c.workspace.id)
-            .collect();
-        for m in &self.monitors {
-            if let Some(ws) = &m.active_ws {
-                self.urgent.remove(&ws.id);
-            }
-        }
+        // 紧急位（持久）：仅由 Urgent 事件置位；此处只执行"切换到该工作区"的清除。
+        // 工作区销毁（空置回收）后清掉幽灵位，防复现时旧紧急位复活。
+        self.urgent.retain(|id| self.ws_all.iter().any(|w| w.id == *id));
+        // 清除路径①：切换到该工作区（活跃跃迁）
+        clear_urgent_on_active_transition(&mut self.urgent, &mut self.last_active, &self.monitors);
 
-        let mut slices: HashMap<String, Vec<WorkspaceState>> = HashMap::new();
-        for m in &self.monitors {
-            let mut slice: Vec<WorkspaceState> = self
-                .ws_all
-                .iter()
-                .filter(|ws| ws.monitor == m.name)
-                .map(|ws| WorkspaceState {
-                    id: ws.id,
-                    name: ws.name.clone(),
-                    urgent: self.urgent.contains(&ws.id),
-                    active: m.active_ws.as_ref().is_some_and(|a| a.id == ws.id),
-                    has_windows: ws.windows > 0,
-                })
-                .collect();
-            slice.sort_by_key(|ws| ws.id);
-            slices.insert(m.name.clone(), slice);
-        }
-        self.workspaces = slices;
+        self.rebuild_workspace_slices();
 
         // 窗口进程对齐：desired ∩ 现存显示器 − 已在册 = spawn；消失的显示器 = kill
         let current: HashSet<String> = self.monitors.iter().map(|m| m.name.clone()).collect();
@@ -317,6 +303,28 @@ impl Daemon {
         }
 
         self.push_workspace_slices();
+    }
+
+    /// 工作区切片重建：显示器 × 现存工作区 ×（活跃 / 占用 / 紧急）。
+    fn rebuild_workspace_slices(&mut self) {
+        let mut slices: HashMap<String, Vec<WorkspaceState>> = HashMap::new();
+        for m in &self.monitors {
+            let mut slice: Vec<WorkspaceState> = self
+                .ws_all
+                .iter()
+                .filter(|ws| ws.monitor == m.name)
+                .map(|ws| WorkspaceState {
+                    id: ws.id,
+                    name: ws.name.clone(),
+                    urgent: self.urgent.contains(&ws.id),
+                    active: m.active_ws.as_ref().is_some_and(|a| a.id == ws.id),
+                    has_windows: ws.windows > 0,
+                })
+                .collect();
+            slice.sort_by_key(|ws| ws.id);
+            slices.insert(m.name.clone(), slice);
+        }
+        self.workspaces = slices;
     }
 
     /// 推送全部显示器的最新工作区切片（diff 后定向）。
@@ -509,6 +517,14 @@ impl Daemon {
                 });
             }
             Request::WorkspaceSwitch { target } => {
+                // 清除路径②：点击该工作区（活跃且紧急时的解除动作；点击非活跃工作区
+                // 等价于"切换到该工作区"）。相对目标（m±1）不按名解析，由跃迁路径清除。
+                if let Some(ws_id) = workspace_id_by_name(&self.ws_all, &target) {
+                    if self.urgent.remove(&ws_id) {
+                        self.rebuild_workspace_slices();
+                        self.push_workspace_slices();
+                    }
+                }
                 std::thread::spawn(move || {
                     hyprland::dispatch_workspace(&target);
                 });
@@ -677,5 +693,83 @@ impl Daemon {
         let _ = std::fs::remove_file(crate::shared::protocol::pid_file());
         let _ = std::fs::remove_file(&self.control_path);
         let _ = std::fs::remove_file(&self.window_path);
+    }
+}
+
+/// 活跃跃迁清除：本屏活跃工作区变化时，清除新活跃工作区的紧急位
+/// （紧急清除规则之"切换到该工作区"；首次见屏只记基线，不清除）。
+fn clear_urgent_on_active_transition(
+    urgent: &mut HashSet<i64>,
+    last_active: &mut HashMap<String, i64>,
+    monitors: &[hyprland::MonitorInfo],
+) {
+    last_active.retain(|name, _| monitors.iter().any(|m| &m.name == name));
+    for m in monitors {
+        let Some(ws) = &m.active_ws else { continue };
+        if let Some(prev) = last_active.insert(m.name.clone(), ws.id) {
+            if prev != ws.id {
+                urgent.remove(&ws.id);
+            }
+        }
+    }
+}
+
+/// 目标名 → 工作区 id（点击清除用；相对目标 m±1 不在此解析）。
+fn workspace_id_by_name(ws_all: &[hyprland::WorkspaceInfo], target: &str) -> Option<i64> {
+    ws_all.iter().find(|w| w.name == target).map(|w| w.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::hyprland::{MonitorInfo, WorkspaceInfo, WorkspaceRef};
+
+    fn mon(name: &str, active: Option<i64>) -> MonitorInfo {
+        MonitorInfo {
+            name: name.into(),
+            active_ws: active.map(|id| WorkspaceRef { id }),
+        }
+    }
+
+    #[test]
+    fn active_transition_clears_only_on_change() {
+        let mut urgent: HashSet<i64> = [1, 2, 3].into_iter().collect();
+        let mut last = HashMap::new();
+        // 首次见屏：只记基线，不清除
+        let mons = [mon("DP-1", Some(2))];
+        clear_urgent_on_active_transition(&mut urgent, &mut last, &mons);
+        assert!(urgent.contains(&2));
+        // 同工作区重复重同步：不清除（活跃期间迟到的 Urgent 事件得以保留）
+        clear_urgent_on_active_transition(&mut urgent, &mut last, &mons);
+        assert!(urgent.contains(&2));
+        // 跃迁到 1：清除 1，其余不动
+        let mons = [mon("DP-1", Some(1))];
+        clear_urgent_on_active_transition(&mut urgent, &mut last, &mons);
+        assert!(!urgent.contains(&1));
+        assert!(urgent.contains(&2) && urgent.contains(&3));
+        // 显示器消失：基线随之移除
+        clear_urgent_on_active_transition(&mut urgent, &mut last, &[]);
+        assert!(last.is_empty());
+    }
+
+    #[test]
+    fn workspace_id_by_name_exact_match() {
+        let ws = vec![
+            WorkspaceInfo {
+                id: 2,
+                name: "2".into(),
+                monitor: "DP-1".into(),
+                windows: 0,
+            },
+            WorkspaceInfo {
+                id: 7,
+                name: "web".into(),
+                monitor: "DP-1".into(),
+                windows: 1,
+            },
+        ];
+        assert_eq!(workspace_id_by_name(&ws, "2"), Some(2));
+        assert_eq!(workspace_id_by_name(&ws, "web"), Some(7));
+        assert_eq!(workspace_id_by_name(&ws, "m+1"), None);
     }
 }

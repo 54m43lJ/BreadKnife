@@ -58,10 +58,11 @@ impl WorkspaceWidget {
         }
     }
 
-    /// 单按钮：Overlay(基底形状 + 活跃小圆点)。
-    /// 有窗口：大圆角方形（紧急→高亮色）；无窗口：单个小圆点；
-    /// 活跃叠加对比色小圆点（紧急时方形变色、小点不变色，保住活跃判断）。
-    /// 按钮内容区会撑满，基底与小圆点各自居中保持契约尺寸（4px 点 / 20×15 胶囊）。
+    /// 单按钮：基底 + 活跃叠加点。
+    /// 四要素由四条件独立决定（README「界面交互」）：基底形态＝有窗口方形／无窗口
+    /// 圆点；基底色＝紧急高亮／否则背景；叠加形态＝活跃圆点；叠加色＝高亮基底取
+    /// 背景色（高对比）／否则对比色。按钮内容区会撑满，基底与叠加点各自居中保持
+    /// 契约尺寸（4px 点 / 20×15 胶囊）。
     fn make_button(&self, ws: &WorkspaceState) -> gtk::Button {
         let button = gtk::Button::new();
         button.add_css_class("ws-btn");
@@ -75,15 +76,15 @@ impl WorkspaceWidget {
         if ws.urgent {
             base.add_css_class("urgent");
         }
-        if !ws.has_windows && ws.active && !ws.urgent {
-            base.add_css_class("active");
-        }
 
         let indicator = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         indicator.add_css_class("ws-ind");
         indicator.set_halign(gtk::Align::Center);
         indicator.set_valign(gtk::Align::Center);
-        indicator.set_visible(ws.has_windows && ws.active);
+        if ws.urgent {
+            indicator.add_css_class("on-warning");
+        }
+        indicator.set_visible(ws.active);
 
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&base));

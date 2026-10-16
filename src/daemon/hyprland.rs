@@ -37,8 +37,6 @@ pub struct WorkspaceInfo {
 pub struct ClientInfo {
     pub address: String,
     pub workspace: WorkspaceRef,
-    #[serde(default)]
-    pub urgent: bool,
 }
 
 /// 运行 hyprctl 子命令；失败时错误消息取 stderr（hyprctl 的错误也可能走 stdout）。
@@ -91,11 +89,17 @@ pub fn clients() -> Vec<ClientInfo> {
     hyprctl_json(&["-j", "clients"])
 }
 
+/// 窗口地址归一：事件载荷不带 0x 前缀，`hyprctl -j clients` 带 0x 前缀；统一去前缀、小写。
+pub fn normalize_addr(addr: &str) -> String {
+    addr.trim().trim_start_matches("0x").to_ascii_lowercase()
+}
+
 /// 窗口地址（0x…）→ 所在工作区 id。
 pub fn workspace_of_client(address: &str) -> Option<i64> {
+    let want = normalize_addr(address);
     clients()
         .into_iter()
-        .find(|c| c.address == address)
+        .find(|c| normalize_addr(&c.address) == want)
         .map(|c| c.workspace.id)
 }
 
@@ -137,7 +141,10 @@ fn lua_string(s: &str) -> String {
 pub enum HyprlandEvent {
     MonitorAdded(String),
     MonitorRemoved(String),
-    ActiveWindow { class: String, title: String, addr: String },
+    /// activewindow（v1 载荷：class,title）
+    ActiveWindow { class: String, title: String },
+    /// activewindowv2（0.56 载荷：仅窗口地址，可空——焦点清空）
+    ActiveWindowAddr(String),
     WindowTitle { addr: String, title: String },
     Urgent { addr: String },
     Resync,
@@ -204,31 +211,14 @@ fn parse_event(name: &str, data: &str) -> Option<HyprlandEvent> {
             Some(HyprlandEvent::MonitorRemoved(first_token(data)))
         }
         "activewindowv2" => {
-            // class,title,addr（title 可含逗号：取首尾，其余归 title）
-            let parts: Vec<&str> = data.split(',').collect();
-            if parts.len() >= 3 {
-                let title = parts[1..parts.len() - 1].join(",");
-                Some(HyprlandEvent::ActiveWindow {
-                    class: parts[0].to_string(),
-                    title,
-                    addr: parts[parts.len() - 1].to_string(),
-                })
-            } else if parts.len() == 2 {
-                Some(HyprlandEvent::ActiveWindow {
-                    class: parts[0].to_string(),
-                    title: parts[1].to_string(),
-                    addr: String::new(),
-                })
-            } else {
-                None
-            }
+            // 0.56 载荷：仅窗口地址（`{:x}`，可空）；class/title 由 v1 事件给出
+            Some(HyprlandEvent::ActiveWindowAddr(first_token(data)))
         }
         "activewindow" => {
             let (class, title) = data.split_once(',')?;
             Some(HyprlandEvent::ActiveWindow {
                 class: class.to_string(),
                 title: title.to_string(),
-                addr: String::new(),
             })
         }
         "windowtitlev2" => {
@@ -275,24 +265,34 @@ mod tests {
 
     #[test]
     fn parse_event_active_window() {
-        // v2 载荷：class,title,addr（title 可含逗号）
+        // v2 载荷：仅窗口地址（0.56；可空 = 焦点清空）
         assert!(matches!(
-            parse_event("activewindowv2", "firefox,T,with,commas,0xdeadbeef"),
-            Some(HyprlandEvent::ActiveWindow { ref class, ref title, ref addr })
-                if class == "firefox" && title == "T,with,commas" && addr == "0xdeadbeef"
+            parse_event("activewindowv2", "55be3c902800"),
+            Some(HyprlandEvent::ActiveWindowAddr(ref a)) if a == "55be3c902800"
         ));
-        // 空桌面：class 与 title 皆空、无地址
         assert!(matches!(
-            parse_event("activewindowv2", ","),
-            Some(HyprlandEvent::ActiveWindow { ref class, ref title, ref addr })
-                if class.is_empty() && title.is_empty() && addr.is_empty()
+            parse_event("activewindowv2", ""),
+            Some(HyprlandEvent::ActiveWindowAddr(ref a)) if a.is_empty()
         ));
-        // 旧版事件：class,title
+        // v1 载荷：class,title（标题可含逗号）
         assert!(matches!(
-            parse_event("activewindow", "kitty,zsh"),
-            Some(HyprlandEvent::ActiveWindow { ref class, ref title, .. })
-                if class == "kitty" && title == "zsh"
+            parse_event("activewindow", "kitty,zsh, with commas"),
+            Some(HyprlandEvent::ActiveWindow { ref class, ref title })
+                if class == "kitty" && title == "zsh, with commas"
         ));
+        // 空桌面：class 与 title 皆空
+        assert!(matches!(
+            parse_event("activewindow", ","),
+            Some(HyprlandEvent::ActiveWindow { ref class, ref title })
+                if class.is_empty() && title.is_empty()
+        ));
+    }
+
+    #[test]
+    fn normalize_addr_strips_prefix() {
+        assert_eq!(normalize_addr("0x55be3c902800"), "55be3c902800");
+        assert_eq!(normalize_addr("55BE3C902800"), "55be3c902800");
+        assert_eq!(normalize_addr(""), "");
     }
 
     #[test]
@@ -388,14 +388,15 @@ mod tests {
     }
 
     #[test]
-    fn clients_json_urgent_flag() {
-        let full = r#"[{"address":"0x55f0aa","mapped":true,"hidden":false,"at":[0,0],"size":[800,600],"workspace":{"id":2,"name":"2"},"floating":false,"monitor":0,"class":"firefox","title":"F","initialClass":"firefox","initialTitle":"F","pid":123,"xwayland":false,"pinned":false,"fullscreen":false,"fullscreenMode":0,"fakefullscreen":false,"grouped":[],"swallowCount":0,"swallowing":"0x0","focusHistoryID":0,"urgent":true}]"#;
+    fn clients_json_tolerates_unknown_fields() {
+        // 0.56 的 clients 输出含大量字段；未声明字段（含历史 urgent 位）必须被忽略
+        let full = r#"[{"address":"0x55f0aa","mapped":true,"at":[0,0],"size":[800,600],"workspace":{"id":2,"name":"2"},"class":"firefox","title":"F","urgent":true}]"#;
         let parsed: Vec<ClientInfo> = serde_json::from_str(full).unwrap();
-        assert!(parsed[0].urgent);
+        assert_eq!(parsed[0].address, "0x55f0aa");
         assert_eq!(parsed[0].workspace.id, 2);
-        // 旧版本输出缺 urgent 字段 → false
+        // 精简输出：仅地址与工作区
         let minimal = r#"[{"address":"0x1","workspace":{"id":1,"name":"1"}}]"#;
         let parsed: Vec<ClientInfo> = serde_json::from_str(minimal).unwrap();
-        assert!(!parsed[0].urgent);
+        assert_eq!(parsed[0].workspace.id, 1);
     }
 }

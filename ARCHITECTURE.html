@@ -80,7 +80,7 @@
 @define-color bg_primary #1b1816;
 @define-color bg_secondary #24211e;
 @define-color bg_hover #302c29;
-@define-color bg_active #3d3835;
+@define-color bg_active #57504a;
 /* ── 文字 ── */
 @define-color fg_primary #ecd9a8;
 @define-color fg_secondary #b8a078;
@@ -101,7 +101,7 @@
   <tr><th>组件</th><th>样式</th></tr>
   <tr><td>任务栏窗口</td><td>背景 <code>bg_primary</code>，底边框 <code>border_strong</code>，高度 30px</td></tr>
   <tr><td>按钮</td><td>透明背景，圆角 6px，Hover 态 <code>bg_hover</code></td></tr>
-  <tr><td>Workspace 按钮</td><td>形态见 <a href="README.html#界面交互">README.html「界面交互」</a>；色彩映射：背景色＝<code>bg_active</code>、对比色＝<code>fg_primary</code>、高亮色＝<code>warning</code>；尺寸（视觉契约，操作源在 <code>bread.css</code>）：无窗口小圆点直径 4px，有窗口胶囊 20×15px（圆角半径 10px），活跃叠加小圆点直径 4px</td></tr>
+  <tr><td>Workspace 按钮</td><td>四要素见 <a href="README.html#界面交互">README.html「界面交互」</a>；色彩映射：背景色＝<code>bg_active</code>、对比色＝<code>fg_primary</code>、高亮色＝<code>warning</code>；尺寸（视觉契约，操作源在 <code>bread.css</code>）：无窗口小圆点直径 4px，有窗口长方形 20×15px（圆角半径 10px），活跃叠加小圆点直径 4px</td></tr>
   <tr><td>控制中心入口</td><td>容器背景 <code>bg_secondary</code>，圆角 6px</td></tr>
   <tr><td>滑块</td><td>滑轨高 4px，圆形滑块 12px，高亮 <code>accent</code></td></tr>
 </table>
@@ -118,6 +118,7 @@
   <tr><td><code>monitoradded</code> / <code>monitorremoved</code></td><td>daemon 创建 / 销毁对应窗口进程</td></tr>
   <tr><td><code>workspace&gt;&gt;X</code></td><td>daemon 更新映射并推送工作区切片</td></tr>
   <tr><td><code>activewindow</code></td><td>daemon 更新并推送活动窗口</td></tr>
+  <tr><td><code>urgent&gt;&gt;X</code></td><td>窗口请求关注 → 所在工作区紧急位置位（清除语义见 <a href="README.html#界面交互">README.html「界面交互」</a>）</td></tr>
   <tr><td><code>configreloaded</code></td><td>daemon 全量重同步：重扫显示器清单、重建映射并对齐窗口进程</td></tr>
 </table>
 
