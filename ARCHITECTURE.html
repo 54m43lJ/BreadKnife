@@ -130,7 +130,6 @@
   <tr><td><code>open-all</code> / <code>close-all</code></td><td>打开 / 关闭全部窗口</td></tr>
   <tr><td><code>exit</code></td><td>退出 daemon（终止全部窗口进程）</td></tr>
   <tr><td><code>reload</code></td><td>热重载：广播全部窗口按跟踪的 CSS 路径重读</td></tr>
-  <tr><td><code>toggle</code></td><td>切换全部窗口显示 / 隐藏</td></tr>
 </table>
 
 <h3 id="sec-4-3">4.3. 托盘库组装契约（daemon 侧）</h3>
@@ -164,7 +163,6 @@
   <tr><td><code>menu_changed</code></td><td>定向：弹窗打开期间的菜单刷新触发</td></tr>
   <tr><td><code>notification</code></td><td>通知记录（推送全部窗口）</td></tr>
   <tr><td><code>reload</code></td><td>按 daemon 跟踪的路径重读 CSS</td></tr>
-  <tr><td><code>visibility</code></td><td>显示 / 隐藏</td></tr>
 </table>
 <ul class="note">
   <li>大对象（如位图图标）可经 fd 传递升级（memfd + <code>SCM_RIGHTS</code>），协议骨架不变；</li>
@@ -175,8 +173,8 @@
 <table>
   <tr><th>模型</th><th>内容</th><th>转换</th></tr>
   <tr><td>显示器映射表</td><td>显示器 ID → 窗口进程（daemon 持有）</td><td>Hyprland 插拔事件 → spawn / kill 窗口进程</td></tr>
-  <tr><td>工作区映射表</td><td>显示器 → 工作区 ID 列表（按各 Workspace 的 <code>monitor</code> 属性反向归组；daemon 持有）</td><td>启动/插拔时全量重建；<code>workspace&gt;&gt;X</code> → 切片推送</td></tr>
-  <tr><td>控制指令</td><td>行文本 → { open, close, open-all, close-all, exit, reload, toggle }</td><td>Socket 读入 → daemon 指令分发</td></tr>
+  <tr><td>工作区映射表</td><td>工作区 ID → 所属显示器（Hyprland 特性：workspace rules 将工作区绑定到显示器，daemon 据此反推；daemon 持有）</td><td>启动/插拔时全量重建；<code>workspace&gt;&gt;X</code> → 切片推送</td></tr>
+  <tr><td>控制指令</td><td>行文本 → { open, close, open-all, close-all, exit, reload }</td><td>Socket 读入 → daemon 指令分发</td></tr>
   <tr><td>通知记录</td><td>应用名、图标、摘要、正文、通知 ID（daemon 持有）</td><td>DBus Notify 调用参数 → 缓存 → 推送全部窗口</td></tr>
   <tr><td>托盘 Item 视图</td><td>图标（IconSource）、状态、标题、提示（ToolTip）、有无菜单、存活标记（daemon → 窗口）</td><td>breadpan 现场读取 → 状态推送；窗口渲染直出为可绘制对象；alive=false → 置灰样式</td></tr>
   <tr><td>窗口切片</td><td>单窗口所需状态：本屏工作区、活动窗口、托盘、通知、CSS 路径</td><td>daemon 状态变更 → 切片增量推送；首连全量</td></tr>

@@ -53,11 +53,6 @@ blockquote {
   font-size: .92rem;
   border-radius: 0 6px 6px 0;
 }
-blockquote.draft {
-  border-left-color: #b8453a;
-  color: #b8453a;
-  font-weight: 600;
-}
 table {
   width: 100%;
   border-collapse: collapse;
