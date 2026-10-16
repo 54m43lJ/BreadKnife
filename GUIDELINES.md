@@ -75,6 +75,6 @@ RULES:
 
 -----
 
-1. File tree: the general structure of the final code, explains which module serves what purposes
+1. File tree: the general structure of the final code, explains which module serves what purposes — entries link to their corresponding subsections of the internal types & method signatures chapter (files without a subsection remain plain).
 2. Call stack tree: what an actual execution of key program logic looks like
 3. Internal types & method signatures: further define what each method takes & produces — organized as one subsection per source file, in the file tree's order; each subsection is titled by its file name and links back to the file tree.
