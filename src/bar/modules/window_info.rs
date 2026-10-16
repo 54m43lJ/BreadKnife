@@ -70,6 +70,9 @@ impl WindowInfoWidget {
 
     pub fn set_active(&self, active: &ActiveWindow) {
         self.label.set_text(&active.title);
+        // 标题截断显示，悬停看全文（README「界面交互」）
+        self.label
+            .set_tooltip_text((!active.title.is_empty()).then_some(active.title.as_str()));
         set_image_from_theme(&self.icon, &active.class.to_lowercase());
     }
 

@@ -117,6 +117,7 @@ pub enum InteractionOutcome {
 pub struct SystemState {
     pub battery: Option<BatteryState>,
     pub network: Option<NetworkState>,
+    pub bluetooth: Option<BluetoothState>,
     pub volume: Option<VolumeState>,
     pub brightness: Option<u32>,
 }
@@ -132,6 +133,14 @@ pub struct NetworkState {
     /// ethernet / wifi / …；无连接时为 "none"。
     pub kind: String,
     pub connected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BluetoothState {
+    /// 适配器 Powered。
+    pub powered: bool,
+    /// 已连接设备数。
+    pub connected: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

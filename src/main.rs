@@ -20,7 +20,8 @@ const APP_ID: &str = "com.breadknife.shell";
 
 const SOCKET_HELP: &str = "\
 CONTROL COMMANDS (forwarded to the daemon over its Unix socket):
-    bread                          Start the daemon in the background
+    bread                          Start the daemon in the foreground
+    bread daemon                   Start the daemon in the background (auto-daemonize)
     bread open-all                 Open bar windows on every connected monitor
     bread close-all                Close all bar windows
     bread open bar [-m MONITOR]    Open the bar window (default: all monitors)
@@ -65,7 +66,11 @@ fn main() {
         .unwrap_or_else(|| protocol::default_control_socket().to_string_lossy().into());
 
     if args.cmd.is_empty() {
-        start_daemon(&control);
+        // bread 前台启动 daemon（README「运行管理」/ ARCHITECTURE §3.3）
+        if let Err(e) = daemon::run(&control) {
+            eprintln!("[breadknife] daemon failed: {e}");
+            std::process::exit(1);
+        }
         return;
     }
 
@@ -77,6 +82,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        "daemon" => start_daemon(&control),
         "__window" => {
             let wargs = WindowArgs::parse_from(
                 std::iter::once("bread").chain(cmd[1..].iter().map(|s| s.as_str())),
@@ -102,7 +108,7 @@ fn main() {
     }
 }
 
-/// 前台命令 → 后台 daemon（bread daemon 自动后台化，ARCHITECTURE §3.3）。
+/// 后台化命令 → 后台 daemon（bread daemon 自动后台化，ARCHITECTURE §3.3）。
 fn start_daemon(control: &str) {
     let exe = match std::env::current_exe() {
         Ok(e) => e,

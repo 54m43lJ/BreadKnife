@@ -37,6 +37,8 @@ pub struct WorkspaceInfo {
 pub struct ClientInfo {
     pub address: String,
     pub workspace: WorkspaceRef,
+    #[serde(default)]
+    pub urgent: bool,
 }
 
 fn hyprctl(args: &[&str]) -> String {

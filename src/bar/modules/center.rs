@@ -1,6 +1,7 @@
 //! 控制中心入口与弹出面板。
 //! 入口：电池（无电池设备自动隐藏）、网络状态、实时时钟；
-//! 面板：媒体控制、音量/亮度滑块、日历。缺失降级见 ARCHITECTURE §2。
+//! 面板：媒体控制、音量/亮度滑块、网络/蓝牙状态、日历。
+//! 缺失降级见 ARCHITECTURE §2：入口隐藏，面板操作项灰置并提示。
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -25,6 +26,8 @@ pub struct CenterWidget {
     brightness: gtk::Scale,
     volume_row: gtk::Box,
     brightness_row: gtk::Box,
+    net_value: gtk::Label,
+    bt_value: gtk::Label,
 }
 
 impl CenterWidget {
@@ -79,6 +82,9 @@ impl CenterWidget {
             media_row.append(&button);
         }
 
+        let (net_value, net_row) = Self::make_status_row("网络");
+        let (bt_value, bt_row) = Self::make_status_row("蓝牙");
+
         let calendar = gtk::Calendar::new();
         calendar.add_css_class("center-calendar");
 
@@ -87,6 +93,8 @@ impl CenterWidget {
         panel.append(&media_row);
         panel.append(&volume_row);
         panel.append(&brightness_row);
+        panel.append(&net_row);
+        panel.append(&bt_row);
         panel.append(&calendar);
 
         let popover = gtk::Popover::new();
@@ -108,6 +116,8 @@ impl CenterWidget {
             brightness,
             volume_row,
             brightness_row,
+            net_value,
+            bt_value,
         };
 
         widget.wire_sliders(ipc);
@@ -126,6 +136,22 @@ impl CenterWidget {
         row.append(&label);
         row.append(&scale);
         (scale, row)
+    }
+
+    /// 面板状态行：标题 + 值（缺失降级由 set_system 切换灰置与提示）。
+    fn make_status_row(title: &str) -> (gtk::Label, gtk::Box) {
+        let label = gtk::Label::new(Some(title));
+        label.add_css_class("center-slider-label");
+
+        let value = gtk::Label::new(None);
+        value.add_css_class("status-label");
+        value.set_halign(gtk::Align::End);
+        value.set_hexpand(true);
+
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.append(&label);
+        row.append(&value);
+        (value, row)
     }
 
     /// 滑块 → daemon（节流投递；拖动标记避免系统回推时回发）。
@@ -203,23 +229,73 @@ impl CenterWidget {
             }
         }
 
-        // 滑块：服务缺席隐藏整行；回推经 value_changed 的拖动判定过滤
+        // 滑块：服务缺席灰置并提示（面板操作项不隐藏，ARCHITECTURE §2）；
+        // 回推经 value_changed 的拖动判定过滤
+        match &system.volume {
+            Some(_) => self.set_row_off(&self.volume_row, false, None),
+            None => self.set_row_off(&self.volume_row, true, Some("pamixer 缺席，音量调节不可用")),
+        }
         if let Some(v) = &system.volume {
-            self.volume_row.set_visible(true);
             if (self.volume.value().round() as u32) != v.percent {
                 self.volume.set_value(v.percent as f64);
             }
-        } else {
-            self.volume_row.set_visible(false);
+        }
+        match &system.brightness {
+            Some(_) => self.set_row_off(&self.brightness_row, false, None),
+            None => self.set_row_off(&self.brightness_row, true, Some("brightnessctl 缺席，亮度调节不可用")),
         }
         if let Some(b) = &system.brightness {
-            self.brightness_row.set_visible(true);
             if (self.brightness.value().round() as u32) != *b {
                 self.brightness.set_value(*b as f64);
             }
-        } else {
-            self.brightness_row.set_visible(false);
         }
+
+        // 面板网络状态
+        match &system.network {
+            None => self.set_status(&self.net_value, "缺席", Some("NetworkManager 缺席")),
+            Some(n) if !n.connected => self.set_status(&self.net_value, "未连接", None),
+            Some(n) => {
+                let text = match n.kind.as_str() {
+                    "ethernet" => "以太网",
+                    "wifi" => "Wi-Fi",
+                    _ => "已连接",
+                };
+                self.set_status(&self.net_value, text, None);
+            }
+        }
+
+        // 面板蓝牙状态
+        match &system.bluetooth {
+            None => self.set_status(&self.bt_value, "缺席", Some("BlueZ 缺席")),
+            Some(b) if !b.powered => self.set_status(&self.bt_value, "已关闭", None),
+            Some(b) if b.connected == 0 => self.set_status(&self.bt_value, "已开启", None),
+            Some(b) => {
+                self.set_status(&self.bt_value, &format!("{} 台已连接", b.connected), None);
+            }
+        }
+    }
+
+    /// 面板操作项降级：灰置 + 提示（tooltip），恢复时解除。
+    fn set_row_off(&self, row: &gtk::Box, off: bool, hint: Option<&str>) {
+        row.set_sensitive(!off);
+        if off {
+            row.add_css_class("row-off");
+            row.set_tooltip_text(hint);
+        } else {
+            row.remove_css_class("row-off");
+            row.set_tooltip_text(None);
+        }
+    }
+
+    /// 面板状态值：文本 + 可选提示。
+    fn set_status(&self, label: &gtk::Label, text: &str, hint: Option<&str>) {
+        label.set_text(text);
+        if hint.is_some() {
+            label.add_css_class("row-off");
+        } else {
+            label.remove_css_class("row-off");
+        }
+        label.set_tooltip_text(hint);
     }
 }
 

@@ -44,7 +44,7 @@
   <tr><td>语言 / GUI</td><td>Rust；GTK4（仅窗口进程）</td></tr>
   <tr><td>进程与 IPC</td><td>bread daemon（无 GTK）+ 每显示器窗口进程；内部 Unix Socket（请求应答 + 状态推送）</td></tr>
   <tr><td>Wayland 集成</td><td><code>gtk4-layer-shell</code>（窗口进程，Layer Surface 锚定）</td></tr>
-  <tr><td>DBus（daemon 侧）</td><td><code>zbus</code>——通知守护（<code>org.freedesktop.Notifications</code>）与 UPower / NetworkManager / MPRIS 消费；托盘域总线互动不在其列，全权由 breadpan 封装</td></tr>
+  <tr><td>DBus（daemon 侧）</td><td><code>zbus</code>——通知守护（<code>org.freedesktop.Notifications</code>，session bus）与 UPower / NetworkManager / BlueZ / MPRIS 消费；托盘域总线互动不在其列，全权由 breadpan 封装</td></tr>
   <tr><td>合成器通信</td><td>Hyprland IPC（Unix Socket，daemon 只读监听）</td></tr>
   <tr><td>托盘协议栈</td><td>breadpan 单库自包含：内置 Watcher 登记中心 + 逻辑 Host API + GTK 渲染直出——daemon 组装、窗口渲染（IconSource → 可绘制对象）；托盘协议词汇不出 daemon</td></tr>
   <tr><td>调节后端</td><td>音量 <code>pamixer</code>；亮度 <code>brightnessctl</code>（内置面板）+ <code>ddcutil</code>（外接显示器，DDC/CI）——由 daemon 调起</td></tr>

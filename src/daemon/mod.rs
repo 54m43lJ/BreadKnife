@@ -267,7 +267,12 @@ impl Daemon {
             }
         }
 
-        // 激活即解除紧急
+        // 紧急位从事实源重算：紧急窗口关闭后自然解除（激活的工作区不显示紧急）
+        self.urgent = hyprland::clients()
+            .iter()
+            .filter(|c| c.urgent)
+            .map(|c| c.workspace.id)
+            .collect();
         for m in &self.monitors {
             if let Some(ws) = &m.active_ws {
                 self.urgent.remove(&ws.id);

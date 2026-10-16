@@ -229,6 +229,11 @@ button:hover {
     font-size: 11px;
 }
 
+/* 面板操作项缺失降级：灰置（提示走 tooltip，ARCHITECTURE §2） */
+.row-off {
+    opacity: 0.45;
+}
+
 /* 滑块：滑轨高 4px，圆形滑块 12px，高亮 accent */
 scale trough {
     min-height: 4px;

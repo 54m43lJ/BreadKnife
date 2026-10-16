@@ -24,7 +24,7 @@
   <tr><td>Rust 工具链</td><td>rustup / cargo（edition 2024）</td></tr>
   <tr><td>GUI / 层壳</td><td>gtk4 / glib 开发包与 <code>gtk4-layer-shell</code>（仅窗口进程链接 GTK；gtk4-layer-shell 需从源码安装：<code>meson setup build &amp;&amp; sudo meson install -C build</code>）</td></tr>
   <tr><td>托盘协议栈</td><td><code>breadpan</code> 随仓库落位（路径依赖，纯 Rust——<strong>无 libastal 等系统级构建依赖</strong>）</td></tr>
-  <tr><td>可选系统工具</td><td><code>pamixer</code> / <code>brightnessctl</code>（音量 / 亮度）、<code>playerctl</code>（媒体控制）、<code>nmcli</code>（网络状态）——缺席时对应功能降级隐藏，不阻断构建</td></tr>
+  <tr><td>可选系统工具</td><td><code>pamixer</code>（音量）、<code>brightnessctl</code>（亮度：内置面板）、<code>ddcutil</code>（亮度：外接显示器，DDC/CI）——缺席时对应功能降级灰置，不阻断构建。媒体（MPRIS）/ 网络（NetworkManager）/ 蓝牙（BlueZ）经 DBus 消费，无需额外工具</td></tr>
   <tr><td>测试环境</td><td>应用测试无需显示服务；breadpan 库测试需 DBus session bus（<code>dbus-run-session</code>）</td></tr>
 </table>
 
@@ -39,8 +39,8 @@ dbus-run-session -- cargo test --manifest-path breadpan/Cargo.toml   # 库：全
 </ul>
 
 <h2>运行</h2>
-<pre><code>bread                     # 前台启动：spawn 后台 daemon 后返回（日志仍写启动终端 stderr）
-bread __daemon            # 前台运行 daemon（调试用，隐藏子命令）
+<pre><code>bread                     # 前台启动 daemon（阻塞当前终端；Ctrl-C / bread exit 结束）
+bread daemon              # 自动后台化：spawn 后台 daemon 后返回（日志仍写启动终端 stderr）
 bread open-all            # 每台显示器开一条任务栏
 bread reload              # 热重载 CSS（改色即见）
 bread exit                # 优雅退出（终止全部窗口、释放托盘 Watcher 名）</code></pre>
@@ -48,7 +48,7 @@ bread exit                # 优雅退出（终止全部窗口、释放托盘 Wat
   <tr><th>运行前提</th><th>说明</th></tr>
   <tr><td>Hyprland 会话</td><td><code>HYPRLAND_INSTANCE_SIGNATURE</code> 与 <code>$XDG_RUNTIME_DIR/hypr/$SIG/.socket2.sock</code> 可达（显示器 / 工作区数据源）</td></tr>
   <tr><td>Wayland 显示</td><td>窗口进程经 layer-shell 上屏；daemon 本身无 GTK、无显示依赖</td></tr>
-  <tr><td>DBus session bus</td><td>托盘组装（org.kde.StatusNotifierWatcher）与通知守护（org.freedesktop.Notifications）——名被占（既有托盘 / 通知守护）时对应功能降级，不阻断其余部分</td></tr>
+  <tr><td>DBus（session + system bus）</td><td>session bus：托盘组装（org.kde.StatusNotifierWatcher）、通知守护（org.freedesktop.Notifications）、媒体（MPRIS）；system bus：电池（UPower）、网络（NetworkManager）、蓝牙（BlueZ）——名被占 / 服务缺席时对应功能降级，不阻断其余部分</td></tr>
 </table>
 <ul class="note">
   <li>运行时文件：<code>$XDG_RUNTIME_DIR/bread.pid</code>（PID 文件）、<code>bread.sock</code>（控制）、<code>bread-windows.sock</code>（窗口 IPC）、<code>bread/bread.css</code>（落盘的默认主题）；控制套接字可用 <code>-s/--socket</code> 覆盖（窗口套接字随之派生）；</li>
