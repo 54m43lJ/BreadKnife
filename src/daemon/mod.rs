@@ -49,6 +49,8 @@ pub struct Daemon {
     tray_registry: HashMap<String, TrayItemView>,
     monitors: Vec<hyprland::MonitorInfo>,
     ws_all: Vec<hyprland::WorkspaceInfo>,
+    /// 工作区规则：本屏工作区清单 = 现存工作区 ∪ 绑定到本屏的静态规则。
+    ws_rules: Vec<hyprland::WorkspaceRuleInfo>,
     workspaces: HashMap<String, Vec<WorkspaceState>>,
     /// 紧急位（持久）：Urgent 事件置位；仅"切换到该工作区"或"活跃时点击该工作区"清除。
     urgent: HashSet<i64>,
@@ -105,6 +107,7 @@ pub fn run(control_path: &str) -> Result<(), String> {
         tray_registry: HashMap::new(),
         monitors: Vec::new(),
         ws_all: Vec::new(),
+        ws_rules: Vec::new(),
         workspaces: HashMap::new(),
         urgent: HashSet::new(),
         last_active: HashMap::new(),
@@ -269,6 +272,7 @@ impl Daemon {
     fn resync(&mut self) {
         self.monitors = hyprland::monitors();
         self.ws_all = hyprland::workspaces();
+        self.ws_rules = hyprland::workspace_rules();
         if !self.seeded {
             self.seeded = true;
             for m in &self.monitors {
@@ -305,24 +309,14 @@ impl Daemon {
         self.push_workspace_slices();
     }
 
-    /// 工作区切片重建：显示器 × 现存工作区 ×（活跃 / 占用 / 紧急）。
+    /// 工作区切片重建：显示器 × 工作区清单（现存 ∪ 规则声明）。
     fn rebuild_workspace_slices(&mut self) {
         let mut slices: HashMap<String, Vec<WorkspaceState>> = HashMap::new();
         for m in &self.monitors {
-            let mut slice: Vec<WorkspaceState> = self
-                .ws_all
-                .iter()
-                .filter(|ws| ws.monitor == m.name)
-                .map(|ws| WorkspaceState {
-                    id: ws.id,
-                    name: ws.name.clone(),
-                    urgent: self.urgent.contains(&ws.id),
-                    active: m.active_ws.as_ref().is_some_and(|a| a.id == ws.id),
-                    has_windows: ws.windows > 0,
-                })
-                .collect();
-            slice.sort_by_key(|ws| ws.id);
-            slices.insert(m.name.clone(), slice);
+            slices.insert(
+                m.name.clone(),
+                workspace_slice(m, &self.ws_all, &self.ws_rules, &self.urgent),
+            );
         }
         self.workspaces = slices;
     }
@@ -719,6 +713,62 @@ fn workspace_id_by_name(ws_all: &[hyprland::WorkspaceInfo], target: &str) -> Opt
     ws_all.iter().find(|w| w.name == target).map(|w| w.id)
 }
 
+/// 仅规则、尚未创建的工作区的合成分拣 id 基准：Hyprland 给命名工作区分配负 id，
+/// 取深负区间避免与真实 id 相撞（数值规则直接用其 id）。
+const RULE_ONLY_ID_BASE: i64 = -100_000;
+
+/// 本屏工作区清单：现存工作区 ∪ 绑定到本屏的静态工作区规则（按名去重 + id 排序）。
+/// 仅规则条目＝非活跃工作区：无窗口、不活跃、不紧急；规则按显示器名绑定，动态
+/// 选择器（special:* / empty*）不产生常驻条目。
+fn workspace_slice(
+    monitor: &hyprland::MonitorInfo,
+    ws_all: &[hyprland::WorkspaceInfo],
+    rules: &[hyprland::WorkspaceRuleInfo],
+    urgent: &HashSet<i64>,
+) -> Vec<WorkspaceState> {
+    let mut slice: Vec<WorkspaceState> = ws_all
+        .iter()
+        .filter(|ws| ws.monitor == monitor.name)
+        .map(|ws| WorkspaceState {
+            id: ws.id,
+            name: ws.name.clone(),
+            urgent: urgent.contains(&ws.id),
+            active: monitor.active_ws.as_ref().is_some_and(|a| a.id == ws.id),
+            has_windows: ws.windows > 0,
+        })
+        .collect();
+
+    // 规则补充：按名对全量现存工作区去重（工作区被移动到其它屏时不造幽灵）
+    let existing: HashSet<&str> = ws_all.iter().map(|ws| ws.name.as_str()).collect();
+    let mut synthetic = 0i64;
+    for rule in rules {
+        if !rule.enabled || rule.monitor != monitor.name {
+            continue;
+        }
+        let Some((name, id)) = hyprland::rule_workspace(rule) else { continue };
+        if existing.contains(name.as_str()) {
+            continue;
+        }
+        let id = match id {
+            Some(id) => id,
+            None => {
+                synthetic += 1;
+                RULE_ONLY_ID_BASE - synthetic
+            }
+        };
+        slice.push(WorkspaceState {
+            id,
+            name,
+            urgent: false,
+            active: false,
+            has_windows: false,
+        });
+    }
+
+    slice.sort_by_key(|ws| ws.id);
+    slice
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,6 +800,70 @@ mod tests {
         // 显示器消失：基线随之移除
         clear_urgent_on_active_transition(&mut urgent, &mut last, &[]);
         assert!(last.is_empty());
+    }
+
+    #[test]
+    fn workspace_slice_merges_rules_and_dedupes() {
+        let m = mon("DP-2", Some(1));
+        let ws_all = vec![
+            WorkspaceInfo {
+                id: 1,
+                name: "1".into(),
+                monitor: "DP-2".into(),
+                windows: 2,
+            },
+            WorkspaceInfo {
+                id: 2,
+                name: "2".into(),
+                monitor: "DP-2".into(),
+                windows: 0,
+            },
+            WorkspaceInfo {
+                id: 3,
+                name: "3".into(),
+                monitor: "DP-1".into(),
+                windows: 1,
+            },
+        ];
+        let rules = vec![
+            rule("1", "DP-2", true),
+            rule("2", "DP-2", true),
+            rule("3", "DP-2", true),             // 现存于 DP-1：不造幽灵
+            rule("5", "DP-2", true),             // 仅规则：非活跃工作区
+            rule("6", "DP-2", false),            // 禁用：跳过
+            rule("7", "DP-1", true),             // 他屏：不出现
+            rule("9", "", true),                 // 未绑定：跳过
+            rule("name:web", "DP-2", true),      // 命名规则：合成 id
+            rule("special:magic", "DP-2", true), // 动态选择器：跳过
+        ];
+        let urgent: HashSet<i64> = [1].into_iter().collect();
+        let slice = workspace_slice(&m, &ws_all, &rules, &urgent);
+
+        let names: Vec<&str> = slice.iter().map(|s| s.name.as_str()).collect();
+        // 命名工作区（合成负 id）排最前，其后按 id：1、2、5
+        assert_eq!(names, ["web", "1", "2", "5"]);
+        assert_eq!(
+            slice.iter().map(|s| s.id).collect::<Vec<_>>(),
+            [RULE_ONLY_ID_BASE - 1, 1, 2, 5]
+        );
+
+        let one = &slice[1];
+        assert!(one.active && one.has_windows && one.urgent);
+        let two = &slice[2];
+        assert!(!two.active && !two.has_windows);
+        let five = &slice[3];
+        assert_eq!(five.id, 5);
+        assert!(!five.active && !five.has_windows && !five.urgent);
+        let web = &slice[0];
+        assert!(!web.active && !web.has_windows && !web.urgent);
+    }
+
+    fn rule(selector: &str, monitor: &str, enabled: bool) -> hyprland::WorkspaceRuleInfo {
+        hyprland::WorkspaceRuleInfo {
+            workspace_string: selector.into(),
+            enabled,
+            monitor: monitor.into(),
+        }
     }
 
     #[test]

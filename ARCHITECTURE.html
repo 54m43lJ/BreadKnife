@@ -80,7 +80,7 @@
 @define-color bg_primary #1b1816;
 @define-color bg_secondary #24211e;
 @define-color bg_hover #302c29;
-@define-color bg_active #57504a;
+@define-color bg_active #3d3835;
 /* ── 文字 ── */
 @define-color fg_primary #ecd9a8;
 @define-color fg_secondary #b8a078;
@@ -101,7 +101,7 @@
   <tr><th>组件</th><th>样式</th></tr>
   <tr><td>任务栏窗口</td><td>背景 <code>bg_primary</code>，底边框 <code>border_strong</code>，高度 30px</td></tr>
   <tr><td>按钮</td><td>透明背景，圆角 6px，Hover 态 <code>bg_hover</code></td></tr>
-  <tr><td>Workspace 按钮</td><td>四要素见 <a href="README.html#界面交互">README.html「界面交互」</a>；色彩映射：背景色＝<code>bg_active</code>、对比色＝<code>fg_primary</code>、高亮色＝<code>warning</code>；尺寸（视觉契约，操作源在 <code>bread.css</code>）：无窗口小圆点直径 4px，有窗口长方形 20×15px（圆角半径 10px），活跃叠加小圆点直径 4px</td></tr>
+  <tr><td>Workspace 按钮</td><td>四要素矩阵见 <a href="README.html#界面交互">README.html「界面交互」</a>；色彩映射（均取既有色板）：背景色＝<code>fg_muted</code>、前景色＝<code>fg_primary</code>、警告色＝<code>warning</code>；尺寸（视觉契约，操作源在 <code>bread.css</code>）：无窗口小圆点直径 4px，有窗口长方形 20×15px（圆角半径 10px），活跃叠加小圆点直径 4px</td></tr>
   <tr><td>控制中心入口</td><td>容器背景 <code>bg_secondary</code>，圆角 6px</td></tr>
   <tr><td>滑块</td><td>滑轨高 4px，圆形滑块 12px，高亮 <code>accent</code></td></tr>
 </table>
@@ -174,7 +174,7 @@
 <table>
   <tr><th>模型</th><th>内容</th><th>转换</th></tr>
   <tr><td>显示器映射表</td><td>显示器 ID → 窗口进程（daemon 持有）</td><td>Hyprland 插拔事件 → spawn / kill 窗口进程</td></tr>
-  <tr><td>工作区映射表</td><td>工作区 ID → 所属显示器（Hyprland 特性：workspace rules 将工作区绑定到显示器，daemon 据此反推；daemon 持有）</td><td>启动/插拔时全量重建；<code>workspace&gt;&gt;X</code> → 切片推送</td></tr>
+  <tr><td>工作区映射表</td><td>工作区 ID → 所属显示器；本屏工作区清单＝现存工作区 ∪ 绑定到本屏的静态 workspace 规则（有规则无窗口＝非活跃工作区，见 <a href="README.html#界面交互">README.html「界面交互」</a>；daemon 持有）</td><td>启动/插拔/配置重载时全量重建（按名去重 + id 排序）；<code>workspace&gt;&gt;X</code> → 切片推送</td></tr>
   <tr><td>控制指令</td><td>行文本 → { open, close, open-all, close-all, exit, reload }</td><td>Socket 读入 → daemon 指令分发</td></tr>
   <tr><td>通知记录</td><td>应用名、图标、摘要、正文、通知 ID（daemon 持有）</td><td>DBus Notify 调用参数 → 缓存 → 推送全部窗口</td></tr>
   <tr><td>托盘 Item 视图</td><td>图标（IconSource）、状态、标题、提示（ToolTip）、有无菜单、存活标记（daemon → 窗口）</td><td>breadpan 现场读取 → 状态推送；窗口渲染直出为可绘制对象；alive=false → 置灰样式</td></tr>

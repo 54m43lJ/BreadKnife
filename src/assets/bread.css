@@ -1,7 +1,7 @@
 @define-color bg_primary #1b1816;
 @define-color bg_secondary #24211e;
 @define-color bg_hover #302c29;
-@define-color bg_active #57504a;
+@define-color bg_active #3d3835;
 @define-color fg_primary #ecd9a8;
 @define-color fg_secondary #b8a078;
 @define-color fg_muted #6b5d48;
@@ -46,12 +46,12 @@ button:hover {
     min-height: 22px;
 }
 
-/* 无窗口：基底小圆点 */
+/* 无窗口：基底小圆点（背景色角色取既有色板 fg_muted） */
 .ws-base {
     min-width: 4px;
     min-height: 4px;
     border-radius: 50%;
-    background-color: @bg_active;
+    background-color: @fg_muted;
     transition: all 150ms ease;
 }
 
@@ -60,7 +60,7 @@ button:hover {
     min-width: 20px;
     min-height: 15px;
     border-radius: 10px;
-    background-color: @bg_active;
+    background-color: @fg_muted;
 }
 
 /* 紧急：基底取高亮色（无窗口不可紧急） */
@@ -78,7 +78,7 @@ button:hover {
 
 /* 基底为高亮色时：叠加点取背景色（高对比） */
 .ws-ind.on-warning {
-    background-color: @bg_active;
+    background-color: @fg_muted;
 }
 
 /* ── 窗口信息 ── */

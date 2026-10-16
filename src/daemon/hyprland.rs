@@ -33,6 +33,22 @@ pub struct WorkspaceInfo {
     pub windows: u64,
 }
 
+/// workspace 规则（`hyprctl -j workspacerules`）：工作区与显示器的绑定声明。
+#[derive(Debug, Deserialize, Clone)]
+pub struct WorkspaceRuleInfo {
+    #[serde(rename = "workspaceString")]
+    pub workspace_string: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 规则声明的显示器名（未绑定为空串）
+    #[serde(default)]
+    pub monitor: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct ClientInfo {
     pub address: String,
@@ -87,6 +103,22 @@ pub fn workspaces() -> Vec<WorkspaceInfo> {
 
 pub fn clients() -> Vec<ClientInfo> {
     hyprctl_json(&["-j", "clients"])
+}
+
+/// 工作区规则（`hyprctl -j workspacerules`）：工作区与显示器的绑定声明。
+pub fn workspace_rules() -> Vec<WorkspaceRuleInfo> {
+    hyprctl_json(&["-j", "workspacerules"])
+}
+
+/// 规则选择器 → 静态工作区（名称, id 提示）。动态选择器（special:* / empty* 等）
+/// 不产生常驻条目；命名工作区的 id 由 Hyprland 创建时分配，提示为 None。
+pub fn rule_workspace(rule: &WorkspaceRuleInfo) -> Option<(String, Option<i64>)> {
+    let selector = rule.workspace_string.trim();
+    if let Ok(id) = selector.parse::<i64>() {
+        return Some((id.to_string(), Some(id)));
+    }
+    let name = selector.strip_prefix("name:")?;
+    (!name.is_empty()).then(|| (name.to_string(), None))
 }
 
 /// 窗口地址归一：事件载荷不带 0x 前缀，`hyprctl -j clients` 带 0x 前缀；统一去前缀、小写。
@@ -293,6 +325,35 @@ mod tests {
         assert_eq!(normalize_addr("0x55be3c902800"), "55be3c902800");
         assert_eq!(normalize_addr("55BE3C902800"), "55be3c902800");
         assert_eq!(normalize_addr(""), "");
+    }
+
+    // ── 工作区规则（workspacerules）──
+
+    #[test]
+    fn rule_workspace_static_selectors() {
+        let r = |s: &str| WorkspaceRuleInfo {
+            workspace_string: s.into(),
+            enabled: true,
+            monitor: "DP-2".into(),
+        };
+        assert_eq!(rule_workspace(&r("3")), Some(("3".to_string(), Some(3))));
+        assert_eq!(rule_workspace(&r("name:web")), Some(("web".to_string(), None)));
+        // 动态/特殊选择器不产生常驻条目
+        assert_eq!(rule_workspace(&r("special:magic")), None);
+        assert_eq!(rule_workspace(&r("empty m1")), None);
+        assert_eq!(rule_workspace(&r("name:")), None);
+    }
+
+    #[test]
+    fn workspace_rules_json_fields() {
+        let data = r#"[{"workspaceString":"3","enabled":true,"monitor":"DP-2","persistent":false},{"workspaceString":"name:web"}]"#;
+        let parsed: Vec<WorkspaceRuleInfo> = serde_json::from_str(data).unwrap();
+        assert_eq!(parsed[0].workspace_string, "3");
+        assert!(parsed[0].enabled);
+        assert_eq!(parsed[0].monitor, "DP-2");
+        // 缺省：enabled 视为启用、monitor 视为未绑定
+        assert!(parsed[1].enabled);
+        assert_eq!(parsed[1].monitor, "");
     }
 
     #[test]
