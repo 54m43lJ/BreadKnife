@@ -18,6 +18,7 @@ use crate::shared::model::WindowSnapshot;
 use crate::shared::protocol as wire;
 use ipc::IpcClient;
 use modules::center::CenterWidget;
+use modules::popup::PopupManager;
 use modules::tray::TrayWidget;
 use modules::window_info::WindowInfoWidget;
 use modules::workspace::WorkspaceWidget;
@@ -99,10 +100,13 @@ impl WindowApp {
             });
         }
 
+        // 弹窗会话：窗口级关闭面先于模块装配（各弹窗经其托管）
+        let popup = PopupManager::install(window.upcast_ref());
+
         let workspace = WorkspaceWidget::new(ipc.clone());
-        let info = WindowInfoWidget::new();
-        let tray = TrayWidget::new(ipc.clone(), ui_tx.clone());
-        let center = CenterWidget::new(ipc.clone());
+        let info = WindowInfoWidget::new(window.upcast_ref(), popup.clone());
+        let tray = TrayWidget::new(ipc.clone(), ui_tx.clone(), window.upcast_ref(), popup.clone());
+        let center = CenterWidget::new(ipc.clone(), window.upcast_ref(), popup.clone());
         let layout = gtk::CenterBox::new();
         layout.set_start_widget(Some(&workspace.container));
         layout.set_center_widget(Some(&info.container));

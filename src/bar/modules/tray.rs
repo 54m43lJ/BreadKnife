@@ -1,9 +1,9 @@
 //! 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）。
 //! 交互契约见 ARCHITECTURE §4.4「daemon ↔ 窗口」；菜单刷新语义见 MIGRATION §6.6。
+//! 弹窗经 PopupManager 托管（挂根窗口、无 grab、关闭自管，见 popup.rs）。
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -11,6 +11,7 @@ use std::sync::Arc;
 use gtk::prelude::*;
 
 use crate::bar::ipc::IpcClient;
+use crate::bar::modules::popup::{self, PopupManager};
 use crate::bar::UiTask;
 use crate::shared::model::{
     IconView, InteractionOutcome, MenuItem, MenuItemType, MenuSnapshot, ToggleState, ToggleType,
@@ -26,6 +27,8 @@ pub struct TrayWidget {
 }
 
 struct TrayInner {
+    window: gtk::Window,
+    popup: Rc<PopupManager>,
     container: gtk::Box,
     ipc: Arc<IpcClient>,
     ui: Sender<UiTask>,
@@ -42,8 +45,15 @@ struct MenuSession {
 }
 
 impl TrayWidget {
-    pub fn new(ipc: Arc<IpcClient>, ui: Sender<UiTask>) -> Self {
+    pub fn new(
+        ipc: Arc<IpcClient>,
+        ui: Sender<UiTask>,
+        window: &gtk::Window,
+        popup: Rc<PopupManager>,
+    ) -> Self {
         let inner = Rc::new(TrayInner {
+            window: window.clone(),
+            popup,
             container: gtk::Box::new(gtk::Orientation::Horizontal, 0),
             ipc,
             ui,
@@ -128,17 +138,16 @@ impl TrayWidget {
     }
 
     pub fn on_menu_read_done(&self, item: &str, result: Result<Response, String>) {
-        let session_open = self.inner.menu.borrow().as_ref().is_some_and(|s| {
-            s.item == item && s.popover.is_visible()
-        });
-        if !session_open {
+        if !self.inner.menu_open_for(item) {
             return;
         }
         match result {
             Ok(Response::Menu(snapshot)) => {
-                if let Some(session) = self.inner.menu.borrow().as_ref() {
+                // 借用即刻释放：widget 调用不得在任何 RefCell 借用之下
+                let popover = self.inner.menu.borrow().as_ref().map(|s| s.popover.clone());
+                if let Some(popover) = popover {
                     let content = build_menu_layer(&self.inner, item, &snapshot);
-                    session.popover.set_child(Some(&content));
+                    popover.set_child(Some(&content));
                 }
             }
             Err(e) => eprintln!("[tray] menu re-read failed: {e}"),
@@ -148,6 +157,16 @@ impl TrayWidget {
 }
 
 // ── 图标增删改 ──
+
+impl TrayInner {
+    /// 该 Item 的根菜单是否正在显示。
+    fn menu_open_for(&self, item: &str) -> bool {
+        self.menu
+            .borrow()
+            .as_ref()
+            .is_some_and(|s| s.item == item && s.popover.is_visible())
+    }
+}
 
 fn add_icon(inner: &Rc<TrayInner>, view: &TrayItemView) {
     let button = gtk::Button::new();
@@ -176,7 +195,9 @@ fn add_icon(inner: &Rc<TrayInner>, view: &TrayItemView) {
 }
 
 fn remove_icon(inner: &Rc<TrayInner>, id: &str) {
-    if let Some(button) = inner.icons.borrow_mut().remove(id) {
+    // 借用即刻释放：container.remove 可能触发菜单 closed 等同步信号重入
+    let button = inner.icons.borrow_mut().remove(id);
+    if let Some(button) = button {
         inner.container.remove(&button);
     }
 }
@@ -262,6 +283,10 @@ fn attach_gestures(inner: &Rc<TrayInner>, button: &gtk::Button, id: &str) {
         let inner2 = inner.clone();
         let id = id.to_string();
         gesture.connect_pressed(move |g, _n, x, y| {
+            // toggle：本次按下刚在捕获阶段关掉自己的菜单 → 不再发起重复交互
+            if inner2.popup.press_closed_contains(&format!("tray:{id}")) || inner2.menu_open_for(&id) {
+                return;
+            }
             let input = match g.current_button() {
                 2 => InteractInput::Middle { x: x as i32, y: y as i32 },
                 3 => InteractInput::Right { x: x as i32, y: y as i32 },
@@ -304,19 +329,16 @@ fn attach_gestures(inner: &Rc<TrayInner>, button: &gtk::Button, id: &str) {
     button.add_controller(scroll);
 }
 
-// ── 菜单弹窗（自绘）──
+// ── 菜单弹窗（自绘；由 PopupManager 托管）──
 
 fn show_menu(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: MenuSnapshot) {
     close_menu(inner);
 
     let popover = gtk::Popover::new();
     popover.add_css_class("menu-popover");
-    popover.set_autohide(true);
+    popup::attach(&popover, &inner.window, anchor, gtk::PositionType::Bottom);
     let content = build_menu_layer(inner, item, &snapshot);
     popover.set_child(Some(&content));
-    popover.set_parent(anchor);
-    popover.popup();
-
     {
         let inner2 = inner.clone();
         popover.connect_closed(move |_| {
@@ -324,14 +346,18 @@ fn show_menu(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: 
             inner2.pending_rows.borrow_mut().clear();
         });
     }
+    inner.popup.manage(&popover);
+    inner.popup.clone().open(&popover, format!("tray:{item}"));
     *inner.menu.borrow_mut() = Some(MenuSession { item: item.to_string(), popover });
 }
 
+/// 关闭本 Item 的菜单链（根 + 全部子层）。
+/// 借用纪律：先清会话并释放借用，再经 manager popdown——popdown 同步派发
+/// closed 信号，闭包会重入 menu / pending_rows（RefCell 跨 popdown 曾致崩溃）。
 fn close_menu(inner: &Rc<TrayInner>) {
-    if let Some(session) = inner.menu.borrow_mut().take() {
-        inner.pending_rows.borrow_mut().clear();
-        session.popover.popdown();
-    }
+    inner.pending_rows.borrow_mut().clear();
+    *inner.menu.borrow_mut() = None;
+    inner.popup.close_prefix("tray:");
 }
 
 /// 单层菜单内容：分隔行 / 标准行（toggle、图标、助记符标签、子层箭头）。
@@ -423,17 +449,17 @@ fn build_menu_row(inner: &Rc<TrayInner>, item: &str, entry: &MenuItem) -> gtk::B
     row
 }
 
-/// 子层弹窗：锚定该行右侧展开。
+/// 子层弹窗：锚定该行右侧展开（同挂根窗口，换层时旧子层先收）。
 fn open_sub_popover(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: MenuSnapshot) {
+    inner.popup.close_prefix(&format!("tray:{item}:sub"));
     let popover = gtk::Popover::new();
     popover.add_css_class("menu-popover");
-    popover.set_position(gtk::PositionType::Right);
-    popover.set_autohide(true);
+    popup::attach(&popover, &inner.window, anchor, gtk::PositionType::Right);
     let content = build_menu_layer(inner, item, &snapshot);
     popover.set_child(Some(&content));
-    popover.set_parent(anchor);
-    popover.popup();
-    // 子层生命周期随锚定行：根层重建时行销毁 → 弹窗自动收回
+    inner.popup.manage(&popover);
+    inner.popup.clone().open(&popover, format!("tray:{item}:sub"));
+    // 子层生命周期随菜单会话：根层关闭（close_prefix "tray:"）时一并收回
 }
 
 /// MenuChanged 重取刷新：根层或已展开路径——首版重取根层并重建

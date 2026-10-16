@@ -45,18 +45,18 @@ button:hover {
 }
 
 .ws-base {
-    min-width: 6px;
-    min-height: 6px;
+    min-width: 4px;
+    min-height: 4px;
     border-radius: 50%;
     background-color: @bg_active;
     transition: all 150ms ease;
 }
 
-/* 有窗口：背景色大圆角方形 */
+/* 有窗口：胶囊基底 20×15px、圆角半径 10px */
 .ws-base.square {
-    min-width: 14px;
-    min-height: 14px;
-    border-radius: 4px;
+    min-width: 20px;
+    min-height: 15px;
+    border-radius: 10px;
     background-color: @bg_active;
 }
 

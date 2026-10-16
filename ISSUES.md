@@ -1,5 +1,8 @@
-- 需要明确：workspace组件用3px小圆点和15px圆角的矩形
-- 需要明确测试并成功hyprland相关的接口能够正确执行
-- 右键菜单需要点一下周围关闭当前popover才能和其它互动，包括menu和submenu。正确的互动应该是无缝切换不需要失去focus即可与其他元素互动的
-- control center的popover窗口弹出的时候窗口的对齐会莫名其妙的变化，表征是tray和cc这些右对齐的元素不能正确贴紧右边
-- 菜单互动时任务栏会崩溃,但是互动能正常发出（复现步骤：右键打开clash-verge菜单，点击Dashboard选项，window立即崩溃，然后daemon自动重启窗口）
+- （未修复）明确样式：workspace组件用4px直径小圆点和20px宽，15px高，10px圆角半径的长方形
+- （未修复）需要明确测试并成功hyprland相关的接口能够正确执行
+  - 点击切换workspace失败：`[hyprland] hyprctl ["dispatch", "workspace", "m+1"] failed:`
+- （部分修复）右键菜单需要点一下周围关闭当前popover才能和其它互动，包括menu和submenu。正确的互动应该是无缝切换不需要失去focus即可与其他元素互动
+  - 新问题被引入：submenu弹出位置错误，变成了屏幕右上方；点击menu外（失去focus）时菜单不再自动关闭
+- （部分修复）control center的popover窗口弹出的时候窗口的对齐会莫名其妙的变化，表征是tray和cc这些右对齐的元素不能正确贴紧右边
+  - 新问题被引入：popover出现的水平位置变成了正中而不是右边
+- （已修复）菜单互动时任务栏会崩溃,但是互动能正常发出（复现步骤：右键打开clash-verge菜单，点击Dashboard选项，window立即崩溃，然后daemon自动重启窗口）

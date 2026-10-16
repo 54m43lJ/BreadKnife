@@ -35,7 +35,8 @@ cargo test                                           # 应用：协议回环 / �
 dbus-run-session -- cargo test --manifest-path breadpan/Cargo.toml   # 库：全量 mock 测试</code></pre>
 <ul class="note">
   <li>应用 crate 依赖 breadpan 路径依赖，根目录一条命令即可整体构建；</li>
-  <li>库测试须独立在 <code>breadpan/</code> 清单下执行（见其 BUILD.html）。</li>
+  <li>库测试须独立在 <code>breadpan/</code> 清单下执行（见其 BUILD.html）；</li>
+  <li>Hyprland 接口冒烟：真机会话内执行 <code>scripts/hypr-smoke.sh</code>（套接字可达 / hyprctl 数据源 / dispatch 语义 / socket2 事件流；<code>SKIP_DISPATCH=1</code> 可跳过会换工作区的相对切换项）。</li>
 </ul>
 
 <h2>运行</h2>

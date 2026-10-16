@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 
+use crate::bar::modules::popup::{self, PopupManager};
 use crate::shared::model::{ActiveWindow, NotificationRecord};
 
 /// 窗口侧留存的通知条数（弹出列表长度上限）。
@@ -19,7 +20,7 @@ pub struct WindowInfoWidget {
 }
 
 impl WindowInfoWidget {
-    pub fn new() -> Self {
+    pub fn new(window: &gtk::Window, popup: Rc<PopupManager>) -> Self {
         let icon = gtk::Image::new();
         icon.set_pixel_size(16);
         icon.add_css_class("title-icon");
@@ -34,15 +35,23 @@ impl WindowInfoWidget {
         let container = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         container.add_css_class("title-box");
 
-        // 点击标题区域弹出通知列表
-        let (list_box, popover) = Self::build_popover(&container);
+        // 点击标题区域弹出通知列表（面板挂根窗口，无 grab）
+        let (list_box, popover) = Self::build_popover();
+        popup::attach(&popover, window, &container, gtk::PositionType::Bottom);
+        popup.manage(&popover);
         let list_box = Rc::new(list_box);
         let click = gtk::GestureClick::new();
         let records_click = records.clone();
         let list_handle = list_box.clone();
+        let pop_handle = popover.clone();
+        let popup_click = popup.clone();
         click.connect_pressed(move |_g, _n, _x, _y| {
             Self::fill_list(&list_handle, &records_click.borrow());
-            popover.popup();
+            // toggle：本次按下刚关掉自己 → 不重开
+            if popup_click.press_closed_contains("notif") {
+                return;
+            }
+            popup_click.clone().open(&pop_handle, "notif".into());
         });
         container.add_controller(click);
 
@@ -52,7 +61,7 @@ impl WindowInfoWidget {
         Self { container, icon, label, records, list_box }
     }
 
-    fn build_popover(parent: &gtk::Box) -> (gtk::Box, gtk::Popover) {
+    fn build_popover() -> (gtk::Box, gtk::Popover) {
         let list_box = gtk::Box::new(gtk::Orientation::Vertical, 2);
         let scrolled = gtk::ScrolledWindow::new();
         scrolled.set_child(Some(&list_box));
@@ -63,8 +72,7 @@ impl WindowInfoWidget {
         content.append(&scrolled);
         let popover = gtk::Popover::new();
         popover.set_child(Some(&content));
-        popover.set_autohide(true);
-        popover.set_parent(parent);
+        popover.set_autohide(false);
         (list_box, popover)
     }
 

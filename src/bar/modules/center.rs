@@ -12,6 +12,7 @@ use gtk::glib;
 use gtk::prelude::*;
 
 use crate::bar::ipc::IpcClient;
+use crate::bar::modules::popup::{self, PopupManager};
 use crate::shared::model::SystemState;
 use crate::shared::protocol::{MediaOp, Request};
 
@@ -31,7 +32,7 @@ pub struct CenterWidget {
 }
 
 impl CenterWidget {
-    pub fn new(ipc: Arc<IpcClient>) -> Self {
+    pub fn new(ipc: Arc<IpcClient>, window: &gtk::Window, popup: Rc<PopupManager>) -> Self {
         let net = gtk::Label::new(None);
         net.add_css_class("status-label");
 
@@ -97,14 +98,21 @@ impl CenterWidget {
         panel.append(&bt_row);
         panel.append(&calendar);
 
+        // 面板挂根窗口（不参与容器布局）；无 grab，开关经 PopupManager
         let popover = gtk::Popover::new();
         popover.set_child(Some(&panel));
-        popover.set_autohide(true);
-        popover.set_parent(&entry);
+        popup::attach(&popover, window, &entry, gtk::PositionType::Bottom);
+        popup.manage(&popover);
 
+        let pop_handle = popover.clone();
+        let popup_click = popup.clone();
         let click = gtk::GestureClick::new();
         click.connect_pressed(move |_g, _n, _x, _y| {
-            popover.popup();
+            // toggle：本次按下刚关掉自己 → 不重开
+            if popup_click.press_closed_contains("cc") {
+                return;
+            }
+            popup_click.clone().open(&pop_handle, "cc".into());
         });
         entry.add_controller(click);
 

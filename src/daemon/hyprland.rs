@@ -102,7 +102,7 @@ pub fn dispatch_workspace(target: &str) {
 // ── socket2 事件流（只读监听）──
 
 /// 汇聚后的事件语义；触发全量重同步的事件合并为 `Resync`。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HyprlandEvent {
     MonitorAdded(String),
     MonitorRemoved(String),
@@ -218,4 +218,139 @@ fn parse_event(name: &str, data: &str) -> Option<HyprlandEvent> {
 
 fn first_token(data: &str) -> String {
     data.split(',').next().unwrap_or_default().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── socket2 事件行解析（fixture 防上游事件名 / 载荷漂移）──
+
+    #[test]
+    fn parse_event_monitor_lifecycle() {
+        assert!(matches!(
+            parse_event("monitoraddedv2", "DP-1,Some Monitor,0"),
+            Some(HyprlandEvent::MonitorAdded(n)) if n == "DP-1"
+        ));
+        assert!(matches!(
+            parse_event("monitoradded", "DP-1"),
+            Some(HyprlandEvent::MonitorAdded(n)) if n == "DP-1"
+        ));
+        assert!(matches!(
+            parse_event("monitorremovedv2", "DP-1,Some Monitor,0"),
+            Some(HyprlandEvent::MonitorRemoved(n)) if n == "DP-1"
+        ));
+    }
+
+    #[test]
+    fn parse_event_active_window() {
+        // v2 载荷：class,title,addr（title 可含逗号）
+        assert!(matches!(
+            parse_event("activewindowv2", "firefox,T,with,commas,0xdeadbeef"),
+            Some(HyprlandEvent::ActiveWindow { ref class, ref title, ref addr })
+                if class == "firefox" && title == "T,with,commas" && addr == "0xdeadbeef"
+        ));
+        // 空桌面：class 与 title 皆空、无地址
+        assert!(matches!(
+            parse_event("activewindowv2", ","),
+            Some(HyprlandEvent::ActiveWindow { ref class, ref title, ref addr })
+                if class.is_empty() && title.is_empty() && addr.is_empty()
+        ));
+        // 旧版事件：class,title
+        assert!(matches!(
+            parse_event("activewindow", "kitty,zsh"),
+            Some(HyprlandEvent::ActiveWindow { ref class, ref title, .. })
+                if class == "kitty" && title == "zsh"
+        ));
+    }
+
+    #[test]
+    fn parse_event_title_and_urgent() {
+        assert!(matches!(
+            parse_event("windowtitlev2", "0xdeadbeef,new title"),
+            Some(HyprlandEvent::WindowTitle { ref addr, ref title })
+                if addr == "0xdeadbeef" && title == "new title"
+        ));
+        assert!(matches!(
+            parse_event("urgent", "0xdeadbeef"),
+            Some(HyprlandEvent::Urgent { ref addr }) if addr == "0xdeadbeef"
+        ));
+        assert!(matches!(
+            parse_event("urgentdecode", "0xdeadbeef,extra"),
+            Some(HyprlandEvent::Urgent { ref addr }) if addr == "0xdeadbeef"
+        ));
+    }
+
+    #[test]
+    fn parse_event_resync_triggers() {
+        let cases = [
+            ("workspacev2", "2"),
+            ("workspace", "2"),
+            ("focusedmonv2", "DP-1,2"),
+            ("focusedmon", "DP-1,2"),
+            ("openwindow", "0xa,1,kitty,zsh"),
+            ("closewindow", "0xa"),
+            ("movewindow", "0xa,2"),
+            ("movewindowv2", "0xa,2,1"),
+            ("createworkspace", "3"),
+            ("createworkspacev2", "3"),
+            ("destroyworkspace", "3"),
+            ("destroyworkspacev2", "3"),
+            ("changefloatingmode", "0xa,1"),
+            ("configreloaded", ""),
+            ("activespecialworkspace", ""),
+        ];
+        for (name, data) in cases {
+            assert!(
+                matches!(parse_event(name, data), Some(HyprlandEvent::Resync)),
+                "{name}>>{data} 应触发 Resync"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_event_unknown_ignored() {
+        assert_eq!(parse_event("somerandomevent", "x"), None);
+        assert_eq!(parse_event("tolongline", "a>>b"), None);
+    }
+
+    // ── hyprctl -j 反序列化（fixture 防字段漂移）──
+
+    #[test]
+    fn monitors_json_workspace_ref_alias() {
+        // 新版本字段名
+        let focused = r#"[{"id":1,"name":"DP-1","focusedWorkspace":{"id":3,"name":"3"}}]"#;
+        let parsed: Vec<MonitorInfo> = serde_json::from_str(focused).unwrap();
+        assert_eq!(parsed[0].active_ws.as_ref().unwrap().id, 3);
+        // 旧版本字段名
+        let legacy = r#"[{"id":1,"name":"DP-1","activeWorkspace":{"id":2,"name":"2"}}]"#;
+        let parsed: Vec<MonitorInfo> = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed[0].active_ws.as_ref().unwrap().id, 2);
+        // 两字段皆缺（理论不达，防手滑改坏 Option）
+        let none = r#"[{"id":1,"name":"DP-1"}]"#;
+        let parsed: Vec<MonitorInfo> = serde_json::from_str(none).unwrap();
+        assert!(parsed[0].active_ws.is_none());
+    }
+
+    #[test]
+    fn workspaces_json_windows_count() {
+        let data = r#"[{"id":1,"name":"1","monitor":"DP-1","monitorID":0,"windows":2,"hasfullscreen":false,"lastwindow":"0x1"},{"id":2,"name":"2","monitor":"DP-1","windows":0}]"#;
+        let parsed: Vec<WorkspaceInfo> = serde_json::from_str(data).unwrap();
+        assert_eq!(parsed[0].windows, 2);
+        assert_eq!(parsed[1].windows, 0);
+        assert_eq!(parsed[1].monitor, "DP-1");
+        assert_eq!(parsed[1].id, 2);
+    }
+
+    #[test]
+    fn clients_json_urgent_flag() {
+        let full = r#"[{"address":"0x55f0aa","mapped":true,"hidden":false,"at":[0,0],"size":[800,600],"workspace":{"id":2,"name":"2"},"floating":false,"monitor":0,"class":"firefox","title":"F","initialClass":"firefox","initialTitle":"F","pid":123,"xwayland":false,"pinned":false,"fullscreen":false,"fullscreenMode":0,"fakefullscreen":false,"grouped":[],"swallowCount":0,"swallowing":"0x0","focusHistoryID":0,"urgent":true}]"#;
+        let parsed: Vec<ClientInfo> = serde_json::from_str(full).unwrap();
+        assert!(parsed[0].urgent);
+        assert_eq!(parsed[0].workspace.id, 2);
+        // 旧版本输出缺 urgent 字段 → false
+        let minimal = r#"[{"address":"0x1","workspace":{"id":1,"name":"1"}}]"#;
+        let parsed: Vec<ClientInfo> = serde_json::from_str(minimal).unwrap();
+        assert!(!parsed[0].urgent);
+    }
 }
