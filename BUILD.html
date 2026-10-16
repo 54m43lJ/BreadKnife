@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadknife 构建与开发</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+
+<h1>breadknife 构建与开发</h1>
+<blockquote>
+  面向开发者的构建、运行、控制与测试说明。项目描述见
+  <a href="README.html">README.html</a>，实现规格见
+  <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> 与
+  <a href="CODE.html">CODE.html</a>；成员库 breadpan 的构建说明见
+  <a href="breadpan/BUILD.html">breadpan/BUILD.html</a>。
+</blockquote>
+
+<h2>构建依赖</h2>
+<table>
+  <tr><th>项</th><th>说明</th></tr>
+  <tr><td>Rust 工具链</td><td>rustup / cargo（edition 2024）</td></tr>
+  <tr><td>GUI / 层壳</td><td>gtk4 / glib 开发包与 <code>gtk4-layer-shell</code>（仅窗口进程链接 GTK；gtk4-layer-shell 需从源码安装：<code>meson setup build &amp;&amp; sudo meson install -C build</code>）</td></tr>
+  <tr><td>托盘协议栈</td><td><code>breadpan</code> 随仓库落位（路径依赖，纯 Rust——<strong>无 libastal 等系统级构建依赖</strong>）</td></tr>
+  <tr><td>可选系统工具</td><td><code>pamixer</code> / <code>brightnessctl</code>（音量 / 亮度）、<code>playerctl</code>（媒体控制）、<code>nmcli</code>（网络状态）——缺席时对应功能降级隐藏，不阻断构建</td></tr>
+  <tr><td>测试环境</td><td>应用测试无需显示服务；breadpan 库测试需 DBus session bus（<code>dbus-run-session</code>）</td></tr>
+</table>
+
+<h2>编译与测试</h2>
+<pre><code>cargo build               # 调试构建（二进制 target/debug/bread）
+cargo build --release
+cargo test                                           # 应用：协议回环 / 控制行解析
+dbus-run-session -- cargo test --manifest-path breadpan/Cargo.toml   # 库：全量 mock 测试</code></pre>
+<ul class="note">
+  <li>应用 crate 依赖 breadpan 路径依赖，根目录一条命令即可整体构建；</li>
+  <li>库测试须独立在 <code>breadpan/</code> 清单下执行（见其 BUILD.html）。</li>
+</ul>
+
+<h2>运行</h2>
+<pre><code>bread                     # 前台启动：spawn 后台 daemon 后返回（日志仍写启动终端 stderr）
+bread __daemon            # 前台运行 daemon（调试用，隐藏子命令）
+bread open-all            # 每台显示器开一条任务栏
+bread reload              # 热重载 CSS（改色即见）
+bread exit                # 优雅退出（终止全部窗口、释放托盘 Watcher 名）</code></pre>
+<table>
+  <tr><th>运行前提</th><th>说明</th></tr>
+  <tr><td>Hyprland 会话</td><td><code>HYPRLAND_INSTANCE_SIGNATURE</code> 与 <code>$XDG_RUNTIME_DIR/hypr/$SIG/.socket2.sock</code> 可达（显示器 / 工作区数据源）</td></tr>
+  <tr><td>Wayland 显示</td><td>窗口进程经 layer-shell 上屏；daemon 本身无 GTK、无显示依赖</td></tr>
+  <tr><td>DBus session bus</td><td>托盘组装（org.kde.StatusNotifierWatcher）与通知守护（org.freedesktop.Notifications）——名被占（既有托盘 / 通知守护）时对应功能降级，不阻断其余部分</td></tr>
+</table>
+<ul class="note">
+  <li>运行时文件：<code>$XDG_RUNTIME_DIR/bread.pid</code>（PID 文件）、<code>bread.sock</code>（控制）、<code>bread-windows.sock</code>（窗口 IPC）、<code>bread/bread.css</code>（落盘的默认主题）；控制套接字可用 <code>-s/--socket</code> 覆盖（窗口套接字随之派生）；</li>
+  <li>主题覆盖：<code>BREAD_CSS=/path/to/theme.css bread</code>——daemon 跟踪该路径，<code>bread reload</code> 广播重读；</li>
+  <li>VMware / vmwgfx 环境：窗口进程自动回退 <code>GSK_RENDERER=cairo</code>（规避 dmabuf 协议错误崩溃）。</li>
+</ul>
+
+<h2>调试要点</h2>
+<table>
+  <tr><th>症状</th><th>定位</th></tr>
+  <tr><td>托盘空 + <code>NameTaken</code> 日志</td><td>会话已有 SNI host（旧任务栏未退）——退出占用者后重启 daemon；breadpan 对该终局不自动重连（见 MIGRATION §6.5）</td></tr>
+  <tr><td>窗口未出现</td><td>查 daemon stderr 的 <code>[windows]</code> spawn / 崩溃重启日志；连续崩溃超限（60s 内 5 次）放弃并记录</td></tr>
+  <tr><td>右键菜单延迟数秒</td><td>病态 Item 的菜单读取耗时（MIGRATION §6.3 阻塞面结论）；阻塞发生在 daemon 专用线程，窗口不冻结</td></tr>
+  <tr><td>通知中心无记录</td><td>会话已有通知守护（如 dunst）持有 org.freedesktop.Notifications——daemon 侧降级，属预期</td></tr>
+</table>
+
+</main>
+</body>
+</html>
