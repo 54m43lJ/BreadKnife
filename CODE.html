@@ -30,14 +30,13 @@
     │   ├── windows.rs    # 窗口进程生命周期（spawn / kill / 崩溃重启）；显示器 → 窗口映射
     │   └── ipc.rs        # Unix socket 服务端：请求应答 + 状态推送
     ├── window/           # 窗口进程（View，GTK4）
-    │   ├── mod.rs        # 装配与 GTK 主循环；层壳窗口；模块组装
+    │   ├── mod.rs        # 装配与 GTK 主循环；层壳窗口实例；数据分发（喂给对应模块）
     │   ├── ipc.rs        # IPC 客户端：快照 / 推送订阅、请求投递
     │   ├── style.rs      # 按 daemon 跟踪的路径加载 CSS；reload 重读
-    │   ├── menu.rs       # MenuSnapshot → GTK 弹出菜单（自绘：懒加载 / 激活 / 刷新）
     │   └── modules/
     │       ├── workspace.rs    # 三态工作区条（渲染 + 手势捕获）
     │       ├── window_info.rs  # 活动窗口图标 / 标题 + 通知中心弹窗
-    │       ├── tray.rs         # 托盘图标渲染（渲染直出）+ 手势捕获
+    │       ├── tray.rs         # 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）
     │       └── center.rs       # 控制中心入口与弹出面板
     ├── shared/           # daemon / 窗口共用
     │   ├── protocol.rs   # IPC 消息类型（请求 / 应答 / 推送）
@@ -46,7 +45,8 @@
         └── bread.css     # 默认主题（变量定义）</code></pre>
 <ul class="note">
   <li>同一二进制承载三种角色：daemon、窗口（由 daemon spawn，<code>bread window --monitor …</code>）、客户端（指令转发）；</li>
-  <li>daemon/ 无 GTK 依赖；GTK 与 breadpan 渲染直出只在 window/。</li>
+  <li>daemon/ 无 GTK 依赖；GTK 与 breadpan 渲染直出只在 window/；</li>
+  <li>渲染归模块：窗口主进程只维护窗口实例与数据分发，一切渲染（含托盘菜单弹窗）由对应模块包干。</li>
 </ul>
 
 <h2 id="sec-2">2. 通用约定</h2>
