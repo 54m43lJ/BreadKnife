@@ -59,6 +59,8 @@ pub struct Daemon {
     windows: HashMap<String, WindowProcEntry>,
     /// 应存在窗口的显示器集合（open/open-all/插拔维护；close 移除）。
     desired: HashSet<String>,
+    /// 首次重同步是否已把显示器清单种入 desired（§3.3：启动即逐屏 spawn）。
+    seeded: bool,
     restarts: HashMap<String, (u32, Instant)>,
     pending_resync: bool,
     control_path: String,
@@ -109,6 +111,7 @@ pub fn run(control_path: &str) -> Result<(), String> {
         css_path,
         windows: HashMap::new(),
         desired: HashSet::new(),
+        seeded: false,
         restarts: HashMap::new(),
         pending_resync: false,
         control_path: control_path.to_string(),
@@ -252,9 +255,17 @@ impl Daemon {
     }
 
     /// 全量重同步：显示器清单、工作区映射（活动 / 占用 / 紧急）、窗口进程对齐。
+    /// 首次执行把显示器清单种入 desired——启动即逐屏 spawn（§3.3）；
+    /// 此后 desired 只经 open/close/插拔事件变更（用户关闭的不因重同步复活）。
     fn resync(&mut self) {
         self.monitors = hyprland::monitors();
         self.ws_all = hyprland::workspaces();
+        if !self.seeded {
+            self.seeded = true;
+            for m in &self.monitors {
+                self.desired.insert(m.name.clone());
+            }
+        }
 
         // 激活即解除紧急
         for m in &self.monitors {
@@ -335,7 +346,15 @@ impl Daemon {
             if let Some(out) = entry.proc.out.take() {
                 drop(out);
             }
-            let _ = entry.proc.child.kill();
+            let mut child = entry.proc.child;
+            let _ = child.kill();
+            // 收割：独立线程 wait，避免僵尸残留至 daemon 退出
+            std::thread::Builder::new()
+                .name(format!("reap-{monitor}"))
+                .spawn(move || {
+                    let _ = child.wait();
+                })
+                .ok();
             eprintln!("[windows] killed window for {monitor}");
         }
     }

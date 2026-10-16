@@ -85,6 +85,7 @@ impl WindowApp {
         window.set_anchor(Edge::Left, true);
         window.set_anchor(Edge::Right, true);
         window.set_anchor(Edge::Top, true);
+        window.set_namespace(Some("bread"));
         window.auto_exclusive_zone_enable();
         if let Some(m) = find_monitor(monitor) {
             window.set_monitor(Some(&m));
