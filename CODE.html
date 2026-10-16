@@ -34,7 +34,7 @@
     │   ├── <a href="#sec-3-window-ipc">ipc.rs</a>        # IPC 客户端：快照 / 推送订阅、请求投递
     │   ├── <a href="#sec-3-style">style.rs</a>      # 按 daemon 跟踪的路径加载 CSS；reload 重读
     │   └── modules/
-    │       ├── workspace.rs    # 三态工作区条（渲染 + 手势捕获）
+    │       ├── workspace.rs    # 工作区条（点/圆角方形渲染 + 手势捕获）
     │       ├── window_info.rs  # 活动窗口图标 / 标题 + 通知中心弹窗
     │       ├── <a href="#sec-3-tray">tray.rs</a>         # 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）
     │       └── center.rs       # 控制中心入口与弹出面板
@@ -169,7 +169,7 @@ pub enum Push {                      // daemon → 窗口（无应答）
     notifications: Vec&lt;NotificationRecord&gt;,
     css_path: String,
 }
-pub struct WorkspaceState { id: u32, phase: WorkspacePhase }    // 激活 / 空置 / 紧急
+pub struct WorkspaceState { id: u32, phase: WorkspacePhase }    // 活跃 / 非活跃 / 紧急
 pub enum WorkspacePhase;
 pub struct ActiveWindow { class: String, title: String }
 pub struct StateDelta;                // 工作区 / 活动窗口 / 系统状态增量
