@@ -169,8 +169,7 @@ pub enum Push {                      // daemon → 窗口（无应答）
     notifications: Vec&lt;NotificationRecord&gt;,
     css_path: String,
 }
-pub struct WorkspaceState { id: u32, phase: WorkspacePhase }    // 形态见 README「界面交互」
-pub enum WorkspacePhase;
+pub struct WorkspaceState { id: u32, urgent: bool, active: bool, has_windows: bool }    // 形态见 README「界面交互」；色彩映射见 ARCHITECTURE §3.10
 pub struct ActiveWindow { class: String, title: String }
 pub struct StateDelta;                // 工作区 / 活动窗口 / 系统状态增量
 pub struct TrayUpdate;                // 托盘项增删改 + breadpan TrayItem / IconSource
