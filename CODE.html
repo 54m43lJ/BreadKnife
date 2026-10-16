@@ -54,7 +54,7 @@
 <h2 id="sec-3">3. 内部类型与方法签名</h2>
 <ul class="note">
   <li>收录标准：只列关键内部类型与方法；条目只承载签名与一行用途，方法内部步骤归 <a href="#sec-4">§4</a> 调用栈，未列出者皆为局部实现细节；</li>
-  <li>协议语义（Hyprland 事件、控制指令、数据模型）见 <a href="ARCHITECTURE.html#sec-4">ARCHITECTURE.html §4</a>；IPC 消息与窗口切片的语义见 <a href="ARCHITECTURE.html#sec-4-4">ARCHITECTURE.html §4.4</a>，此处只列 Rust 形体（首版规划，随实现校准）。</li>
+  <li>协议语义（Hyprland 事件、控制指令、数据模型）见 <a href="ARCHITECTURE.html#sec-4">ARCHITECTURE.html §4</a>；IPC 消息与窗口切片的语义见 <a href="ARCHITECTURE.html#sec-4-4">ARCHITECTURE.html §4.4</a>，此处只列 Rust 形体；无实现参考的条目以注释标注「待实现，可以根据实际情况调整」。</li>
 </ul>
 <pre><code>// shared/protocol.rs —— daemon ↔ 窗口 IPC（请求均有应答；推送无应答）
 pub enum Request {                       // 窗口 → daemon
@@ -137,66 +137,90 @@ impl WindowApp {
     pub fn run(monitor: &amp;str) -&gt; Result&lt;(), Error&gt;;     // 连接 IPC → 取快照 → GTK 主循环
     fn request(&amp;self, req: Request) -&gt; Result&lt;Response, Error&gt;;
 }</code></pre>
+<pre><code>// 草稿 API（无实现参考）：待实现，可以根据实际情况调整
+// daemon/notify.rs
+pub fn serve(conn: &amp;zbus::Connection) -&gt; Result&lt;(), Error&gt;;
+// daemon/hyprland.rs
+pub fn monitors() -&gt; Vec&lt;MonitorId&gt;;
+// daemon/ipc.rs
+pub fn listen(path: &amp;Path) -&gt; Result&lt;IpcServer, Error&gt;;
+// window/ipc.rs
+pub fn connect(path: &amp;Path) -&gt; Result&lt;IpcClient, Error&gt;;
+pub fn daemon_alive() -&gt; bool;
+// window/style.rs
+pub fn load(path: &amp;Path) -&gt; Result&lt;(), Error&gt;;
+// window/modules/tray.rs
+pub struct TrayWidget;
+impl TrayWidget {
+    pub fn new(ipc: IpcClient) -&gt; Self;
+    pub fn show_menu(&amp;self, snapshot: &amp;MenuSnapshot);
+}</code></pre>
 
 <h2 id="sec-4">4. 关键流程调用栈（伪码）</h2>
 
 <h3 id="sec-4-1">4.1. 启动</h3>
 <h4 id="sec-4-1-1">4.1.1. daemon</h4>
 <pre><code>启动（bread [daemon]）
-├── dbus::connect()（通知守护注册）
-├── hyprland::listen()（.socket2.sock 只读监听）
-├── Tray::start() → (handle, 事件通道)（登记中心就位 + 存量 Item 反向发现）
-├── ipc::listen()（Unix socket）
-├── 扫描显示器 → 对每台显示器 spawn_window(mon)
-│    └── 窗口连接 → push(snapshot)（工作区切片 / 托盘 / 系统状态 / CSS 路径）
+├── notify::serve(conn) // 待实现，可以根据实际情况调整
+├── EventBus::start()（.socket2.sock 只读监听）
+├── Tray::start(config) → (handle, 事件通道)（登记中心就位 + 存量 Item 反向发现）
+├── ipc::listen(path) // 待实现，可以根据实际情况调整
+├── hyprland::monitors() // 待实现，可以根据实际情况调整
+├── 对每台显示器
+│    ├── spawn_window(mon) // 待实现，可以根据实际情况调整
+│    └── push(window, snapshot) // 待实现，可以根据实际情况调整（接入后首连全量）
 └── run()（事件循环）</code></pre>
 <h4 id="sec-4-1-2">4.1.2. 窗口进程</h4>
 <pre><code>启动（bread window --monitor …）
-├── ipc::connect()
-├── style::load(css_path)（路径来自快照）
-├── 创建层壳窗口 + 装配模块
-└── gtk::main()（渲染与交互循环）</code></pre>
+├── ipc::connect(path) // 待实现，可以根据实际情况调整
+├── style::load(css_path) // 待实现，可以根据实际情况调整（路径来自快照）
+├── BarApp::create(app, monitor, ipc)（层壳窗口 + 模块装配）
+│    ├── window.init_layer_shell()（锚定 Top|Left|Right）
+│    ├── window.set_layer(Layer::Top)
+│    ├── window.set_monitor(Some(monitor))
+│    └── build_modules(window) // 待实现，可以根据实际情况调整
+└── app.run()（GTK 主循环）</code></pre>
 
 <h3 id="sec-4-2">4.2. 窗口进程生命周期</h3>
 <h4 id="sec-4-2-1">4.2.1. 上线（显示器增加）</h4>
-<pre><code>on_hyprland_event(MonitorAdded)
+<pre><code>on_hyprland_event(MonitorAdded) // 待实现，可以根据实际情况调整
 └── spawn_window(mon)
-     ├── 登记 显示器 → 窗口 映射
-     └── 窗口连接 → push(snapshot)</code></pre>
+     ├── window_map.insert(mon, child)
+     └── push(window, snapshot)（接入后首连全量）</code></pre>
 <h4 id="sec-4-2-2">4.2.2. 退出路径①：daemon 终止窗口进程</h4>
-<pre><code>kill_window(mon)（exit / close / 显示器移除）
-├── 终止窗口进程
-└── 移除 显示器 → 窗口 映射条目</code></pre>
+<pre><code>kill_window(mon) // 待实现，可以根据实际情况调整（exit / close / 显示器移除）
+├── child.kill()（终止窗口进程）
+└── window_map.remove(mon)</code></pre>
 <h4 id="sec-4-2-3">4.2.3. 退出路径②：窗口自主退出（daemon 死亡检测）</h4>
-<pre><code>互动失败（面向 daemon 的请求）
-└── 检查 PID 文件（/run/user/$UID/bread.pid）确认 daemon 已退出
-     └── 窗口自主退出</code></pre>
+<pre><code>ipc::request(req) → Err（面向 daemon 的互动失败）
+└── daemon_alive() // 待实现，可以根据实际情况调整（读 PID 文件 /run/user/$UID/bread.pid 探测 daemon 进程）
+     ├── daemon 已退出 → app.quit()
+     └── daemon 仍在 → 呈现错误、继续运行</code></pre>
 <h4 id="sec-4-2-4">4.2.4. 崩溃重启</h4>
-<pre><code>窗口崩溃（daemon 仍存活）
-└── 延时等待 → 重试 spawn（次数上限内）；超限放弃并记录</code></pre>
+<pre><code>on_window_exit(mon) // 待实现，可以根据实际情况调整（daemon 仍存活；等待子进程退出）
+└── spawn_window(mon)（延时后重试；次数上限内，超限放弃并记录）</code></pre>
 
 <h3 id="sec-4-3">4.3. 控制指令</h3>
-<pre><code>bread open / close / open-all / close-all / exit / reload / toggle
-└── bread.sock → on_control(cmd)
-     ├── Open / Close（可带显示器）→ spawn_window / kill_window
-     ├── Reload → broadcast(Reload)（窗口按跟踪路径重读 CSS）
-     ├── Toggle → broadcast(Visibility)
-     └── Exit → 终止全部窗口进程 → tray.shutdown() → 退出进程</code></pre>
+<pre><code>on_control(cmd) // 待实现，可以根据实际情况调整
+├── Open / Close → spawn_window(mon) / kill_window(mon)
+├── Reload → broadcast(Push::Reload) // 待实现，可以根据实际情况调整（窗口按跟踪路径重读 CSS）
+├── Toggle → broadcast(Push::Visibility) // 待实现，可以根据实际情况调整
+└── Exit → 对每台显示器 kill_window(mon) → handle.shutdown() → std::process::exit(0)</code></pre>
 
 <h3 id="sec-4-4">4.4. 托盘右键（窗口 ↔ daemon）</h3>
-<pre><code>用户右键托盘图标（窗口进程）
-├── IPC: TrayInteract(right) → daemon
-│    └── right_click() → Outcome::Menu(快照)（阻塞在 daemon）
+<pre><code>TrayWidget 手势：右键托盘图标
+├── ipc::request(Request::TrayInteract { item, input: Right(x, y) }) // 待实现，可以根据实际情况调整
+│    └── daemon: right_click(item) → Outcome::Menu(snapshot)（阻塞在 daemon）
 │         └── Outcome::Dispatched → ContextMenu fallback（Item 自绘，宿主不渲染）
-├── 快照回窗口 → 渲染弹出
-├── 点击条目 → IPC: TrayMenuActivate → daemon → menu_activate
-└── 弹窗期间 MenuChanged → daemon 定向 push → 窗口重取刷新</code></pre>
+├── TrayWidget::show_menu(snapshot) // 待实现，可以根据实际情况调整（GTK 弹窗渲染）
+├── 条目点击 → ipc::request(Request::TrayMenuActivate { item, entry })
+└── MenuChanged 推送 → ipc::request(Request::TrayMenuRead { item })（重取刷新）</code></pre>
 
 <h3 id="sec-4-5">4.5. 通知到达</h3>
-<pre><code>DBus Notify 调用 → daemon（通知守护）
-├── 组装通知记录
-├── 缓存 + broadcast(Notification)（全部窗口）
-└── 各窗口：列表计数刷新；当前显示器弹窗</code></pre>
+<pre><code>DBus Notify 调用（daemon 通知守护）
+├── NotificationRecord::from(args) // 待实现，可以根据实际情况调整
+├── notifications.push(record)
+└── broadcast(Push::Notification(record))（窗口侧：计数刷新 + 当前显示器弹窗）</code></pre>
 
 </main>
 </body>
