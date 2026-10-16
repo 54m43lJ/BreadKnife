@@ -22,7 +22,7 @@
 | Item 发现 | `items()` 启动全量 + `item_added/removed` 信号 | 首事件 `Snapshot`（原子快照）+ `Added/Removed/Changed` 事实事件 | 推模型 → 拉模型 | 事件泵驱动图标增删改；取值一律重读 `item(id)` |
 | 图标 | `gicon()` + `connect_gicon_notify`（GIcon） | `IconSource`（主题名 / 文件路径 / 位图）→ `icon_paintable()` 渲染直出 `gdk::Paintable` | 直出替代推送 | `Image::from_paintable` 上屏；变更由 `Changed` 重读驱动；文件路径图标（Ayatana 生态）库侧已支持 |
 | 左键 | `activate(x, y)` | `left_click(_at)`；`menu_only` 项自动转菜单流程 | 返回值分流 | `Outcome::Menu` → 弹菜单；`Dispatched` → 结束 |
-| 中键 | `secondary_activate(x, y)`（现挂在右键无菜单回退上） | `middle_click(_at)` → SecondaryActivate | astal 侧无干净对应 | 中键独立接线；最小等价档位下可后补（应用文档 §5.3 已列） |
+| 中键 | `secondary_activate(x, y)`（现挂在右键无菜单回退上） | `middle_click(_at)` → SecondaryActivate | astal 侧无干净对应 | 中键独立接线；最小等价档位下可后补（应用文档 §4.4 已列） |
 | 右键菜单 | `menu_model() + about_to_show() + action_group()` → `PopoverMenu::from_model` | `right_click(_at)` → `Outcome::Menu(MenuSnapshot)`（AboutToShow 内置）；`menu_expand` 子层懒加载、`menu_activate` 下发、`MenuChanged` 刷新 | 交付面：GTK 模型 → 快照；渲染与键盘导航归应用 | 自绘 `gtk::Popover`（推荐路线，MIGRATION §6.1）；勾选态忠实透传、无乐观更新、重读刷新 |
 | ContextMenu 回退 | 现实现未出现 | `Outcome::Dispatched`：Item 自绘菜单，宿主不渲染 | breadpan 显式化 | 无需渲染分支，按回执结束 |
 | 滚轮 | 未使用 | `scroll_up/down/left/right(_by)`（垂直 + 水平，步数聚合） | 规格补全 | 滚轮手势接线（Shift+滚轮转水平） |
@@ -36,7 +36,7 @@
 
 - 必修面（组装模型、Item 生命周期、图标、交互）是等价迁移的工作量主体，估算见 MIGRATION.md §4。
 - 最大单项为菜单（自绘）：键盘导航、助记符、勾选态呈现需自研——路线选择见 MIGRATION.md §6.1。
-- 规格补全面（中键 / 滚轮 / Tooltip / 存活 / 换主）按应用 ARCHITECTURE §5.3 契约纳入，可随迁移一次做完或分阶段。
+- 规格补全面（中键 / 滚轮 / Tooltip / 存活 / 换主）按应用 ARCHITECTURE §4.3–§4.5 契约纳入，可随迁移一次做完或分阶段。
 
 ## 依赖面核对
 

@@ -1,0 +1,16 @@
+@startuml breadpan-architecture
+skinparam componentStyle rectangle
+
+component "消费方（托盘展示应用）\nUI 线程：事件 → 渲染 / 交互" as consumer
+
+package "breadpan（内部 tokio 运行时，见 CODE.html）" {
+  component "前端：Handle + GTK 整合层" as front
+  component "watcher 模块：登记中心 + 登记簿记（最小集）" as watcher
+}
+
+component "各 Item（外部应用导出）" as items
+
+consumer -down-> front : TrayHandle（Clone+Send+Sync）\n事件通道 / GTK 事件桥接 / 渲染入口
+front -down-> items : DBus 会话总线
+watcher -down-> items : DBus 会话总线
+@enduml

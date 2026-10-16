@@ -2,7 +2,7 @@
 
 > 定位：迁移工作量评估记录（工作稿），不属于四文档体系；托盘库契约以
 > [breadpan/ARCHITECTURE.html](breadpan/ARCHITECTURE.html) 为准，应用侧托盘规格见
-> [ARCHITECTURE.html §5.3](ARCHITECTURE.html) 与 [CODE.html §3.4](CODE.html)。
+> [ARCHITECTURE.html §4.3–§4.5](ARCHITECTURE.html) 与 [CODE.html §3.4](CODE.html)。
 
 ## 1. 结论摘要
 
@@ -29,7 +29,7 @@
 - 库侧 breadpan 已完整实现 SNI + DBusMenu 协议栈（登记中心内置、零缓存现场读取、
   逐层菜单懒加载、事件流、GTK 渲染直出），`cargo check` 通过，带全量 mock 测试
   （`dbus-run-session -- cargo test`）。
-- 应用侧文档（ARCHITECTURE §4.3/§5.3、CODE §4.4、BUILD 依赖表）已按 breadpan 契约
+- 应用侧文档（ARCHITECTURE §4.3–§4.5、CODE §4.4、BUILD 依赖表）已按 breadpan 契约
   写好，本次迁移是让代码追平文档；`README.md`（来自 main）仍在宣传 Astal，需清理。
 
 ## 3. 现状 astal 使用面清单
@@ -73,10 +73,10 @@
 | `connect_item_added/removed` | `TrayEvent::Added/Removed` | 事件驱动；唯一 Receiver 需应用扇出 |
 | `gicon()` + `connect_gicon_notify` | `icon_paintable(&item.icon) -> gdk::Paintable` + `Changed` 重读 | 推模型 → 拉模型；`Image::from_paintable` |
 | `activate(x,y)` | `left_click_at(id,x,y)` | menu_only 项自动转菜单流程，返回 `Outcome::Menu` 需处理 |
-| `secondary_activate(x,y)` | `middle_click_at(id,x,y)` | 当前 UI 未接中键，按文档 §5.3 建议补 |
+| `secondary_activate(x,y)` | `middle_click_at(id,x,y)` | 当前 UI 未接中键，按文档 §4.4 建议补 |
 | `menu_model()+about_to_show()+action_group()` | `right_click_at(id,x,y) -> Outcome::Menu(MenuSnapshot)` | AboutToShow 内置；`Dispatched` 即 ContextMenu 回退，宿主不渲染 |
 | `PopoverMenu::from_model` | 自绘弹出 + `menu_activate(id, entry_id)` + `menu_expand(id, entry_id)` | 迁移最大单项；toggle/radio 状态为忠实透传，无乐观更新，靠重读刷新 |
-| （无） | `scroll_up/down/left/right(_by)` | 文档 §5.3 已纳入规格 |
+| （无） | `scroll_up/down/left/right(_by)` | 文档 §4.4 已纳入规格 |
 | （无） | `is_alive(id)`、`tooltip`、`overlay/attention_icon` | 可选增强；`alive=false` 置灰属库侧"诚实状态呈现"设计 |
 
 ## 6. 风险与开放问题

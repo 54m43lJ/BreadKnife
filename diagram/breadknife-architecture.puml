@@ -1,0 +1,28 @@
+@startuml breadknife-architecture
+skinparam componentStyle rectangle
+
+component "Hyprland（合成器）" as hypr
+component "DBus 服务\nUPower / NetworkManager / MPRIS" as svc
+component "bread 客户端\n（脚本 / 命令行）" as client
+component "托盘 Item（外部应用）" as items
+component "调节后端\npamixer / brightnessctl / ddcutil" as tools
+
+package "breadknife" {
+  package "bread daemon（Model，无 GTK）\n信息源与映射的唯一持有者" as daemon {
+    component "Hyprland 只读监听" as hlisten
+    component "系统服务采集 + 通知守护" as sysv
+    component "breadpan 托盘宿主（成员库）" as tray
+    component "窗口进程管理 + IPC 服务端" as wm
+  }
+  package "窗口进程 ×显示器（View，GTK4）" as winpkg {
+    component "渲染与本地交互\n工作区 / 窗口信息 / 托盘 / 控制中心" as win
+  }
+}
+
+hypr -down-> hlisten : IPC（只读）
+svc -down-> sysv : DBus
+client -down-> wm : bread.sock\n控制指令
+tray -up- items : DBus 会话总线
+wm -down-> win : Unix socket\n请求应答 + 状态推送
+wm -right-> tools : 调起（音量 / 亮度）
+@enduml

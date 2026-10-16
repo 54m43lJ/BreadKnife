@@ -33,31 +33,32 @@ Other constraints:
 3. (if applicable) prototype/mock, can be code, can be pictures/videos
 ## Architecture
 RULES:
-- **mermaid graph is to be completely avoided. sequence and activity diagrams are drawn with PlantUML (see "Diagrams: PlantUML" below); ASCII graph or actual pictures for everything else.**
+- **mermaid graph is to be completely avoided. Architecture diagrams, sequence diagrams and activity diagrams are drawn with PlantUML (see "Diagrams: PlantUML" below); ASCII graph or actual pictures for everything else.**
 - **Architecture document should be customer-facing. Everything a customer (app that depends on it, user of this application, etc.) would directly interact with should be documented here. The remaining internal structure and mechanisms should be in CODE.html instead.**
 - Optionally, any finer requirement that cannot be described by straightforward mechanisms should be attached to the end of that section as complement. This part should always be the last resort, prefer mechanism over specific constraint whenever possible.
 
 -----
 
 1. TERMS: a table of doamin-specific keywords that should never be synonymized, with their full definition. When these terms are used, no further explaination of the term is allowed.
-2. DIAGRAMS: document all relevant architecture as mechanisms, which is the preferred method.
+2. CONVENTIONS: shared conventions across interfaces — dedicated chapter right after the first chapter (see "Other constraints"); may stay empty.
+3. DIAGRAMS: document all relevant architecture as mechanisms, which is the preferred method.
    1. General architecture (how the application interact with others)
    2. Sequence diagrams (how the program logic flows, in business language only, minimal amount of terms and API usage is allowed when referring to well-known standards)
-3. INTERFACES:
+4. INTERFACES:
    1. all exposed API specifications written in code, or pseudocode if it supports multiple languages
    2. if applicable, all message types, including errors
        1. a pseudocode block that defines the message object/enum/etc
        2. a table that explains the meanings and suggested action of each message/error
-   2. Data models & transformations
+   3. Data models & transformations
       1. Data objects used by exposed APIs (also written in code, or pseudocode for multi-language support, without any explanatory comment)
       2. Field definition table explaining the meaning of each field, with reference to external specifications when applicable
       3. Data transformations (referencing exact data object name, which may include specification by external standards)
 
 ### Diagrams: PlantUML (`<project>/diagram/`)
 
-Sequence diagrams and activity diagrams are drawn with PlantUML — never hand-drawn in ASCII or HTML tables. Sources (`*.puml`) and exported images (`*.svg`) live in the owning project's own `diagram/` folder — the folder follows its project, never a repo-wide root; the exported SVG is embedded into that project's HTML via `<img>` with a relative path (`diagram/…`). The `.puml` source is authoritative: edit the source, re-export, and commit both together (`plantuml -tsvg <project>/diagram/*.puml`).
+Architecture diagrams, sequence diagrams and activity diagrams are drawn with PlantUML — never hand-drawn in ASCII or HTML tables. Sources (`*.puml`) and exported images (`*.svg`) live in the owning project's own `diagram/` folder — the folder follows its project, never a repo-wide root; the exported SVG is embedded into that project's HTML via `<img>` with a relative path (`diagram/…`). The `.puml` source is authoritative: edit the source, re-export, and commit both together (`plantuml -tsvg <project>/diagram/*.puml`).
 
-1. Choose the form by complexity: flows with at most one branch decision (fewer than 2 nesting levels) are sequence diagrams; anything with more branching is a UML activity diagram with one swimlane per participant.
+1. Choose the form by complexity: general architecture is a UML component diagram; flows with at most one branch decision (fewer than 2 nesting levels) are sequence diagrams; anything with more branching is a UML activity diagram with one swimlane per participant.
 2. Labels are written in the documentation language; keep messages short and push details into notes.
 3. Do not edit the exported image by hand; do not let the source and the image diverge.
 4. Layout grows vertically, not horizontally: branch-heavy flows are written as guard-clause cascades — each branch ends with `stop`, checks run sequentially — never as nested `if/else`, which PlantUML spreads side-by-side.
@@ -76,5 +77,6 @@ RULES:
 -----
 
 1. File tree: the general structure of the final code, explains which module serves what purposes — entries link to their corresponding subsections of the internal types & method signatures chapter (files without a subsection remain plain).
-2. Call stack tree: what an actual execution of key program logic looks like
+2. CONVENTIONS: shared conventions across interfaces — dedicated chapter right after the first chapter (see "Other constraints"); may stay empty.
 3. Internal types & method signatures: further define what each method takes & produces — organized as one subsection per source file, in the file tree's order; each subsection is titled by its file name and links back to the file tree.
+4. Call stack tree: what an actual execution of key program logic looks like

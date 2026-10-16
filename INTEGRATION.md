@@ -15,7 +15,7 @@
 2. **应用侧迁移**：MIGRATION.md §4 的 P0–P6（依赖切换 → 托盘服务 → Item 生命周期 → 交互 → 菜单弹窗 → 联调/清理）。
 3. **构建/CI**：preview workflow 删除 libastal/astal-tray 与 appmenu-glib-translator 构建步骤；接入库测试（`dbus-run-session -- cargo test`）。
 4. **文案与文档**：main 的 `README.md`（旧 Astal 文案）随合入清理，README.html 为事实源；
-   应用文档 ARCHITECTURE §5.3 / CODE §4.4 / BUILD 依赖表已按 breadpan 契约写就，代码迁移后核对找平。
+   应用文档 ARCHITECTURE §4.3–§4.5 / CODE §4.4 / BUILD 依赖表已按 breadpan 契约写就，代码迁移后核对找平。
    demo-tray 项目已整体移除（含引用），验收操作台改用 breadpan 的 interactions 示例。
 5. **验收**：MIGRATION.md §7 真机矩阵 + 对照旧 astal 版行为回归。
 
