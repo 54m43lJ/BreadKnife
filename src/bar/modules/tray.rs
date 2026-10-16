@@ -1,6 +1,6 @@
 //! 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）。
 //! 交互契约见 ARCHITECTURE §4.4「daemon ↔ 窗口」；菜单刷新语义见 MIGRATION §6.6。
-//! 弹窗经 PopupManager 托管（挂根窗口、无 grab、关闭自管，见 popup.rs）。
+//! 弹窗经 PopupManager 托管（根层挂根窗口；子层挂根层弹窗，Wayland 嵌套，见 popup.rs）。
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -146,6 +146,8 @@ impl TrayWidget {
                 // 借用即刻释放：widget 调用不得在任何 RefCell 借用之下
                 let popover = self.inner.menu.borrow().as_ref().map(|s| s.popover.clone());
                 if let Some(popover) = popover {
+                    // 行树重建：已展开子层先收（锚行随即被替换）
+                    self.inner.popup.close_prefix(&format!("tray:{item}:sub"));
                     let content = build_menu_layer(&self.inner, item, &snapshot);
                     popover.set_child(Some(&content));
                 }
@@ -336,9 +338,26 @@ fn show_menu(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: 
 
     let popover = gtk::Popover::new();
     popover.add_css_class("menu-popover");
-    popup::attach(&popover, &inner.window, anchor, gtk::PositionType::Bottom);
+    popup::attach(
+        &popover,
+        &inner.window,
+        gtk::PositionType::Bottom,
+        gtk::Align::Fill,
+        gtk::Align::Fill,
+    );
+    popup::point_at(&popover, &inner.window, anchor);
     let content = build_menu_layer(inner, item, &snapshot);
     popover.set_child(Some(&content));
+    // 子层打开时指针移回根层：先收子层（抓取随子层释放），随后点击直达根层条目
+    {
+        let inner2 = inner.clone();
+        let item2 = item.to_string();
+        let motion = gtk::EventControllerMotion::new();
+        motion.connect_enter(move |_c, _x, _y| {
+            inner2.popup.close_prefix(&format!("tray:{item2}:sub"));
+        });
+        popover.add_controller(motion);
+    }
     {
         let inner2 = inner.clone();
         popover.connect_closed(move |_| {
@@ -449,21 +468,34 @@ fn build_menu_row(inner: &Rc<TrayInner>, item: &str, entry: &MenuItem) -> gtk::B
     row
 }
 
-/// 子层弹窗：锚定该行右侧展开（同挂根窗口，换层时旧子层先收）。
+/// 子层弹窗：挂根菜单弹窗之下（Wayland 嵌套弹窗），锚定该行右侧展开；
+/// 换层时旧子层先收，根层收回时子层随之收回。
 fn open_sub_popover(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: MenuSnapshot) {
+    // 借用即刻释放：widget 调用不得在任何 RefCell 借用之下
+    let root = inner.menu.borrow().as_ref().map(|s| s.popover.clone());
+    let Some(root) = root else {
+        eprintln!("[tray] submenu reply without root menu session");
+        return;
+    };
     inner.popup.close_prefix(&format!("tray:{item}:sub"));
     let popover = gtk::Popover::new();
     popover.add_css_class("menu-popover");
-    popup::attach(&popover, &inner.window, anchor, gtk::PositionType::Right);
+    popup::attach(
+        &popover,
+        &root,
+        gtk::PositionType::Right,
+        gtk::Align::Fill,
+        gtk::Align::Start,
+    );
+    popup::point_at(&popover, &root, anchor);
     let content = build_menu_layer(inner, item, &snapshot);
     popover.set_child(Some(&content));
     inner.popup.manage(&popover);
     inner.popup.clone().open(&popover, format!("tray:{item}:sub"));
-    // 子层生命周期随菜单会话：根层关闭（close_prefix "tray:"）时一并收回
 }
 
 /// MenuChanged 重取刷新：根层或已展开路径——首版重取根层并重建
-/// （子层弹窗随行销毁自动收回，用户按需再展开）。
+/// （已展开子层先收，用户按需再展开）。
 fn menu_refresh(inner: &Rc<TrayInner>, item: &str) {
     let open = inner.menu.borrow().as_ref().is_some_and(|s| {
         s.item == item && s.popover.is_visible()

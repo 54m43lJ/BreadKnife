@@ -31,7 +31,7 @@
     │   └── modules/
     │       ├── workspace.rs    # 工作区条（渲染 + 手势捕获）
     │       ├── window_info.rs  # 活动窗口图标 / 标题 + 通知中心弹窗
-    │       ├── popup.rs        # 弹窗会话：无 grab popover 统一托管（根窗口定位 / 捕获关闭 / Escape / toggle）
+    │       ├── popup.rs        # 弹窗会话：grab 弹窗统一托管（根窗口 / 上级弹窗定位 · 任务栏内捕获关闭 · Escape / toggle）
     │       ├── <a href="#sec-3-tray">tray.rs</a>         # 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）
     │       └── center.rs       # 控制中心入口与弹出面板
     ├── shared/           # daemon / 窗口共用

@@ -98,20 +98,29 @@ impl CenterWidget {
         panel.append(&bt_row);
         panel.append(&calendar);
 
-        // 面板挂根窗口（不参与容器布局）；无 grab，开关经 PopupManager
+        // 面板挂根窗口（不参与容器布局），右缘与入口对齐；开关经 PopupManager
         let popover = gtk::Popover::new();
         popover.set_child(Some(&panel));
-        popup::attach(&popover, window, &entry, gtk::PositionType::Bottom);
+        popup::attach(
+            &popover,
+            window,
+            gtk::PositionType::Bottom,
+            gtk::Align::End,
+            gtk::Align::Fill,
+        );
         popup.manage(&popover);
 
         let pop_handle = popover.clone();
         let popup_click = popup.clone();
+        let window_handle = window.clone();
+        let entry_handle = entry.clone();
         let click = gtk::GestureClick::new();
         click.connect_pressed(move |_g, _n, _x, _y| {
             // toggle：本次按下刚关掉自己 → 不重开
             if popup_click.press_closed_contains("cc") {
                 return;
             }
+            popup::point_at(&pop_handle, &window_handle, &entry_handle);
             popup_click.clone().open(&pop_handle, "cc".into());
         });
         entry.add_controller(click);

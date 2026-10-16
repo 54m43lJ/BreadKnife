@@ -35,9 +35,15 @@ impl WindowInfoWidget {
         let container = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         container.add_css_class("title-box");
 
-        // 点击标题区域弹出通知列表（面板挂根窗口，无 grab）
+        // 点击标题区域弹出通知列表（面板挂根窗口，不参与容器布局）
         let (list_box, popover) = Self::build_popover();
-        popup::attach(&popover, window, &container, gtk::PositionType::Bottom);
+        popup::attach(
+            &popover,
+            window,
+            gtk::PositionType::Bottom,
+            gtk::Align::Fill,
+            gtk::Align::Fill,
+        );
         popup.manage(&popover);
         let list_box = Rc::new(list_box);
         let click = gtk::GestureClick::new();
@@ -45,12 +51,15 @@ impl WindowInfoWidget {
         let list_handle = list_box.clone();
         let pop_handle = popover.clone();
         let popup_click = popup.clone();
+        let window_handle = window.clone();
+        let anchor_handle = container.clone();
         click.connect_pressed(move |_g, _n, _x, _y| {
             Self::fill_list(&list_handle, &records_click.borrow());
             // toggle：本次按下刚关掉自己 → 不重开
             if popup_click.press_closed_contains("notif") {
                 return;
             }
+            popup::point_at(&pop_handle, &window_handle, &anchor_handle);
             popup_click.clone().open(&pop_handle, "notif".into());
         });
         container.add_controller(click);
@@ -72,7 +81,6 @@ impl WindowInfoWidget {
         content.append(&scrolled);
         let popover = gtk::Popover::new();
         popover.set_child(Some(&content));
-        popover.set_autohide(false);
         (list_box, popover)
     }
 

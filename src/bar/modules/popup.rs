@@ -1,9 +1,13 @@
-//! 弹窗会话托管：无 grab popover 的统一打开 / 定位 / 关闭。
-//! 背景：GtkPopover 默认 autohide 抢占输入 grab——外部点击只用于关闭、不落到
-//! 下方部件（无缝交互缺失）；且挂在普通容器上的 popover 显示期参与容器布局，
-//! 曾把控制中心入口撑宽导致整行重排（右侧对齐漂移）。
-//! 对策：弹窗一律挂根窗口、pointing_to 定位、autohide/modal 双关；
-//! 关闭自管——捕获阶段窗口外按下先行关闭（交互照常送达目标）、Escape、窗口失活。
+//! 弹窗会话托管：统一打开 / 定位 / 关闭。
+//! 关闭面三条：① 任务栏内的按下一律先关全部弹窗——事件继续送达目标部件（无缝切换，
+//! 含 menu ↔ submenu ↔ 其它入口）；② 任务栏外的按下由合成器经 xdg_popup grab 收回
+//! 弹窗并吞掉（点击外部自动关闭，不落到底下的应用）——grab 由 GtkPopover 的
+//! autohide 建立，各弹窗不得改为无 grab 自管，否则会失去 ②；③ Escape 兜底。
+//!
+//! 定位纪律：弹窗挂父部件——根窗口（不参与容器布局，避免撑宽右对齐元素）或上级
+//! 弹窗（Wayland 嵌套弹窗，锚点矩形落在上级弹窗几何内）；pointing_to 在每次打开前
+//! 按当前布局重算（锚点坐标随内容变化，装配期尚无分配）；右对齐 / 顶对齐用
+//! halign / valign 表达，GTK 据此摆放。
 //!
 //! 借用纪律：popdown 同步派发 closed 信号，闭包会重入各模块的 RefCell；
 //! 任何持有 RefCell 借用的代码路径不得跨越 popdown——本结构一律
@@ -23,26 +27,24 @@ pub struct PopupManager {
 }
 
 impl PopupManager {
-    /// 窗口级装配：捕获阶段点击、Escape、失活三类关闭源。
+    /// 窗口级装配：捕获阶段按下、Escape 两类关闭源。
     pub fn install(window: &gtk::Window) -> Rc<Self> {
         let mgr = Rc::new(Self {
             open: RefCell::new(Vec::new()),
             press_closed: RefCell::new(Vec::new()),
         });
 
-        // 任意键型的按下：菜单外的按下先关菜单，交互本身照常送达目标部件
+        // 任务栏内按下：先关全部弹窗，交互本身照常送达目标部件
         let click = gtk::GestureClick::new();
         click.set_propagation_phase(gtk::PropagationPhase::Capture);
         click.set_button(0);
         let m = mgr.clone();
-        click.connect_pressed(move |_g, _n, x, y| {
+        click.connect_pressed(move |_g, _n, _x, _y| {
             m.press_closed.borrow_mut().clear();
-            if !m.point_inside_any(x, y) {
-                let closed: Vec<String> =
-                    m.open.borrow().iter().map(|(_, g)| g.clone()).collect();
-                m.close_all();
-                *m.press_closed.borrow_mut() = closed;
-            }
+            let closed: Vec<String> =
+                m.open.borrow().iter().map(|(_, g)| g.clone()).collect();
+            m.close_all();
+            *m.press_closed.borrow_mut() = closed;
         });
         window.add_controller(click);
 
@@ -57,14 +59,6 @@ impl PopupManager {
             }
         });
         window.add_controller(key);
-
-        // 点到其它应用 / 其它屏的 bar（层壳窗口通常不参与激活，此路为兜底）
-        let m = mgr.clone();
-        window.connect_is_active_notify(move |w| {
-            if !w.is_active() {
-                m.close_all();
-            }
-        });
 
         mgr
     }
@@ -125,49 +119,37 @@ impl PopupManager {
     fn unlist(&self, popover: &gtk::Popover) {
         self.open.borrow_mut().retain(|(p, _)| p != popover);
     }
-
-    /// 命中判定：按下点是否落在任一打开弹窗的 popup 面内。
-    /// popup surface 的位置相对其父 surface（即根窗口），与手势坐标同坐标系。
-    fn point_inside_any(&self, x: f64, y: f64) -> bool {
-        self.open.borrow().iter().any(|(p, _)| {
-            if !p.is_visible() {
-                return false;
-            }
-            let Some(surface) = p.surface() else { return false };
-            let Ok(popup) = surface.downcast::<gtk::gdk::Popup>() else { return false };
-            let px = f64::from(popup.position_x());
-            let py = f64::from(popup.position_y());
-            let (w, h) = (f64::from(p.width()), f64::from(p.height()));
-            x >= px && x < px + w && y >= py && y < py + h
-        })
-    }
 }
 
-/// 弹窗改造：挂根窗口、指向锚点矩形、无 grab（autohide 关闭即去 grab）。
+/// 弹窗静态装配：挂父部件并声明方位与对齐。
+/// `parent` 为根窗口时是顶层弹窗；为上级 popover 时是 Wayland 嵌套弹窗。
 pub fn attach(
     popover: &gtk::Popover,
-    window: &gtk::Window,
-    anchor: &impl IsA<gtk::Widget>,
+    parent: &impl IsA<gtk::Widget>,
     position: gtk::PositionType,
+    halign: gtk::Align,
+    valign: gtk::Align,
 ) {
-    popover.set_autohide(false);
-    if let Some(rect) = anchor_rect(window, anchor) {
-        popover.set_pointing_to(Some(&rect));
-    }
     popover.set_position(position);
-    popover.set_parent(window);
+    popover.set_halign(halign);
+    popover.set_valign(valign);
+    popover.set_parent(parent);
 }
 
-/// 锚点在根窗口坐标系下的矩形（pointing_to 载荷）。
-fn anchor_rect(
-    window: &gtk::Window,
+/// 打开前定位：指向矩形取锚点在父部件坐标系下的当前布局。
+pub fn point_at(
+    popover: &gtk::Popover,
+    parent: &impl IsA<gtk::Widget>,
     anchor: &impl IsA<gtk::Widget>,
-) -> Option<gtk::gdk::Rectangle> {
-    let b = anchor.compute_bounds(window)?;
-    Some(gtk::gdk::Rectangle::new(
+) {
+    let Some(b) = anchor.compute_bounds(parent) else {
+        eprintln!("[popup] anchor bounds unavailable; popover left unanchored");
+        return;
+    };
+    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
         b.x().round() as i32,
         b.y().round() as i32,
         b.width().round() as i32,
         b.height().round() as i32,
-    ))
+    )));
 }

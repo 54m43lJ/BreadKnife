@@ -41,28 +41,32 @@ pub struct ClientInfo {
     pub urgent: bool,
 }
 
-fn hyprctl(args: &[&str]) -> String {
+/// 运行 hyprctl 子命令；失败时错误消息取 stderr（hyprctl 的错误也可能走 stdout）。
+fn hyprctl(args: &[&str]) -> Result<String, String> {
     match std::process::Command::new("hyprctl").args(args).output() {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        }
         Ok(out) => {
-            eprintln!(
-                "[hyprland] hyprctl {:?} failed: {}",
-                args,
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
-            String::new()
+            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            if out.status.success() {
+                Ok(stdout)
+            } else if stderr.is_empty() {
+                Err(stdout)
+            } else {
+                Err(stderr)
+            }
         }
-        Err(e) => {
-            eprintln!("[hyprland] hyprctl {:?} exec failed: {}", args, e);
-            String::new()
-        }
+        Err(e) => Err(e.to_string()),
     }
 }
 
 fn hyprctl_json<T: serde::de::DeserializeOwned>(args: &[&str]) -> Vec<T> {
-    let resp = hyprctl(args);
+    let resp = match hyprctl(args) {
+        Ok(resp) => resp,
+        Err(e) => {
+            eprintln!("[hyprland] hyprctl {:?} failed: {}", args, e);
+            return Vec::new();
+        }
+    };
     if resp.is_empty() {
         return Vec::new();
     }
@@ -95,8 +99,35 @@ pub fn workspace_of_client(address: &str) -> Option<i64> {
         .map(|c| c.workspace.id)
 }
 
+/// 工作区切换。Hyprland ≥0.55（Lua 配置）走 `hl.dsp.focus`；
+/// 旧版（hyprlang）Lua 表达式必然失败，回退经典 `dispatch workspace <target>`。
 pub fn dispatch_workspace(target: &str) {
-    hyprctl(&["dispatch", "workspace", target]);
+    if hyprctl(&["dispatch", &lua_focus_expr(target)]).is_ok() {
+        return;
+    }
+    if let Err(e) = hyprctl(&["dispatch", "workspace", target]) {
+        eprintln!("[hyprland] dispatch workspace {target:?} failed: {e}");
+    }
+}
+
+/// Hyprland Lua dispatch 表达式（`hl.dsp.focus({ workspace = "…" })`）。
+fn lua_focus_expr(target: &str) -> String {
+    format!("hl.dsp.focus({{ workspace = {} }})", lua_string(target))
+}
+
+/// Lua 字符串字面量（转义反斜杠与双引号）。
+fn lua_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 // ── socket2 事件流（只读监听）──
@@ -312,6 +343,20 @@ mod tests {
     fn parse_event_unknown_ignored() {
         assert_eq!(parse_event("somerandomevent", "x"), None);
         assert_eq!(parse_event("tolongline", "a>>b"), None);
+    }
+
+    // ── 工作区切换命令构造（Lua dispatch 表达式）──
+
+    #[test]
+    fn lua_focus_expr_shape() {
+        assert_eq!(lua_focus_expr("2"), r#"hl.dsp.focus({ workspace = "2" })"#);
+        assert_eq!(lua_focus_expr("m+1"), r#"hl.dsp.focus({ workspace = "m+1" })"#);
+    }
+
+    #[test]
+    fn lua_string_escapes() {
+        assert_eq!(lua_string("special:magic"), r#""special:magic""#);
+        assert_eq!(lua_string(r#"a"b\c"#), r#""a\"b\\c""#);
     }
 
     // ── hyprctl -j 反序列化（fixture 防字段漂移）──

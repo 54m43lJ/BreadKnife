@@ -21,26 +21,36 @@ for cmd in monitors workspaces clients activeworkspace activewindow; do
     hyprctl -j "$cmd" >/dev/null 2>&1 && ok "hyprctl -j $cmd" || fail "hyprctl -j $cmd"
 done
 
-# ── dispatch 语义 ──
+# ── dispatch 语义（Hyprland ≥0.55 走 Lua hl.dsp.focus；旧版回退经典 workspace 语法）──
+lua_ws()    { hyprctl dispatch "hl.dsp.focus({ workspace = \"$1\" })" >/dev/null 2>&1; }
+legacy_ws() { hyprctl dispatch workspace "$1" >/dev/null 2>&1; }
+ws_switch() { lua_ws "$1" || legacy_ws "$1"; }
+
 cur="$(hyprctl -j activeworkspace 2>/dev/null)"
-name="$(printf '%s' "$cur" | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4)"
-id="$(printf '%s' "$cur" | grep -o '"id":[0-9]*' | head -1 | cut -d: -f2)"
+name="$(printf '%s' "$cur" | grep -o '"name": *"[^"]*"' | head -1 | cut -d'"' -f4)"
+id="$(printf '%s' "$cur" | grep -o '"id": *[0-9]*' | head -1 | tr -dc '0-9')"
 if [ -n "$name" ]; then
-    hyprctl dispatch workspace "$name" >/dev/null 2>&1 \
+    if lua_ws "$name"; then
+        ok "dispatch Lua（hl.dsp.focus）可用"
+    elif legacy_ws "$name"; then
+        ok "经典 dispatch 语法可用（当前 Hyprland 不认 Lua dispatch）"
+    else
+        fail "dispatch 两种语法均不可用"
+    fi
+    ws_switch "$name" >/dev/null 2>&1 \
         && ok "dispatch workspace <name=$name> 原位切换" || fail "dispatch workspace name"
 else
     fail "activeworkspace 无 name 字段，无法验证按名切换"
 fi
 if [ -n "$id" ]; then
-    hyprctl dispatch workspace "$id" >/dev/null 2>&1 \
+    ws_switch "$id" >/dev/null 2>&1 \
         && ok "dispatch workspace <id=$id> 原位切换" || fail "dispatch workspace id"
 fi
 if [ "${SKIP_DISPATCH:-0}" != "1" ]; then
-    if hyprctl dispatch workspace m+1 >/dev/null 2>&1 \
-        && hyprctl dispatch workspace m-1 >/dev/null 2>&1; then
-        ok "dispatch workspace m+1/m-1（往返，条会闪一下）"
+    if ws_switch m+1 && ws_switch m-1; then
+        ok "dispatch 相对切换 m+1/m-1（往返，条会闪一下）"
     else
-        fail "dispatch workspace 相对切换"
+        fail "dispatch 相对切换"
     fi
 fi
 
