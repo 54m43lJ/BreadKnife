@@ -1,0 +1,4 @@
+- 需要明确：workspace组件用3px小圆点和15px圆角的矩形
+- 需要明确测试并成功hyprland相关的接口能够正确执行
+- 右键菜单需要点一下周围关闭当前popover才能和其它互动，包括menu和submenu。正确的互动应该是无缝切换不需要失去focus即可与其他元素互动的
+- control center的popover窗口弹出的时候窗口的对齐会莫名其妙的变化，表征是tray和cc这些右对齐的元素不能正确贴紧右边
