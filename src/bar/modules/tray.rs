@@ -1,0 +1,501 @@
+//! 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）。
+//! 交互契约见 ARCHITECTURE §4.4「daemon ↔ 窗口」；菜单刷新语义见 MIGRATION §6.6。
+
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+
+use gtk::prelude::*;
+
+use crate::bar::ipc::IpcClient;
+use crate::bar::UiTask;
+use crate::shared::model::{
+    IconView, InteractionOutcome, MenuItem, MenuItemType, MenuSnapshot, ToggleState, ToggleType,
+    TrayItemView, TrayUpdate,
+};
+use crate::shared::protocol::{InteractInput, Request, Response};
+
+/// 图标渲染直出尺寸（逻辑像素）。
+const ICON_SIZE: i32 = 16;
+
+pub struct TrayWidget {
+    inner: Rc<TrayInner>,
+}
+
+struct TrayInner {
+    container: gtk::Box,
+    ipc: Arc<IpcClient>,
+    ui: Sender<UiTask>,
+    icons: RefCell<BTreeMap<String, gtk::Button>>,
+    /// 当前打开的根菜单会话（一个窗口同时至多一个根弹窗）。
+    menu: RefCell<Option<MenuSession>>,
+    /// 待展开条目登记：子层请求飞行中的行锚（item, entry) → row。
+    pending_rows: RefCell<HashMap<(String, i32), gtk::Button>>,
+}
+
+struct MenuSession {
+    item: String,
+    popover: gtk::Popover,
+}
+
+impl TrayWidget {
+    pub fn new(ipc: Arc<IpcClient>, ui: Sender<UiTask>) -> Self {
+        let inner = Rc::new(TrayInner {
+            container: gtk::Box::new(gtk::Orientation::Horizontal, 0),
+            ipc,
+            ui,
+            icons: RefCell::new(BTreeMap::new()),
+            menu: RefCell::new(None),
+            pending_rows: RefCell::new(HashMap::new()),
+        });
+        Self { inner }
+    }
+
+    pub fn container(&self) -> gtk::Box {
+        self.inner.container.clone()
+    }
+
+    pub fn rebuild(&self, views: &[TrayItemView]) {
+        {
+            let mut icons = self.inner.icons.borrow_mut();
+            icons.clear();
+            while let Some(child) = self.inner.container.first_child() {
+                self.inner.container.remove(&child);
+            }
+        }
+        for view in views {
+            add_icon(&self.inner, view);
+        }
+    }
+
+    pub fn apply(&self, update: TrayUpdate) {
+        match update {
+            TrayUpdate::Added(view) | TrayUpdate::Changed(view) => {
+                remove_icon(&self.inner, &view.id);
+                add_icon(&self.inner, &view);
+            }
+            TrayUpdate::Removed(id) => remove_icon(&self.inner, &id),
+        }
+    }
+
+    pub fn menu_changed(&self, item: &str) {
+        menu_refresh(&self.inner, item);
+    }
+
+    // ── 异步回执（UI 队列汇入，GTK 主线程执行）──
+
+    pub fn on_interact_done(&self, item: &str, result: Result<Response, String>) {
+        match result {
+            // 左键 / 右键命中菜单流程（含 menu_only 项自动转菜单）
+            Ok(Response::Outcome(InteractionOutcome::Menu(snapshot))) => {
+                if let Some(anchor) = self.inner.icons.borrow().get(item).cloned() {
+                    show_menu(&self.inner, &anchor, item, snapshot);
+                }
+            }
+            // ContextMenu 回退：Item 自绘菜单，宿主不渲染
+            Ok(Response::Outcome(InteractionOutcome::Dispatched)) => {}
+            Ok(Response::Ok) => {}
+            Ok(other) => eprintln!("[tray] unexpected interact reply: {other:?}"),
+            Err(e) => eprintln!("[tray] interact failed: {e}"),
+        }
+    }
+
+    pub fn on_expand_done(
+        &self,
+        item: &str,
+        entry: i32,
+        result: Result<Response, String>,
+    ) {
+        let key = (item.to_string(), entry);
+        let anchor = self.inner.pending_rows.borrow_mut().remove(&key);
+        match (result, anchor) {
+            (Ok(Response::Menu(snapshot)), Some(anchor)) => {
+                open_sub_popover(&self.inner, &anchor, item, snapshot)
+            }
+            (Err(e), _) => eprintln!("[tray] menu expand failed: {e}"),
+            (other, _) => eprintln!("[tray] unexpected expand reply: {other:?}"),
+        }
+    }
+
+    pub fn on_activate_done(&self, _item: &str, result: Result<Response, String>) {
+        if let Err(e) = &result {
+            eprintln!("[tray] menu activate failed: {e}");
+        }
+        close_menu(&self.inner);
+    }
+
+    pub fn on_menu_read_done(&self, item: &str, result: Result<Response, String>) {
+        let session_open = self.inner.menu.borrow().as_ref().is_some_and(|s| {
+            s.item == item && s.popover.is_visible()
+        });
+        if !session_open {
+            return;
+        }
+        match result {
+            Ok(Response::Menu(snapshot)) => {
+                if let Some(session) = self.inner.menu.borrow().as_ref() {
+                    let content = build_menu_layer(&self.inner, item, &snapshot);
+                    session.popover.set_child(Some(&content));
+                }
+            }
+            Err(e) => eprintln!("[tray] menu re-read failed: {e}"),
+            other => eprintln!("[tray] unexpected menu read reply: {other:?}"),
+        }
+    }
+}
+
+// ── 图标增删改 ──
+
+fn add_icon(inner: &Rc<TrayInner>, view: &TrayItemView) {
+    let button = gtk::Button::new();
+    button.add_css_class("tray-btn");
+    button.set_focusable(false);
+
+    let paintable = icon_paintable_of(&view.icon);
+    apply_pad_class(&button, &view.icon);
+    let image = gtk::Image::from_paintable(Some(&paintable));
+    image.set_pixel_size(ICON_SIZE);
+    button.set_child(Some(&image));
+    if let Some(tooltip) = &view.tooltip {
+        button.set_tooltip_text(Some(tooltip));
+    }
+    if !view.alive {
+        button.add_css_class("tray-dead"); // 失联置灰（不移除）
+    }
+    if view.attention {
+        button.add_css_class("tray-attention");
+    }
+
+    attach_gestures(inner, &button, &view.id);
+
+    inner.container.append(&button);
+    inner.icons.borrow_mut().insert(view.id.clone(), button);
+}
+
+fn remove_icon(inner: &Rc<TrayInner>, id: &str) {
+    if let Some(button) = inner.icons.borrow_mut().remove(id) {
+        inner.container.remove(&button);
+    }
+}
+
+/// 对比底色垫高（深浅随图标反相）：采样像素亮度决定底色深浅。
+fn apply_pad_class(button: &gtk::Button, view: &IconView) {
+    match icon_is_dark(view) {
+        Some(true) => button.add_css_class("tray-pad-on-dark"),
+        Some(false) => button.add_css_class("tray-pad-on-light"),
+        None => {}
+    }
+}
+
+/// 像素平均亮度判定：位图（原始字节）/ 文件路径（纹理）/ 主题名（回源文件）；
+/// 不可得 → None（不加垫色）。
+fn icon_is_dark(view: &IconView) -> Option<bool> {
+    match view {
+        IconView::Pixmap { width, height, argb } => {
+            luminance_of_samples(argb.chunks_exact(4), *width, *height)
+        }
+        IconView::Path(path) => {
+            let texture = gtk::gdk::Texture::from_filename(path).ok()?;
+            texture_luminance(&texture)
+        }
+        IconView::Name(name) => {
+            // 主题命中的 IconPaintable 回源文件路径取纹理
+            let paintable =
+                breadpan::gtk::icon_paintable(&breadpan::IconSource::Name(name.clone()));
+            let icon_paintable = paintable.downcast_ref::<gtk::IconPaintable>()?;
+            let path = icon_paintable.file()?.path()?;
+            let texture = gtk::gdk::Texture::from_filename(path).ok()?;
+            texture_luminance(&texture)
+        }
+    }
+}
+
+fn texture_luminance(texture: &gtk::gdk::Texture) -> Option<bool> {
+    let w = texture.width();
+    let h = texture.height();
+    if w <= 0 || h <= 0 || w as i64 * h as i64 > 4096 * 4096 {
+        return None;
+    }
+    let stride = (w * 4) as usize;
+    let mut buf = vec![0u8; stride * h as usize];
+    gtk::gdk::prelude::TextureExtManual::download(texture, &mut buf, stride);
+    luminance_of_samples(buf.chunks_exact(4), w as u32, h as u32)
+}
+
+/// 4 字节像素采样的 alpha 加权亮度（≤512 采样；通道序对均值无影响）。
+fn luminance_of_samples<'a>(
+    pixels: impl Iterator<Item = &'a [u8]>,
+    width: u32,
+    height: u32,
+) -> Option<bool> {
+    let total = (width as usize) * (height as usize);
+    if total == 0 {
+        return None;
+    }
+    let step = (total / 512).max(1);
+    let mut sum = 0f64;
+    let mut count = 0f64;
+    for (i, px) in pixels.enumerate() {
+        if i % step != 0 || px.len() < 4 {
+            continue;
+        }
+        let a = px[3] as f64 / 255.0;
+        sum += a * (px[0] as f64 + px[1] as f64 + px[2] as f64) / 3.0;
+        count += a;
+    }
+    if count < 1.0 {
+        return None;
+    }
+    Some(sum / count / 255.0 < 0.55)
+}
+
+// ── 手势 → IPC → daemon ──
+
+fn attach_gestures(inner: &Rc<TrayInner>, button: &gtk::Button, id: &str) {
+    // 左 / 中 / 右键（坐标取部件局部，SNI 常规做法）
+    for button_number in [1u32, 2, 3] {
+        let gesture = gtk::GestureClick::new();
+        gesture.set_button(button_number);
+        let inner2 = inner.clone();
+        let id = id.to_string();
+        gesture.connect_pressed(move |g, _n, x, y| {
+            let input = match g.current_button() {
+                2 => InteractInput::Middle { x: x as i32, y: y as i32 },
+                3 => InteractInput::Right { x: x as i32, y: y as i32 },
+                _ => InteractInput::Left { x: x as i32, y: y as i32 },
+            };
+            let ipc = inner2.ipc.clone();
+            let ui = inner2.ui.clone();
+            let item = id.clone();
+            std::thread::spawn(move || {
+                let result = ipc.request(Request::TrayInteract { item: item.clone(), input });
+                let _ = ui.send(UiTask::TrayInteractDone { item, result });
+            });
+        });
+        button.add_controller(gesture);
+    }
+
+    // 四向滚轮（垂直 + 水平；Shift+滚轮在 GTK 侧表现为水平增量）
+    let scroll = gtk::EventControllerScroll::new(
+        gtk::EventControllerScrollFlags::VERTICAL | gtk::EventControllerScrollFlags::HORIZONTAL,
+    );
+    let inner2 = inner.clone();
+    let id = id.to_string();
+    scroll.connect_scroll(move |_ctrl, dx, dy| {
+        let input = if dy.abs() >= dx.abs() {
+            if dy > 0.0 { InteractInput::ScrollDown { steps: 1 } } else { InteractInput::ScrollUp { steps: 1 } }
+        } else if dx > 0.0 {
+            InteractInput::ScrollRight { steps: 1 }
+        } else {
+            InteractInput::ScrollLeft { steps: 1 }
+        };
+        let ipc = inner2.ipc.clone();
+        let item = id.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = ipc.request(Request::TrayInteract { item, input }) {
+                eprintln!("[tray] scroll failed: {e}");
+            }
+        });
+        gtk::glib::Propagation::Proceed
+    });
+    button.add_controller(scroll);
+}
+
+// ── 菜单弹窗（自绘）──
+
+fn show_menu(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: MenuSnapshot) {
+    close_menu(inner);
+
+    let popover = gtk::Popover::new();
+    popover.add_css_class("menu-popover");
+    popover.set_autohide(true);
+    let content = build_menu_layer(inner, item, &snapshot);
+    popover.set_child(Some(&content));
+    popover.set_parent(anchor);
+    popover.popup();
+
+    {
+        let inner2 = inner.clone();
+        popover.connect_closed(move |_| {
+            *inner2.menu.borrow_mut() = None;
+            inner2.pending_rows.borrow_mut().clear();
+        });
+    }
+    *inner.menu.borrow_mut() = Some(MenuSession { item: item.to_string(), popover });
+}
+
+fn close_menu(inner: &Rc<TrayInner>) {
+    if let Some(session) = inner.menu.borrow_mut().take() {
+        inner.pending_rows.borrow_mut().clear();
+        session.popover.popdown();
+    }
+}
+
+/// 单层菜单内容：分隔行 / 标准行（toggle、图标、助记符标签、子层箭头）。
+fn build_menu_layer(inner: &Rc<TrayInner>, item: &str, snapshot: &MenuSnapshot) -> gtk::Box {
+    inner.pending_rows.borrow_mut().clear();
+    let layer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    for entry in snapshot.items.iter().filter(|m| m.visible) {
+        match entry.item_type {
+            MenuItemType::Separator => {
+                let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+                sep.add_css_class("menu-sep");
+                layer.append(&sep);
+            }
+            MenuItemType::Standard => {
+                layer.append(&build_menu_row(inner, item, entry));
+            }
+        }
+    }
+    layer
+}
+
+fn build_menu_row(inner: &Rc<TrayInner>, item: &str, entry: &MenuItem) -> gtk::Button {
+    let row = gtk::Button::new();
+    row.add_css_class("menu-row");
+    row.set_focusable(false);
+
+    let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+
+    // toggle 指示（忠实透传，无乐观更新——刷新靠 MenuChanged 重读）
+    let toggle_label = gtk::Label::new(Some(toggle_glyph(entry)));
+    toggle_label.add_css_class("menu-toggle");
+    hbox.append(&toggle_label);
+
+    if let Some(image) = menu_entry_icon(entry) {
+        hbox.append(&image);
+    }
+
+    // 已解析助记符直接交给 GTK 下划线解析
+    let label = gtk::Label::with_mnemonic(&entry.label);
+    label.add_css_class("menu-label");
+    label.set_halign(gtk::Align::Start);
+    hbox.append(&label);
+
+    if entry.children_display {
+        let arrow = gtk::Label::new(Some("▸"));
+        arrow.add_css_class("menu-arrow");
+        hbox.append(&arrow);
+    }
+
+    row.set_child(Some(&hbox));
+    if !entry.enabled {
+        row.set_sensitive(false);
+    }
+
+    let inner2 = inner.clone();
+    let item = item.to_string();
+    let entry_id = entry.id;
+    let submenu = entry.children_display;
+    let row_handle = row.clone();
+    row.connect_clicked(move |_| {
+        if submenu {
+            // 子层懒加载：登记行锚（飞行中的展开请求据此回锚）
+            inner2
+                .pending_rows
+                .borrow_mut()
+                .insert((item.clone(), entry_id), row_handle.clone());
+            let ipc = inner2.ipc.clone();
+            let ui = inner2.ui.clone();
+            let item = item.clone();
+            std::thread::spawn(move || {
+                let result = ipc.request(Request::TrayMenuExpand {
+                    item: item.clone(),
+                    entry: entry_id,
+                });
+                let _ = ui.send(UiTask::TrayExpandDone { item, entry: entry_id, result });
+            });
+        } else {
+            // 条目激活：menu_activate（VOID 受理即返回），随后关闭菜单
+            let ipc = inner2.ipc.clone();
+            let ui = inner2.ui.clone();
+            let item = item.clone();
+            std::thread::spawn(move || {
+                let result = ipc.request(Request::TrayMenuActivate { item: item.clone(), entry: entry_id });
+                let _ = ui.send(UiTask::TrayActivateDone { item, result });
+            });
+        }
+    });
+
+    row
+}
+
+/// 子层弹窗：锚定该行右侧展开。
+fn open_sub_popover(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: MenuSnapshot) {
+    let popover = gtk::Popover::new();
+    popover.add_css_class("menu-popover");
+    popover.set_position(gtk::PositionType::Right);
+    popover.set_autohide(true);
+    let content = build_menu_layer(inner, item, &snapshot);
+    popover.set_child(Some(&content));
+    popover.set_parent(anchor);
+    popover.popup();
+    // 子层生命周期随锚定行：根层重建时行销毁 → 弹窗自动收回
+}
+
+/// MenuChanged 重取刷新：根层或已展开路径——首版重取根层并重建
+/// （子层弹窗随行销毁自动收回，用户按需再展开）。
+fn menu_refresh(inner: &Rc<TrayInner>, item: &str) {
+    let open = inner.menu.borrow().as_ref().is_some_and(|s| {
+        s.item == item && s.popover.is_visible()
+    });
+    if !open {
+        return;
+    }
+    let ipc = inner.ipc.clone();
+    let ui = inner.ui.clone();
+    let item = item.to_string();
+    std::thread::spawn(move || {
+        let result = ipc.request(Request::TrayMenuRead { item: item.clone() });
+        let _ = ui.send(UiTask::TrayMenuReadDone { item, result });
+    });
+}
+
+// ── 渲染辅助 ──
+
+/// 共享视图 → breadpan 图标源 → 渲染直出（须在 GTK 主线程）。
+fn icon_paintable_of(view: &IconView) -> gtk::gdk::Paintable {
+    let source = match view {
+        IconView::Name(name) => breadpan::IconSource::Name(name.clone()),
+        IconView::Path(path) => breadpan::IconSource::Path(path.clone()),
+        IconView::Pixmap { width, height, argb } => {
+            breadpan::IconSource::Pixmap(breadpan::Pixmap {
+                width: *width,
+                height: *height,
+                argb: argb.clone(),
+            })
+        }
+    };
+    breadpan::gtk::icon_paintable(&source)
+}
+
+fn menu_entry_icon(entry: &MenuItem) -> Option<gtk::Image> {
+    if let Some(name) = &entry.icon_name {
+        let paintable = breadpan::gtk::icon_paintable(&breadpan::IconSource::Name(name.clone()));
+        let image = gtk::Image::from_paintable(Some(&paintable));
+        image.set_pixel_size(ICON_SIZE);
+        return Some(image);
+    }
+    if let Some(png) = &entry.icon_data {
+        let bytes = gtk::glib::Bytes::from_owned(png.clone());
+        if let Ok(texture) = gtk::gdk::Texture::from_bytes(&bytes) {
+            let image = gtk::Image::from_paintable(Some(&texture));
+            image.set_pixel_size(ICON_SIZE);
+            return Some(image);
+        }
+    }
+    None
+}
+
+fn toggle_glyph(entry: &MenuItem) -> &'static str {
+    match (entry.toggle_type, entry.toggle_state) {
+        (Some(ToggleType::Checkmark), Some(ToggleState::On)) => "✓",
+        (Some(ToggleType::Checkmark), Some(ToggleState::Indeterminate)) => "▬",
+        (Some(ToggleType::Radio), Some(ToggleState::On)) => "●",
+        (Some(ToggleType::Radio), Some(ToggleState::Indeterminate)) => "◍",
+        _ => "",
+    }
+}
