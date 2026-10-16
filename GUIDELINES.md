@@ -71,6 +71,7 @@ RULES:
 - **No constant definitions. Literal values (bus names, periods, capacities, …) are tuned against the real system during development and go stale in docs — they live in the code alone, with the trade-off recorded in the project's implementation notes when it matters. A literal may appear only inline in a call stack, where that flow depends on it.**
 - **Signatures carry no internals. An entry in the internal types & signatures section is a signature plus at most a one-line purpose note. The internal structure of a method (call chains, branching, fallbacks, ordering) is not the signature's responsibility — if it is worth documenting, it belongs to the call-stack section.**
 - **Call-stack lines carry calls or judgments only. Every tree line must point at a concrete method call (`module::fn(args)`, DBus method, event send, …); the only exception is a judgment / branch condition. A call may carry at most one trailing comment — a comment is not a tree node: no branch glyph (`├──`/`└──`) of its own, but the ancestor spine (`│`) continues through its line so the tree never breaks. Motivations, policies and trade-offs that do not fit in one comment line live in the prose after the block.**
+- **Where a call-stack line has no implementation reference, draft the code reference — meaningful method names and signatures — and mark it with the comment `待实现，可以根据实际情况调整`; where a reference exists (main branch, breadpan, std / GTK APIs), use its real names directly.**
 
 -----
 
