@@ -76,34 +76,29 @@
 <div class="diagram"><img src="diagram/breadknife-notification.svg" alt="时序：通知到达"></div>
 
 <h3 id="sec-3-9">3.9. 样式基础变量</h3>
-<pre><code>/* ── 底板 ── */
-@define-color bg_primary #1b1816;
-@define-color bg_secondary #24211e;
-@define-color bg_hover #302c29;
-@define-color bg_active #3d3835;
-/* ── 文字 ── */
-@define-color fg_primary #ecd9a8;
-@define-color fg_secondary #b8a078;
-@define-color fg_muted #6b5d48;
-/* ── 强调色 ── */
-@define-color accent #5c3d7a;
-@define-color accent_hover #735294;
-/* ── 语义色 ── */
-@define-color success #4a9c6c;
-@define-color warning #c4954e;
-@define-color danger #b8453a;
-/* ── 边框 ── */
-@define-color border rgba(236, 217, 168, 0.08);
-@define-color border_strong rgba(236, 217, 168, 0.15);</code></pre>
+<pre><code>/* 权威调色盘（~/Documents/dotfiles/palette）dark mode 九色 */
+@define-color bg #231F1F;
+@define-color surface #3E3542;
+@define-color fg #D6CAB6;
+@define-color muted #B0B4BC;
+@define-color purple #89338E;
+@define-color purple-light #E593E7;
+@define-color gold #9D7E4D;
+@define-color cream #FFF7E4;
+@define-color red #CC2A47;</code></pre>
+<ul class="note">
+  <li>token 名与权威调色盘一一对应，语义与对比度数据以调色盘 README 为唯一权威源，本文不重复定义；本产品当前取 dark mode，各组件取用见 <a href="#sec-3-10">§3.10</a>。</li>
+</ul>
 
 <h3 id="sec-3-10">3.10. 组件样式规范</h3>
 <table>
   <tr><th>组件</th><th>样式</th></tr>
-  <tr><td>任务栏窗口</td><td>背景 <code>bg_primary</code>，底边框 <code>border_strong</code>，高度 30px</td></tr>
-  <tr><td>按钮</td><td>透明背景，圆角 6px，Hover 态 <code>bg_hover</code></td></tr>
-  <tr><td>Workspace 按钮</td><td>四要素矩阵见 <a href="README.html#界面交互">README.html「界面交互」</a>；色彩映射（均取既有色板）：背景色＝<code>fg_muted</code>、前景色＝<code>fg_primary</code>、警告色＝<code>warning</code>；尺寸（视觉契约，操作源在 <code>bread.css</code>）：无窗口小圆点直径 4px，有窗口长方形 20×15px（圆角半径 10px），活跃叠加小圆点直径 4px</td></tr>
-  <tr><td>控制中心入口</td><td>容器背景 <code>bg_secondary</code>，圆角 6px</td></tr>
-  <tr><td>滑块</td><td>滑轨高 4px，圆形滑块 12px，高亮 <code>accent</code></td></tr>
+  <tr><td>任务栏窗口</td><td>背景 <code>bg</code>，底边框细线 <code>gold</code>，高度 30px</td></tr>
+  <tr><td>按钮</td><td>透明背景，圆角 6px，Hover 态 <code>surface</code></td></tr>
+  <tr><td>Workspace 按钮</td><td>四要素矩阵见 <a href="README.html#界面交互">README.html「界面交互」</a>；色彩映射（均取色板）：背景色＝<code>muted</code>、前景色＝<code>fg</code>、警告色＝<code>gold</code>；尺寸（视觉契约，操作源在 <code>bread.css</code>）：无窗口小圆点直径 4px，有窗口长方形 20×15px（圆角半径 10px），活跃叠加小圆点直径 4px</td></tr>
+  <tr><td>托盘与托盘菜单</td><td>托盘按钮与菜单同底色 <code>fg</code>；菜单文字取 <code>bg</code>，Hover 行 <code>purple</code> 填充配 <code>cream</code> 字，禁用项降不透明度</td></tr>
+  <tr><td>控制中心入口</td><td>容器背景 <code>surface</code>，圆角 6px</td></tr>
+  <tr><td>滑块</td><td>滑轨高 4px 取 <code>muted</code>，圆形滑块 12px 取 <code>purple</code>，Hover 与已填充高亮 <code>purple-light</code></td></tr>
 </table>
 <ul class="note">
   <li>CSS 文件路径由 daemon 控制与跟踪；窗口按该路径加载内容。<code>reload</code> 指令经 daemon 广播（契约见 <a href="#sec-4-2">§4.2</a>），窗口重读后改色即见。</li>
