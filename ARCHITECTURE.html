@@ -87,7 +87,7 @@
 @define-color cream #FFF7E4;
 @define-color red #CC2A47;</code></pre>
 <ul class="note">
-  <li>token 名与权威调色盘一一对应，语义与对比度数据以调色盘 README 为唯一权威源，本文不重复定义；本产品当前取 dark mode，各组件取用见 <a href="#sec-3-10">§3.10</a>。</li>
+  <li>本产品直接采用权威调色盘（~/Documents/dotfiles/palette）的 dark mode，token 名、语义与对比度以该 README 为唯一权威源，本文不重复定义；各组件取用见 <a href="#sec-3-10">§3.10</a>。</li>
 </ul>
 
 <h3 id="sec-3-10">3.10. 组件样式规范</h3>
@@ -98,7 +98,7 @@
   <tr><td>Workspace 按钮</td><td>四要素矩阵见 <a href="README.html#界面交互">README.html「界面交互」</a>；色彩映射（均取色板）：背景色＝<code>muted</code>、前景色＝<code>fg</code>、警告色＝<code>gold</code>；尺寸（视觉契约，操作源在 <code>bread.css</code>）：无窗口小圆点直径 4px，有窗口长方形 20×15px（圆角半径 10px），活跃叠加小圆点直径 4px</td></tr>
   <tr><td>托盘与托盘菜单</td><td>托盘按钮与菜单同底色 <code>fg</code>；菜单文字取 <code>bg</code>，Hover 行 <code>purple</code> 填充配 <code>cream</code> 字，禁用项降不透明度</td></tr>
   <tr><td>控制中心入口</td><td>容器背景 <code>surface</code>，圆角 6px</td></tr>
-  <tr><td>滑块</td><td>滑轨高 4px 取 <code>muted</code>，圆形滑块 12px 取 <code>purple</code>，Hover 与已填充高亮 <code>purple-light</code></td></tr>
+  <tr><td>滑块</td><td>滑轨高 4px 取 <code>fg</code>，圆形滑块 12px 取 <code>purple</code>，Hover 与已填充高亮 <code>purple-light</code></td></tr>
 </table>
 <ul class="note">
   <li>CSS 文件路径由 daemon 控制与跟踪；窗口按该路径加载内容。<code>reload</code> 指令经 daemon 广播（契约见 <a href="#sec-4-2">§4.2</a>），窗口重读后改色即见。</li>
