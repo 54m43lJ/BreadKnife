@@ -5,8 +5,8 @@
 > 四份 HTML 文档（[README](README.html) / [ARCHITECTURE](ARCHITECTURE.html) / [CODE](CODE.html) / [BUILD](BUILD.html)）
 > 是面向使用方的规格；按文档规约，工程取值（时长、周期、容量、阈值）与具体取舍只记在本文件，四文档不重复。
 > 对齐标记：`✓` 表示该行为已与所列文档章节对齐；无标记的条目为实现笔记（四文档按规约不收录）。
-> 本次收尾同时归档删除了五份 md 工作稿（BOUNDARY / INTEGRATION / MIGRATION / ISSUES / GUIDELINES），
-> 其内容状态已在交付报告中逐项声明（全部为「实现 / 调整」，无未决项）。
+> 本次收尾归档删除了四份 md 工作稿（BOUNDARY / INTEGRATION / MIGRATION / ISSUES），
+> 其内容状态已在交付报告中逐项声明（全部为「实现 / 调整」，无未决项）；GUIDELINES.md（文档规范）保留。
 
 ## 1. 交付范围
 
