@@ -189,7 +189,7 @@ footer {
 
 /* 控制中心：入口药丸 / 弹出面板 / 滑块 */
 .mk-entry {
-  background: #3E3542; border-radius: 6px; padding: 2px 10px;
+  background: transparent; border-radius: 6px; padding: 2px 10px;
   display: flex; align-items: center; gap: 8px;
 }
 .mk-panel { background: #3E3542; border-radius: 10px; padding: 12px; min-width: 260px; font-size: 12px; color: #D6CAB6; }
@@ -212,3 +212,18 @@ footer {
 .mk-notif .x { position: absolute; top: 6px; right: 10px; font-size: 12px; opacity: .7; }
 .mk-notif .bd { display: flex; gap: 16px; align-items: flex-start; padding: 0 4px; }
 .mk-nicon { width: 32px; height: 32px; border-radius: 6px; border: 1.6px solid currentColor; flex: none; opacity: .85; }
+
+/* 通知中心 */
+.mk-nc {
+  width: 480px; max-width: 100%; background: #3E3542; color: #D6CAB6;
+  border: 1px solid #9D7E4D; border-radius: 10px; padding: 8px; font-size: 12px;
+}
+.mk-nc-head { display: flex; justify-content: flex-end; padding: 2px 4px 6px; }
+.mk-nc-clear { border: 1px solid #9D7E4D; border-radius: 6px; padding: 1px 8px; font-size: 11px; }
+.mk-nc-item { position: relative; padding: 6px 20px 6px 8px; border-bottom: 1px solid #9D7E4D; }
+.mk-nc-item:last-child { border-bottom: none; }
+.mk-nc-t { font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mk-nc-x { position: absolute; top: 6px; right: 8px; font-size: 12px; opacity: .7; }
+.mk-nc-b {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
