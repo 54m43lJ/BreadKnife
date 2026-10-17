@@ -158,15 +158,15 @@ footer {
 .mk-btn.hi { background: #3E3542; }
 
 /* Workspace 按钮：圆点 / 长方形基底 + 活跃叠点 */
-.mk-dot { width: 4px; height: 4px; border-radius: 50%; background: #3E3542; }
+.mk-dot { width: 4px; height: 4px; border-radius: 50%; background: #89338E; }
 .mk-dot.fg { background: #D6CAB6; }
 .mk-rect {
-  width: 20px; height: 15px; border-radius: 10px; background: #3E3542;
+  width: 20px; height: 15px; border-radius: 10px; background: #89338E;
   display: flex; align-items: center; justify-content: center;
 }
-.mk-rect.gold { background: #9D7E4D; }
+.mk-rect.urgent { background: #E593E7; }
 .mk-ind { width: 4px; height: 4px; border-radius: 50%; background: #D6CAB6; }
-.mk-ind.on-gold { background: #B0B4BC; }
+.mk-ind.on-urgent { background: #231F1F; }
 
 /* 托盘条 + 自绘菜单（同底色 fg） */
 .mk-tray { display: inline-flex; gap: 4px; padding: 2px; border-radius: 6px; background: #D6CAB6; }

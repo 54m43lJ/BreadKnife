@@ -125,15 +125,15 @@
         <div class="mk-dot fg"></div>
         <div class="mk-rect"></div>
         <div class="mk-rect"><div class="mk-ind"></div></div>
-        <div class="mk-rect gold"><div class="mk-ind on-gold"></div></div>
+        <div class="mk-rect urgent"><div class="mk-ind on-urgent"></div></div>
       </div>
     </div>
   </div>
 </div>
 <ul class="note">
   <li>从左至右：无窗口、无窗口且活跃、有窗口、有窗口且活跃、紧急。</li>
-  <li>基底：无窗口＝直径 4px 圆点，有窗口＝20×15px 长方形（圆角半径 10px），均取 <code>surface</code>；紧急＝长方形整体取 <code>gold</code>，仅限有窗口。</li>
-  <li>活跃叠点直径 4px 取 <code>fg</code>；基底为紧急 <code>gold</code> 时叠点取 <code>muted</code>；无窗口且活跃时叠点与基底圆点等大重叠，视觉为单个 <code>fg</code> 圆点。</li>
+  <li>基底：无窗口＝直径 4px 圆点，有窗口＝20×15px 长方形（圆角半径 10px），均取 <code>purple</code>；紧急＝长方形整体取 <code>purple-light</code>，仅限有窗口。</li>
+  <li>活跃叠点直径 4px 取 <code>fg</code>；基底为紧急 <code>purple-light</code> 时叠点取 <code>bg</code>；无窗口且活跃时叠点与基底圆点等大重叠，视觉为单个 <code>fg</code> 圆点。</li>
   <li>可见性矩阵见 <a href="README.html#界面交互">README.html「界面交互」</a>；状态过渡 150ms ease。</li>
 </ul>
 
