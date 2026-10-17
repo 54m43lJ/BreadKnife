@@ -128,3 +128,76 @@ footer {
    不缩放，超宽时在自身盒内横向延伸 */
 .diagram { margin: 1rem 0; overflow-x: auto; }
 .diagram img { max-width: none; display: block; }
+
+/* ── 组件样式可视化（ARCHITECTURE §3.10.x）──
+   样例直绘应用组件，色值取自 §3.9 色板 */
+.mk { margin: 1rem 0; display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.mk-scene { display: inline-block; }
+
+/* 任务栏条 */
+.mk-bar {
+  background: #231F1F; border-bottom: 1px solid #9D7E4D; height: 30px;
+  border-radius: 4px 4px 0 0; display: flex; align-items: center;
+  justify-content: space-between; padding: 0 8px; gap: 16px;
+  font-family: "Noto Sans Mono", monospace; font-size: 12px; color: #D6CAB6;
+}
+.mk-bar .l, .mk-bar .r { display: flex; align-items: center; gap: 4px; }
+
+/* 通用按钮（任务栏上） */
+.mk-btn { border-radius: 6px; padding: 2px 8px; display: flex; align-items: center; gap: 6px; }
+.mk-btn.hi { background: #3E3542; }
+
+/* Workspace 按钮：圆点 / 长方形基底 + 活跃叠点 */
+.mk-dot { width: 4px; height: 4px; border-radius: 50%; background: #B0B4BC; }
+.mk-dot.fg { background: #D6CAB6; }
+.mk-rect {
+  width: 20px; height: 15px; border-radius: 10px; background: #B0B4BC;
+  display: flex; align-items: center; justify-content: center;
+}
+.mk-rect.gold { background: #9D7E4D; }
+.mk-ind { width: 4px; height: 4px; border-radius: 50%; background: #D6CAB6; }
+.mk-ind.on-gold { background: #B0B4BC; }
+
+/* 托盘条 + 自绘菜单（同底色 fg） */
+.mk-tray { display: inline-flex; gap: 4px; padding: 2px; border-radius: 6px; background: #D6CAB6; }
+.mk-tbtn { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.mk-menu {
+  width: 200px; background: #D6CAB6; border-radius: 8px; padding: 4px;
+  margin-top: 2px; box-shadow: 0 6px 18px rgba(0,0,0,.28);
+}
+.mk-mrow {
+  display: flex; align-items: center; gap: 7px; padding: 3px 10px;
+  border-radius: 4px; font-size: 12.5px; color: #231F1F; min-width: 120px;
+}
+.mk-mrow.hi { background: #89338E; color: #FFF7E4; }
+.mk-mrow.dis { opacity: .45; }
+.mk-msep { height: 1px; background: #B0B4BC; margin: 3px 6px; }
+.mk-mi { width: 11px; height: 11px; border-radius: 3px; border: 1.6px solid currentColor; flex: none; }
+.mk-chk { width: 16px; text-align: center; font-size: 11px; color: #9D7E4D; }
+.mk-arr { margin-left: auto; font-size: 10px; opacity: .8; }
+
+/* 控制中心：入口药丸 / 弹出面板 / 滑块 */
+.mk-entry {
+  background: #3E3542; border-radius: 6px; padding: 2px 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.mk-panel { background: #3E3542; border-radius: 10px; padding: 12px; min-width: 260px; font-size: 12px; color: #D6CAB6; }
+.mk-slider { position: relative; height: 12px; display: flex; align-items: center; margin: 6px 0 2px; }
+.mk-trough { height: 4px; border-radius: 2px; background: #D6CAB6; width: 100%; }
+.mk-fill { position: absolute; left: 0; height: 4px; border-radius: 2px; background: #E593E7; }
+.mk-knob { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #89338E; transform: translateX(-50%); }
+.mk-slab { display: flex; justify-content: space-between; font-size: 11px; color: #D6CAB6; }
+
+/* 通知弹窗 */
+.mk-notif {
+  width: 300px; border-radius: 15px; border: 1px solid #B0B4BC;
+  background: #3E3542; color: #D6CAB6; padding: 10px 8px 12px;
+  position: relative; font-size: 12px;
+}
+.mk-notif.crit { background: #CC2A47; color: #FFF7E4; }
+.mk-notif .app { font-size: 10px; color: #9D7E4D; padding: 0 4px; }
+.mk-notif.crit .app { color: #FFF7E4; opacity: .75; }
+.mk-notif .tt { text-align: center; font-weight: bold; font-size: 13px; margin: 2px 0 6px; }
+.mk-notif .x { position: absolute; top: 6px; right: 10px; font-size: 12px; opacity: .7; }
+.mk-notif .bd { display: flex; gap: 16px; align-items: flex-start; padding: 0 4px; }
+.mk-nicon { width: 32px; height: 32px; border-radius: 6px; border: 1.6px solid currentColor; flex: none; opacity: .85; }
