@@ -129,6 +129,16 @@ footer {
 .diagram { margin: 1rem 0; overflow-x: auto; }
 .diagram img { max-width: none; display: block; }
 
+/* ── §3.9 色板色块预览 ── */
+.pal { display: flex; flex-wrap: wrap; gap: 10px; margin: 1rem 0; }
+.pal .sw {
+  width: 104px; border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden; background: var(--card);
+}
+.pal .chip { height: 44px; border-bottom: 1px solid var(--border); }
+.pal .lab { padding: 4px 8px 6px; font-size: .8rem; line-height: 1.5; }
+.pal .lab span { display: block; color: var(--muted); font-size: .72rem; }
+
 /* ── 组件样式可视化（ARCHITECTURE §3.10.x）──
    样例直绘应用组件，色值取自 §3.9 色板 */
 .mk { margin: 1rem 0; display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
