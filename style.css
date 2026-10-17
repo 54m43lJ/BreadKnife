@@ -164,9 +164,9 @@ footer {
   width: 20px; height: 15px; border-radius: 10px; background: #89338E;
   display: flex; align-items: center; justify-content: center;
 }
-.mk-rect.urgent { background: #E593E7; }
+.mk-rect.urgent { background: #D6CAB6; }
 .mk-ind { width: 4px; height: 4px; border-radius: 50%; background: #D6CAB6; }
-.mk-ind.on-urgent { background: #231F1F; }
+.mk-ind.on-urgent { background: #89338E; }
 
 /* 托盘条 + 自绘菜单（同底色 fg） */
 .mk-tray { display: inline-flex; gap: 4px; padding: 2px; border-radius: 6px; background: #D6CAB6; }
