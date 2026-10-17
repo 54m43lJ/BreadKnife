@@ -60,9 +60,9 @@ bread exit                # 优雅退出（终止全部窗口、释放托盘 Wat
 <h2>调试要点</h2>
 <table>
   <tr><th>症状</th><th>定位</th></tr>
-  <tr><td>托盘空 + <code>NameTaken</code> 日志</td><td>会话已有 SNI host（旧任务栏未退）——退出占用者后重启 daemon；breadpan 对该终局不自动重连（见 MIGRATION §6.5）</td></tr>
+  <tr><td>托盘空 + <code>NameTaken</code> 日志</td><td>会话已有 SNI host（旧任务栏未退）——退出占用者后重启 daemon；breadpan 对该终局不自动重连（终局降级：不重试、不夺回）</td></tr>
   <tr><td>窗口未出现</td><td>查 daemon stderr 的 <code>[windows]</code> spawn / 崩溃重启日志；连续崩溃超限（60s 内 5 次）放弃并记录</td></tr>
-  <tr><td>右键菜单延迟数秒</td><td>病态 Item 的菜单读取耗时（MIGRATION §6.3 阻塞面结论）；阻塞发生在 daemon 专用线程，窗口不冻结</td></tr>
+  <tr><td>右键菜单延迟数秒</td><td>病态 Item 的菜单读取耗时（breadpan 同步调用阻塞调用线程）；阻塞发生在 daemon 专用线程，窗口不冻结</td></tr>
   <tr><td>通知中心无记录</td><td>会话已有通知守护（如 dunst）持有 org.freedesktop.Notifications——daemon 侧降级，属预期</td></tr>
 </table>
 

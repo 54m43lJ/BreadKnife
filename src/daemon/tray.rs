@@ -1,6 +1,6 @@
 //! breadpan 组装（Tray::start）+ 事件泵 + 交互执行 + 菜单读取。
-//! 组装契约见 ARCHITECTURE.html §4.3；阻塞面结论见 MIGRATION.md §6.3
-//! （全部托盘调用在 daemon 内执行，阻塞不冻结任何窗口）。
+//! 组装契约见 ARCHITECTURE.html §4.3；全部托盘调用在 daemon 内执行，
+//! 同步阻塞只发生于调用线程，不冻结任何窗口。
 
 use std::sync::mpsc::Sender;
 

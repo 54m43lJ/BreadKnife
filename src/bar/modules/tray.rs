@@ -1,5 +1,5 @@
 //! 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）。
-//! 交互契约见 ARCHITECTURE §4.4「daemon ↔ 窗口」；菜单刷新语义见 MIGRATION §6.6。
+//! 交互契约见 ARCHITECTURE §4.4「daemon ↔ 窗口」；菜单刷新走 menu_changed 推送（§4.4）。
 //! 弹窗经 PopupManager 托管（根层挂根窗口；子层挂根层弹窗，Wayland 嵌套，见 popup.rs）。
 
 use std::cell::{Cell, RefCell};

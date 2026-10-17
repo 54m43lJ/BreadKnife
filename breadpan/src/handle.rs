@@ -88,6 +88,9 @@ impl Tray {
         let deadline = std::time::Instant::now() + overall;
         let bus = loop {
             if std::time::Instant::now() >= deadline {
+                // 消费端放弃等待：先释放就绪通道再 join——运行线程的就绪发送随即
+                // 失败并转入停机路径，join 方能返回（否则引导完成后驻停，join 悬挂）
+                drop(ready_rx);
                 let _ = join.join();
                 return Err(TrayError::Timeout {
                     ms: overall.as_millis() as u64,
