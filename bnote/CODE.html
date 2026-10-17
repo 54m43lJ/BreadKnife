@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>bnote — 实现骨架</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>bnote 实现骨架</h1>
+
+<h2 id="sec-1">1. 文件树</h2>
+<pre><code>bnote/
+├── reference/          # 官方规范清理版（协议唯一权威文本）
+└── src/
+    ├── <a href="#sec-3-lib">lib.rs</a>        # 门面：会话装配、错误类型、再导出
+    ├── <a href="#sec-3-server">server.rs</a>     # org.freedesktop.Notifications 服务端方法应答
+    ├── <a href="#sec-3-signal">signal.rs</a>     # NotificationClosed / ActionInvoked / ActivationToken 发射
+    ├── <a href="#sec-3-hints">hints.rs</a>      # hints 解析与归一（urgency / actions / 图标 / 超时）
+    └── <a href="#sec-3-types">types.rs</a>      # Notice / NoticeEvent / 能力等共享类型</code></pre>
+<ul class="note">
+  <li>本库无 GTK、无业务状态：只做协议应答、信号发射与归一化；展示与生命周期决策全部归宿主。</li>
+</ul>
+
+<h2 id="sec-2">2. 通用约定</h2>
+<ul class="note">
+  <li>规范条文引用一律指向 <code>reference/notification-spec.clean.html</code> 的对应小节，不在注释里复述协议原文。</li>
+</ul>
+
+<h2 id="sec-3">3. 内部类型与方法签名</h2>
+
+<h3 id="sec-3-lib">3.1. src/lib.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct Session { /* 连接、接口注册、事件发送端 */ }
+
+impl Session {
+    pub fn start(conn: &amp;zbus::Connection, tx: Sender&lt;NoticeEvent&gt;,
+                 caps: Capabilities, info: ServerInfo)
+        -&gt; Result&lt;Rc&lt;Self&gt;, bnote::Error&gt;;        // 待实现，可以根据实际情况调整
+}
+
+pub enum Error {     //见 ARCHITECTURE §4.2
+    Bus(zbus::Error),
+    InvalidArgs(String),
+}</code></pre>
+
+<h3 id="sec-3-server">3.2. src/server.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct Server { /* zbus 接口实例，持有 Session 句柄 */ }
+
+impl Server {
+    fn get_capabilities(&amp;self) -&gt; Capabilities;                       // 待实现，可以根据实际情况调整
+    fn notify(&amp;self, notice: Notice) -&gt; u32;                          // 待实现，可以根据实际情况调整
+    fn close_notification(&amp;self, id: u32) -&gt; Result&lt;(), Error&gt;;       // 待实现，可以根据实际情况调整
+    fn get_server_information(&amp;self) -&gt; ServerInfo;                   // 待实现，可以根据实际情况调整
+}</code></pre>
+<ul class="note">
+  <li>四个方法与规范 §9.1 一一对应；id 分配与 <code>replaces_id</code> 归一在 <code>notify</code> 内完成。</li>
+</ul>
+
+<h3 id="sec-3-signal">3.3. src/signal.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn emit_closed(conn: &amp;zbus::Connection, id: u32, reason: CloseReason)
+    -&gt; Result&lt;(), bnote::Error&gt;;                                      // 待实现，可以根据实际情况调整
+
+pub fn emit_action_invoked(conn: &amp;zbus::Connection, id: u32, action_key: &amp;str)
+    -&gt; Result&lt;(), bnote::Error&gt;;                                      // 待实现，可以根据实际情况调整
+
+pub fn emit_activation_token(conn: &amp;zbus::Connection, id: u32, token: &amp;str)
+    -&gt; Result&lt;(), bnote::Error&gt;;                                      // 待实现，可以根据实际情况调整</code></pre>
+<ul class="note">
+  <li>ARCHITECTURE §4.1 的三个回发 API 即本模块的再导出。</li>
+</ul>
+
+<h3 id="sec-3-hints">3.4. src/hints.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn parse(hints: &amp;HashMap&lt;String, zbus::Value&gt;) -&gt; HintSet;        // 待实现，可以根据实际情况调整
+
+pub struct HintSet {   //见 ARCHITECTURE §4.3
+    pub urgency: Urgency,
+    pub actions: Vec&lt;Action&gt;,
+    pub icon: NoticeIcon,
+    pub expire_timeout_ms: Option&lt;u32&gt;,
+}</code></pre>
+
+<h3 id="sec-3-types">3.5. src/types.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct Notice;          //见 ARCHITECTURE §4.3
+pub enum NoticeEvent;       //见 ARCHITECTURE §4.2
+pub enum CloseReason;       //见 ARCHITECTURE §4.2
+pub struct Capabilities;    //见 ARCHITECTURE §4.2
+pub struct ServerInfo;      //见 ARCHITECTURE §4.2</code></pre>
+
+<h2 id="sec-4">4. 关键流程调用栈（伪码）</h2>
+
+<h3 id="sec-4-1">4.1. 通知到达</h3>
+<pre><code>DBus Notify 调用 → Server::notify()
+├── hints::parse()（urgency / actions / 图标 / 超时归一）
+├── id 分配（replaces_id 非 0 沿用，否则新分配）
+├── Session 转 NoticeEvent::Notify → tx（宿主）
+└── 应答新 id</code></pre>
+
+<h3 id="sec-4-2">4.2. 关闭与回发</h3>
+<pre><code>两条入口，同一出口：
+├── 客户端 CloseNotification(id) → Server::close_notification()
+└── 宿主决定关闭（超时 / 用户交互）→ signal::emit_closed()
+出口：signal::emit_closed(id, reason)（NotificationClosed 信号，规范 §9.2.1）</code></pre>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>bnote — 架构</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>bnote 架构</h1>
+
+<h2 id="sec-1">1. 术语</h2>
+<table>
+  <tr><th>术语</th><th>定义</th></tr>
+  <tr><td>宿主</td><td>装配本库、承担通知守护角色的进程，即 bread daemon 的消息中心模块</td></tr>
+  <tr><td>通知（Notification）</td><td>客户端经 <code>Notify</code> 方法提交的一条消息，归一后为 <code>Notice</code>（见 §4.3）</td></tr>
+  <tr><td>紧急度（Urgency）</td><td>hint <code>urgency</code> 的归一值：Low / Normal / Critical；决定宿主的超时策略</td></tr>
+  <tr><td>动作（Action）</td><td>通知携带的可点击项：键（key）＋标签（label）；客户端经 <code>ActionInvoked</code> 得知用户点击</td></tr>
+  <tr><td>能力（Capability）</td><td>守护声明支持的特性串（<code>GetCapabilities</code> 应答），如 <code>actions</code>、<code>body-markup</code></td></tr>
+  <tr><td>关闭原因（Reason）</td><td><code>NotificationClosed</code> 信号携带的数值码：过期 / 被用户关闭 / 被 <code>CloseNotification</code> 调用关闭</td></tr>
+</table>
+
+<h2 id="sec-2">2. 通用约定</h2>
+<p class="placeholder">（暂空）</p>
+
+<h2 id="sec-3">3. 架构图</h2>
+<p class="placeholder">待补：组件图（宿主 ↔ bnote ↔ DBus 会话总线）与通知到达时序图，PlantUML 源与导出图置于 <code>diagram/</code>。</p>
+
+<h2 id="sec-4">4. 接口</h2>
+
+<h3 id="sec-4-1">4.1. 宿主 API（Rust）</h3>
+<pre><code>pub async fn serve(conn: &amp;zbus::Connection, tx: Sender&lt;NoticeEvent&gt;)
+    -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整
+
+pub fn close(conn: &amp;zbus::Connection, id: u32, reason: CloseReason)
+    -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整
+
+pub fn invoke_action(conn: &amp;zbus::Connection, id: u32, action_key: &amp;str)
+    -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整
+
+pub fn activation_token(conn: &amp;zbus::Connection, id: u32, token: &amp;str)
+    -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整</code></pre>
+<ul class="note">
+  <li><code>serve</code> 在总线上注册 <code>org.freedesktop.Notifications</code> 并常驻应答；宿主经 <code>tx</code> 收事件流。</li>
+  <li>三个回发函数对应规范的三个信号：关闭、动作已调用、激活令牌。</li>
+</ul>
+
+<h3 id="sec-4-2">4.2. 消息与应答</h3>
+<pre><code>pub enum NoticeEvent {          // 待实现，可以根据实际情况调整
+    Notify { notice: Notice },
+    Close { id: u32 },
+}
+
+pub enum CloseReason {          // 待实现，可以根据实际情况调整
+    Expired,
+    Dismissed,
+    CloseRequest,
+}
+
+pub struct Capabilities {       // 待实现，可以根据实际情况调整
+    pub entries: Vec&lt;String&gt;,
+}
+
+pub struct ServerInfo {         // 待实现，可以根据实际情况调整
+    pub name: String,
+    pub vendor: String,
+    pub version: String,
+    pub spec_version: String,
+}</code></pre>
+<table>
+  <tr><th>消息</th><th>含义 / 宿主动作</th></tr>
+  <tr><td><code>NoticeEvent::Notify</code></td><td>新通知或同 id 替换；宿主决定展示与生命周期</td></tr>
+  <tr><td><code>NoticeEvent::Close</code></td><td>客户端要求关闭指定通知；宿主移除后应调用 <code>close()</code> 回发原因 <code>CloseRequest</code></td></tr>
+  <tr><td><code>Capabilities</code></td><td><code>GetCapabilities</code> 应答；能力清单由宿主装配时声明</td></tr>
+  <tr><td><code>ServerInfo</code></td><td><code>GetServerInformation</code> 应答</td></tr>
+</table>
+
+<h3 id="sec-4-3">4.3. 数据模型与转换</h3>
+<pre><code>pub struct Notice {             // 待实现，可以根据实际情况调整
+    pub id: u32,
+    pub app_name: String,
+    pub icon: NoticeIcon,
+    pub summary: String,
+    pub body: String,
+    pub actions: Vec&lt;Action&gt;,
+    pub urgency: Urgency,
+    pub expire_timeout_ms: Option&lt;u32&gt;,
+}
+
+pub enum Urgency { Low, Normal, Critical }
+pub struct Action { pub key: String, pub label: String }
+pub enum NoticeIcon { None, Name(String), Pixels { width: i32, height: i32, rgba: Vec&lt;u8&gt; } }</code></pre>
+<table>
+  <tr><th>字段</th><th>定义</th><th>来源（规范转换）</th></tr>
+  <tr><td><code>id</code></td><td>通知唯一标识；0 表示由本库分配</td><td><code>replaces_id</code> 非 0 时沿用，否则新分配（规范 §Notify）</td></tr>
+  <tr><td><code>app_name</code> / <code>summary</code> / <code>body</code></td><td>应用名 / 标题 / 正文</td><td><code>Notify</code> 同名参数原样</td></tr>
+  <tr><td><code>icon</code></td><td>图标三态：无 / 主题名 / 位图</td><td><code>app_icon</code> 参数与 hint <code>image-data</code> 系列合并归一</td></tr>
+  <tr><td><code>actions</code></td><td>键值对列表，键用于 <code>ActionInvoked</code> 回发</td><td><code>actions</code> 参数按（key, label）成对解析</td></tr>
+  <tr><td><code>urgency</code></td><td>紧急度</td><td>hint <code>urgency</code>（byte 0/1/2）；缺省 Normal</td></tr>
+  <tr><td><code>expire_timeout_ms</code></td><td>请求的超时；<code>None</code>＝常驻（-1），0＝按宿主默认</td><td><code>expire_timeout</code> 参数归一</td></tr>
+</table>
+<ul class="note">
+  <li>协议原文细节以 <a href="reference/notification-spec.clean.html">reference/notification-spec.clean.html</a> 为唯一权威。</li>
+</ul>
+
+</main>
+</body>
+</html>

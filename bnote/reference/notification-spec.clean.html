@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Desktop Notifications Specification</title>
+</head>
+<body>
+<p>Cleaned offline copy, styling removed. Authoritative text: <a href="https://specifications.freedesktop.org/notification-spec/latest/">https://specifications.freedesktop.org/notification-spec/latest/</a></p>
+<hr>
+<div id="_content" class=""><div class="documentation"><div class="sect1" id="protocol"><div class="titlepage"><div><div><h2 class="title" id="protocol"><span class="number">9 </span><span xmlns:dm="urn:x-suse:ns:docmanager" class="name">D-Bus Protocol</span> <a title="Permalink" class="permalink" href="protocol.html">#</a></h2></div></div></div><p>
+   The following messages <span class="emphasis"><em>must</em></span> be supported by all
+   implementations.
+  </p><div class="sect2" id="commands"><div class="titlepage"><div><div><h3 class="title" id="commands"><span class="number">9.1 </span><span xmlns:dm="urn:x-suse:ns:docmanager" class="name">Message commands</span> <a title="Permalink" class="permalink" href="protocol.html#commands">#</a></h3></div></div></div><div class="sect3" id="command-get-capabilities"><div class="titlepage"><div><div><h4 class="title" id="command-get-capabilities"><span class="number">9.1.1 </span><span xmlns:dm="urn:x-suse:ns:docmanager" class="name"><code class="literal">org.freedesktop.Notifications.GetCapabilities</code></span> <a title="Permalink" class="permalink" href="protocol.html#command-get-capabilities">#</a></h4></div></div></div><div class="funcsynopsis"><table border="0" class="funcprototype-table" summary="Function synopsis"><tr><td><code class="funcdef">as
+       <strong class="fsfunc">org.freedesktop.Notifications.GetCapabilities</strong>
+      (</code></td><td><code>void)</code>;</td><td> </td></tr></table><div class="funcprototype-spacer"> </div></div><p>
+     This message takes no parameters.
+    </p><p>
+     It returns an array of strings. Each string describes an optional
+     capability implemented by the server. The following values are
+     defined by this spec:
+    </p><div class="table" id="id-1.10.3.2.5"><div class="table-title-wrap"><h6 class="table-title"><span class="number">Table 5: </span><span class="name">Server Capabilities </span><a title="Permalink" class="permalink" href="protocol.html#id-1.10.3.2.5">#</a></h6></div><div class="table-contents"><table class="table" summary="Server Capabilities" border="1"><colgroup><col /><col /></colgroup><tbody valign="top"><tr><td valign="top"><code class="literal">"action-icons"</code></td><td valign="top">
+         Supports using icons instead of text for displaying actions.
+         Using icons for actions must be enabled on a per-notification
+         basis using the "action-icons" hint.
+        </td></tr><tr><td valign="top"><code class="literal">"actions"</code></td><td valign="top">
+         The server will provide the specified actions to the user. Even if
+         this cap is missing, actions may still be specified by the client,
+         however the server is free to ignore them.
+        </td></tr><tr><td valign="top"><code class="literal">"body"</code></td><td valign="top">
+         Supports body text. Some implementations may only show the
+         summary (for instance, onscreen displays, marquee/scrollers)
+        </td></tr><tr><td valign="top"><code class="literal">"body-hyperlinks"</code></td><td valign="top">
+         The server supports hyperlinks in the notifications.
+        </td></tr><tr><td valign="top"><code class="literal">"body-images"</code></td><td valign="top">
+         The server supports images in the notifications.
+        </td></tr><tr><td valign="top"><code class="literal">"body-markup"</code></td><td valign="top">
+         Supports markup in the body text. If marked up text is sent
+         to a server that does not give this cap, the markup will show
+         through as regular text so must be stripped clientside.
+        </td></tr><tr><td valign="top"><code class="literal">"icon-multi"</code></td><td valign="top">
+         The server will render an animation of all the frames in a given
+         image array. The client may still specify multiple frames even if
+         this cap and/or <code class="literal">"icon-static"</code> is missing, however
+         the server is free to ignore them and use only the primary frame.
+        </td></tr><tr><td valign="top"><code class="literal">"icon-static"</code></td><td valign="top">
+         Supports display of exactly 1 frame of any given image array.
+         This value is mutually exclusive with
+         <code class="literal">"icon-multi"</code>, it is a protocol error for the
+         server to specify both.
+        </td></tr><tr><td valign="top"><code class="literal">"persistence"</code></td><td valign="top">
+         The server supports persistence of notifications.
+         Notifications will be retained until they are acknowledged or
+         removed by the user or recalled by the sender.  The presence
+         of this capability allows clients to depend on the server to
+         ensure a notification is seen and eliminate the need for
+         the client to display a reminding function (such as a status
+         icon) of its own.
+        </td></tr><tr><td valign="top"><code class="literal">"sound"</code></td><td valign="top">
+         The server supports sounds on notifications. If returned, the
+         server must support the <code class="literal">"sound-file"</code> and
+         <code class="literal">"suppress-sound"</code> hints.
+        </td></tr></tbody></table></div></div><p>
+     New vendor-specific caps may be specified as long as they start with
+     <code class="literal">"x-<em class="replaceable">vendor</em>"</code>. For instance,
+     <code class="literal">"x-gnome-foo-cap"</code>. Capability names must not
+     contain spaces. They are limited to alpha-numeric characters and dashes
+     (<code class="literal">"-"</code>).
+    </p></div><div class="sect3" id="command-notify"><div class="titlepage"><div><div><h4 class="title" id="command-notify"><span class="number">9.1.2 </span><span xmlns:dm="urn:x-suse:ns:docmanager" class="name"><code class="literal">org.freedesktop.Notifications.Notify</code></span> <a title="Permalink" class="permalink" href="protocol.html#command-notify">#</a></h4></div></div></div><div class="funcsynopsis"><table border="0" class="funcprototype-table" summary="Function synopsis"><tr><td><code class="funcdef">UINT32
+       <strong class="fsfunc">org.freedesktop.Notifications.Notify</strong>
+      (</code></td><td>STRING <var class="pdparam">app_name</var>, </td></tr><tr><td> </td><td>UINT32 <var class="pdparam">replaces_id</var>, </td></tr><tr><td> </td><td>STRING <var class="pdparam">app_icon</var>, </td></tr><tr><td> </td><td>STRING <var class="pdparam">summary</var>, </td></tr><tr><td> </td><td>STRING <var class="pdparam">body</var>, </td></tr><tr><td> </td><td>as <var class="pdparam">actions</var>, </td></tr><tr><td> </td><td>a{sv} <var class="pdparam">hints</var>, </td></tr><tr><td> </td><td>INT32 <var class="pdparam">expire_timeout</var><code>)</code>;</td></tr></table><div class="funcprototype-spacer"> </div></div><p>
+     Sends a notification to the notification server.
+    </p><div class="table" id="id-1.10.3.3.4"><div class="table-title-wrap"><h6 class="table-title"><span class="number">Table 6: </span><span class="name">Notify Parameters </span><a title="Permalink" class="permalink" href="protocol.html#id-1.10.3.3.4">#</a></h6></div><div class="table-contents"><table class="table" summary="Notify Parameters" border="1"><colgroup><col /><col /><col /></colgroup><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody valign="top"><tr><td valign="top"><em class="parameter">app_name</em></td><td valign="top">STRING</td><td valign="top">
+         The optional name of the application sending the notification.
+         Can be blank.
+        </td></tr><tr><td valign="top"><em class="parameter">replaces_id</em></td><td valign="top">UINT32</td><td valign="top">
+         The optional notification ID that this notification replaces. The
+         server must atomically (ie with no flicker or other visual cues)
+         replace the given notification with this one. This allows clients to
+         effectively modify the notification while it's active. A value of
+         value of 0 means that this notification won't replace any
+         existing notifications.
+        </td></tr><tr><td valign="top"><em class="parameter">app_icon</em></td><td valign="top">STRING</td><td valign="top">
+         The optional program icon of the calling application. See <a class="xref" href="icons-and-images.html" title="5. Icons and Images">Icons and Images</a>.
+         Can be an empty string, indicating no icon.
+        </td></tr><tr><td valign="top"><em class="parameter">summary</em></td><td valign="top">STRING</td><td valign="top">The summary text briefly describing the notification.</td></tr><tr><td valign="top"><em class="parameter">body</em></td><td valign="top">STRING</td><td valign="top">The optional detailed body text. Can be empty.</td></tr><tr><td valign="top"><em class="parameter">actions</em></td><td valign="top">as</td><td valign="top">
+         Actions are sent over as a list of pairs. Each even element in
+         the list (starting at index 0) represents the identifier for the
+         action. Each odd element in the list is the localized string
+         that will be displayed to the user.
+        </td></tr><tr><td valign="top"><em class="parameter">hints</em></td><td valign="top">a{sv}</td><td valign="top">
+         Optional hints that can be passed to the server from the client
+         program. Although clients and servers should never assume each other
+         supports any specific hints, they can be used to pass along
+         information, such as the process PID or window ID, that the server
+         may be able to make use of. See <a class="xref" href="hints.html" title="8. Hints">Hints</a>. Can be
+         empty.
+        </td></tr><tr><td valign="top"><em class="parameter">expire_timeout</em></td><td valign="top">INT32</td><td valign="top">
+         <p>
+          The timeout time in milliseconds since the display of the notification at
+          which the notification should automatically close.
+         </p>
+         <p>
+          If -1, the notification's expiration time is dependent on the
+          notification server's settings, and may vary for the type of
+          notification.
+
+          If 0, never expire.
+         </p>
+        </td></tr></tbody></table></div></div><p>
+     If <em class="parameter">replaces_id</em> is 0, the return value is a
+     UINT32 that represent the notification. It is unique, and will not be
+     reused unless a <code class="constant">MAXINT</code> number of notifications
+     have been generated. An acceptable implementation may just use an
+     incrementing counter for the ID. The returned ID is always greater than
+     zero. Servers must make sure not to return zero as an ID.
+    </p><p>
+     If <em class="parameter">replaces_id</em> is not 0, the returned value
+     is the same value as <em class="parameter">replaces_id</em>.
+    </p></div><div class="sect3" id="command-close-notification"><div class="titlepage"><div><div><h4 class="title" id="command-close-notification"><span class="number">9.1.3 </span><span xmlns:dm="urn:x-suse:ns:docmanager" class="name"><code class="literal">org.freedesktop.Notifications.CloseNotification</code></span> <a title="Permalink" class="permalink" href="protocol.html#command-close-notification">#</a></h4></div></div></div><div class="funcsynopsis"><table border="0" class="funcprototype-table" summary="Function synopsis"><tr><td><code class="funcdef">void
+       <strong class="fsfunc">org.freedesktop.Notifications.CloseNotification</strong>
+      (</code></td><td>UINT32 <var class="pdparam">id</var><code>)</code>;</td></tr></table><div class="funcprototype-spacer"> </div></div><p>
+     Causes a notification to be forcefully closed and removed from the user's
+     view. It can be used, for example, in the event that what the
+     notification pertains to is no longer relevant, or to cancel a
+     notification with no expiration time.
+    </p><p>
+     The <code class="literal">NotificationClosed</code> signal is emitted by this
+     method.
+    </p><p>
+     If the notification no longer exists, an empty D-Bus Error message is
+     sent back.
+    </p></div><div class="sect3" id="command-get-server-information"><div class="titlepage"><div><div><h4 class="title" id="command-get-server-information"><span class="number">9.1.4 </span><span xmlns:dm="urn:x-suse:ns:docmanager" class="name"><code class="literal">org.freedesktop.Notifications.GetServerInformation</code></span> <a title="Permalink" class="permalink" href="protocol.html#command-get-server-information">#</a></h4></div></div></div><div class="funcsynopsis"><table border="0" class="funcprototype-table" summary="Function synopsis"><tr><td><code class="funcdef">
+       void
+       <strong class="fsfunc">org.freedesktop.Notifications.GetServerInformation</strong>
+      (</code></td><td>out STRING <var class="pdparam">name</var>, </td></tr><tr><td> </td><td>out STRING <var class="pdparam">vendor</var>, </td></tr><tr><td> </td><td>out STRING <var class="pdparam">version</var>, </td></tr><tr><td> </td><td>out STRING <var class="pdparam">spec_version</var><code>)</code>;</td></tr></table><div class="funcprototype-spacer"> </div></div><p>
+     This message returns the information on the server. Specifically,
+     the server name, vendor, and version number.
+    </p><div class="table" id="id-1.10.3.5.4"><div class="table-title-wrap"><h6 class="table-title"><span class="number">Table 7: </span><span class="name">GetServerInformation Return Values </span><a title="Permalink" class="permalink" href="protocol.html#id-1.10.3.5.4">#</a></h6></div><div class="table-contents"><table class="table" summary="GetServerInformation Return Values" border="1"><colgroup><col /><col /></colgroup><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody valign="top"><tr><td valign="top"><em class="parameter">name</em></td><td valign="top">STRING</td><td valign="top">The product name of the server.</td></tr><tr><td valign="top"><em class="parameter">vendor</em></td><td valign="top">STRING</td><td valign="top">
+         The vendor name. For example, "KDE," "GNOME,"
+         "freedesktop.org," or "Microsoft."
+        </td></tr><tr><td valign="top"><em class="parameter">version</em></td><td valign="top">STRING</td><td valign="top">The server's version number.</td></tr><tr><td valign="top"><em class="parameter">spec_version</em></td><td valign="top">STRING</td><td valign="top">The specification version the server is compliant with.</td></tr></tbody></table></div></div></div></div><div class="sect2" id="signals"><div class="titlepage"><div><div><h3 class="title" id="signals"><span class="number">9.2 </span><span xmlns:dm="urn:x-suse:ns:docmanager" class="name">Signals</span> <a title="Permalink" class="permalink" href="protocol.html#signals">#</a></h3></div></div></div><div class="sect3" id="signal-notification-closed"><div class="titlepage"><div><div><h4 class="title" id="signal-notification-closed"><span class="number">9.2.1 </span><span xmlns:dm="urn:x-suse:ns:docmanager" class="name"><code class="literal">org.freedesktop.Notifications.NotificationClosed</code></span> <a title="Permalink" class="permalink" href="protocol.html#signal-notification-closed">#</a></h4></div></div></div><div class="funcsynopsis"><table border="0" class="funcprototype-table" summary="Function synopsis"><tr><td><code class="funcdef">
+       <strong class="fsfunc">org.freedesktop.Notifications.NotificationClosed</strong>
+      (</code></td><td>UINT32 <var class="pdparam">id</var>, </td></tr><tr><td> </td><td>UINT32 <var class="pdparam">reason</var><code>)</code>;</td></tr></table><div class="funcprototype-spacer"> </div></div><p>
+     A completed notification is one that has timed out, or has been
+     dismissed by the user.
+    </p><div class="table" id="id-1.10.4.2.4"><div class="table-title-wrap"><h6 class="table-title"><span class="number">Table 8: </span><span class="name">NotificationClosed Parameters </span><a title="Permalink" class="permalink" href="protocol.html#id-1.10.4.2.4">#</a></h6></div><div class="table-contents"><table class="table" summary="NotificationClosed Parameters" border="1"><colgroup><col /><col /></colgroup><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody valign="top"><tr><td valign="top"><em class="parameter">id</em></td><td valign="top">UINT32</td><td valign="top">The ID of the notification that was closed.</td></tr><tr><td valign="top"><em class="parameter">reason</em></td><td valign="top">UINT32</td><td valign="top">
+         <p>The reason the notification was closed.</p>
+         <p>1 - The notification expired.</p>
+         <p>2 - The notification was dismissed by the user.</p>
+         <p>3 - The notification was closed by a call to
+               <code class="literal">CloseNotification</code>.</p>
+         <p>4 - Undefined/reserved reasons.</p>
+        </td></tr></tbody></table></div></div><p>
+     The ID specified in the signal is invalidated
+     <span class="emphasis"><em>before</em></span> the signal is sent and may not be used
+     in any further communications with the server.
+    </p></div><div class="sect3" id="signal-action-invoked"><div class="titlepage"><div><div><h4 class="title" id="signal-action-invoked"><span class="number">9.2.2 </span><span xmlns:dm="urn:x-suse:ns:docmanager" class="name"><code class="literal">org.freedesktop.Notifications.ActionInvoked</code></span> <a title="Permalink" class="permalink" href="protocol.html#signal-action-invoked">#</a></h4></div></div></div><div class="funcsynopsis"><table border="0" class="funcprototype-table" summary="Function synopsis"><tr><td><code class="funcdef">
+       <strong class="fsfunc">org.freedesktop.Notifications.ActionInvoked</strong>
+      (</code></td><td>UINT32 <var class="pdparam">id</var>, </td></tr><tr><td> </td><td>STRING <var class="pdparam">action_key</var><code>)</code>;</td></tr></table><div class="funcprototype-spacer"> </div></div><p>
+     This signal is emitted when one of the following occurs:
+    </p><div class="itemizedlist"><ul class="itemizedlist"><li class="listitem"><p>
+       The user performs some global "invoking" action upon a notification.
+       For instance, clicking somewhere on the notification itself.
+      </p></li><li class="listitem"><p>
+       The user invokes a specific action as specified in the original
+       Notify request. For example, clicking on an action button.
+      </p></li></ul></div><div class="table" id="id-1.10.4.3.5"><div class="table-title-wrap"><h6 class="table-title"><span class="number">Table 9: </span><span class="name">ActionInvoked Parameters </span><a title="Permalink" class="permalink" href="protocol.html#id-1.10.4.3.5">#</a></h6></div><div class="table-contents"><table class="table" summary="ActionInvoked Parameters" border="1"><colgroup><col /><col /></colgroup><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody valign="top"><tr><td valign="top"><em class="parameter">id</em></td><td valign="top">UINT32</td><td valign="top">
+         The ID of the notification emitting the ActionInvoked signal.
+        </td></tr><tr><td valign="top"><em class="parameter">action_key</em></td><td valign="top">STRING</td><td valign="top">
+         The key of the action invoked. These match the keys sent over
+         in the list of actions.
+        </td></tr></tbody></table></div></div><div id="id-1.10.4.3.6" class="admonition note normal"><h6>Note</h6><p>
+      Clients should not assume the server will generate this signal. Some
+      servers may not support user interaction at all, or may not support
+      the concept of being able to "invoke" a notification.
+     </p></div></div><div class="sect3" id="signal-activation-token"><div class="titlepage"><div><div><h4 class="title" id="signal-activation-token"><span class="number">9.2.3 </span><span xmlns:dm="urn:x-suse:ns:docmanager" class="name"><code class="literal">org.freedesktop.Notifications.ActivationToken</code></span> <a title="Permalink" class="permalink" href="protocol.html#signal-activation-token">#</a></h4></div></div></div><div class="funcsynopsis"><table border="0" class="funcprototype-table" summary="Function synopsis"><tr><td><code class="funcdef">
+       <strong class="fsfunc">org.freedesktop.Notifications.ActivationToken</strong>
+      (</code></td><td>UINT32 <var class="pdparam">id</var>, </td></tr><tr><td> </td><td>STRING <var class="pdparam">activation_token</var><code>)</code>;</td></tr></table><div class="funcprototype-spacer"> </div></div><p>
+     This signal can be emitted before a <code class="literal">ActionInvoked</code>
+     signal. It carries an activation token that can be used to activate a
+     toplevel.
+    </p><div class="table" id="id-1.10.4.4.4"><div class="table-title-wrap"><h6 class="table-title"><span class="number">Table 10: </span><span class="name">ActivationToken Parameters </span><a title="Permalink" class="permalink" href="protocol.html#id-1.10.4.4.4">#</a></h6></div><div class="table-contents"><table class="table" summary="ActivationToken Parameters" border="1"><colgroup><col /><col /></colgroup><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody valign="top"><tr><td valign="top"><em class="parameter">id</em></td><td valign="top">UINT32</td><td valign="top">
+         The ID of the notification emitting the <code class="literal">ActionInvoked</code>
+         signal.
+        </td></tr><tr><td valign="top"><em class="parameter">activation_token</em></td><td valign="top">STRING</td><td valign="top">
+         An activation token. This can be either an X11-style startup ID (see
+         <a class="ulink" href="https://specifications.freedesktop.org/startup-notification-spec/startup-notification-latest.txt" target="_blank">Startup notification protocol<span class="ulink-url"> (https://specifications.freedesktop.org/startup-notification-spec/startup-notification-latest.txt)</span></a>)
+         or a
+         <a class="ulink" href="https://gitlab.freedesktop.org/wayland/wayland-protocols/-/tree/main/staging/xdg-activation" target="_blank">Wayland xdg-activation<span class="ulink-url"> (https://gitlab.freedesktop.org/wayland/wayland-protocols/-/tree/main/staging/xdg-activation)</span></a>
+         token.
+        </td></tr></tbody></table></div></div><div id="id-1.10.4.4.5" class="admonition note normal"><h6>Note</h6><p>
+      Clients should not assume the server will generate this signal. Some
+      servers may not support user interaction at all, or may not support
+      the concept of being able to generate an activation token for a
+      notification.
+     </p></div></div></div></div></div>
+</body>
+</html>

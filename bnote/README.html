@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>bnote</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>bnote</h1>
+
+<h2 id="sec-1">1. WHAT &amp; WHY</h2>
+<h3>IDEAL</h3>
+<p>bread 的通知守护要正确实现 <code>org.freedesktop.Notifications</code> 的全部协议行为——方法应答、信号回发、hints 归一、能力协商。这些细节繁杂且与业务无关，不应散落在 daemon 业务代码里。</p>
+<h3>GOAL</h3>
+<p>一个独立封装该协议的库：宿主（bread daemon 的消息中心模块）只面向结构化的通知事件与动作回发 API，不见任何 DBus 协议细节；协议行为与官方规范逐条对应，可独立测试。</p>
+
+<h2 id="sec-2">2. 用户交互</h2>
+<ul>
+  <li>本库无图形界面；「用户」即宿主进程。</li>
+  <li>宿主装配会话后订阅通知事件流；对外回发（关闭、动作、激活令牌）通过显式 API 调用，见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a>。</li>
+</ul>
+
+<h2 id="sec-3">3. 原型 / 参考资料</h2>
+<ul>
+  <li>协议权威文本：<a href="reference/notification-spec.clean.html">reference/notification-spec.clean.html</a>（官方规范清理版）。</li>
+</ul>
+
+</main>
+</body>
+</html>

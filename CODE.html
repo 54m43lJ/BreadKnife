@@ -14,6 +14,7 @@
 <h2 id="sec-1">1. 文件树</h2>
 <pre><code>breadknife/               # 项目群根（单一二进制 bread：daemon / 窗口 / 客户端 三角色）
 ├── <a href="breadpan/CODE.html">breadpan/</a>             # 成员项目（内部结构见其 CODE.html）
+├── <a href="bnote/CODE.html">bnote/</a>               # 成员项目：DBUS 通知协议封装库（内部结构见其 CODE.html）
 └── src/
     ├── main.rs           # 入口：子命令分发（daemon / open / close / …）
     ├── daemon/           # bread daemon（Model，无 GTK）
@@ -21,7 +22,7 @@
     │   ├── <a href="#sec-3-hyprland">hyprland.rs</a>   # Hyprland IPC 只读监听：显示器 / 工作区 / 活动窗口
     │   ├── <a href="#sec-3-daemon-tray">tray.rs</a>       # breadpan 组装（Tray::start）+ 事件泵 + 交互执行 + 菜单读取
     │   ├── <a href="#sec-3-system">system.rs</a>     # UPower / NetworkManager / MPRIS；pamixer / brightnessctl / ddcutil
-    │   ├── <a href="#sec-3-notify">notify.rs</a>     # org.freedesktop.Notifications 实现（通知守护角色）
+    │   ├── <a href="#sec-3-notify">notify.rs</a>     # 通知守护角色装配（org.freedesktop.Notifications 协议细节由 bnote 封装）
     │   ├── <a href="#sec-3-windows">windows.rs</a>    # 窗口进程生命周期（spawn / kill / 崩溃重启）；显示器 → 窗口映射
     │   └── <a href="#sec-3-daemon-ipc">ipc.rs</a>        # Unix socket 服务端：请求应答 + 状态推送
     ├── bar/              # bar 窗口进程（View，GTK4）
@@ -30,7 +31,7 @@
     │   ├── <a href="#sec-3-style">style.rs</a>      # 按 daemon 跟踪的路径加载 CSS；reload 重读
     │   └── modules/
     │       ├── <a href="#sec-3-workspace">workspace.rs</a>    # 工作区条（渲染 + 手势捕获）
-    │       ├── <a href="#sec-3-window-info">window_info.rs</a>  # 活动窗口图标 / 标题 + 通知中心弹窗
+    │       ├── <a href="#sec-3-info">info.rs</a>        # 活动窗口图标 / 标题 + 通知中心弹窗
     │       ├── <a href="#sec-3-popup">popup.rs</a>        # 弹窗会话：grab 弹窗统一托管（根窗口 / 上级弹窗定位 · 任务栏内捕获关闭 · Escape / toggle）
     │       ├── <a href="#sec-3-tray">tray.rs</a>         # 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）
     │       └── <a href="#sec-3-center">center.rs</a>       # 控制中心入口与弹出面板
@@ -206,10 +207,10 @@ impl WorkspaceWidget {
     pub fn rebuild(&amp;self, states: &amp;[WorkspaceState]);
 }</code></pre>
 
-<h3 id="sec-3-window-info">3.12. bar/modules/window_info.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct WindowInfoWidget { pub container: gtk::Box, /* 图标、标题、通知列表 */ }
+<h3 id="sec-3-info">3.12. bar/modules/info.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct InfoCenterWidget { pub container: gtk::Box, /* 图标、标题、通知列表 */ }
 
-impl WindowInfoWidget {
+impl InfoCenterWidget {
     pub fn new(window: &amp;gtk::Window, popup: Rc&lt;PopupManager&gt;) -&gt; Self;
     pub fn set_active(&amp;self, active: &amp;ActiveWindow);
     pub fn notify(&amp;self, record: NotificationRecord);
@@ -451,7 +452,7 @@ pub struct StateDelta {         //见 ARCHITECTURE §4.4
 │         ├── 层壳窗口：init_layer_shell / set_layer(Top) / 锚定 Left|Right|Top / namespace "bread" / auto_exclusive_zone_enable
 │         ├── find_monitor(name) → set_monitor / set_default_size；connect_geometry_notify 跟踪分辨率
 │         ├── PopupManager::install(window)
-│         ├── WorkspaceWidget::new / WindowInfoWidget::new / TrayWidget::new / CenterWidget::new
+│         ├── WorkspaceWidget::new / InfoCenterWidget::new / TrayWidget::new / CenterWidget::new
 │         ├── CenterBox 布局（workspace | info | tray + center）
 │         ├── glib::timeout_add_local(UI_DRAIN)（排空 UiTask）
 │         └── glib::timeout_add_seconds_local(2)（daemon_alive() 周期检查）
@@ -513,7 +514,7 @@ pub struct StateDelta {         //见 ARCHITECTURE §4.4
 ├── notify::serve(conn, tx) → DaemonEvent::Notification(NotificationRecord)
 ├── 同 id 替换 / 新 id 入队（上限见代码）
 └── broadcast(Push::Notification(record))
-     └── WindowApp::handle_push → WindowInfoWidget::notify（列表上限见代码）</code></pre>
+     └── WindowApp::handle_push → InfoCenterWidget::notify（列表上限见代码）</code></pre>
 
 </main>
 </body>
