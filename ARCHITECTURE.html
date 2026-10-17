@@ -226,21 +226,24 @@
   <div class="mk-scene">
     <div class="mk-nc">
       <div class="mk-nc-head"><span class="mk-nc-clear">全部清理</span></div>
+      <div class="mk-nc-gh"><span class="arr">▾</span>应用 A</div>
       <div class="mk-nc-item">
-        <div class="mk-nc-t">构建完成</div><div class="mk-x">✕</div>
+        <div class="mk-nc-tr"><span class="mk-nc-t">构建完成</span><span class="mk-nc-x">✕</span></div>
         <div class="mk-nc-b">任务 #128 已成功结束，产物已上传。</div>
       </div>
       <div class="mk-nc-item">
-        <div class="mk-nc-t">磁盘空间不足</div><div class="mk-x">✕</div>
-        <div class="mk-nc-b">自上次清理以来记录日志持续增长，已写入大量诊断信息与历史快照；本条正文超出三行，多余部分在此处裁剪显示省略号，悬停可查看全文内容并继续列举更多细节以填满第三行。</div>
+        <div class="mk-nc-tr"><span class="mk-nc-t">磁盘空间不足</span><span class="mk-nc-x">✕</span></div>
+        <div class="mk-nc-b">自上次清理以来记录日志持续增长，已写入大量诊断信息与历史快照；本条正文超出两行，多余部分在此处裁剪显示省略号，悬停可查看全文内容并继续列举更多细节以填满第二行。</div>
       </div>
+      <div class="mk-nc-gh"><span class="arr">▸</span>应用 B</div>
     </div>
   </div>
 </div>
 <ul class="note">
   <li>面板宽 40% 屏宽，高度随消息列表动态变化，上限 100% 屏高；面板底 <code>surface</code>，圆角 10px、边框 1px、内边距 8px。</li>
-  <li>每条消息：标题至多 1 行、正文至多 3 行，超出裁剪显示省略号。</li>
-  <li>每条消息右上角关闭（删除）按钮；顶部一键清理全部按钮。</li>
+  <li>消息按应用聚合：聚合标题为应用名，点击可收缩；组按时间排序，最后推送通知的应用在最上。</li>
+  <li>每条消息：标题至多 1 行、正文至多 2 行，超出裁剪显示省略号；关闭按钮与标题同行置右。</li>
+  <li>顶部一键清理全部按钮，位于左上角。</li>
   <li>弹出触发、悬停查看全文与左键/中键行为见 <a href="README.html#界面交互">README.html「界面交互」</a>。</li>
 </ul>
 
