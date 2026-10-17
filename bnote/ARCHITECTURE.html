@@ -31,41 +31,43 @@
 
 <h3 id="sec-4-1">4.1. 宿主 API（Rust）</h3>
 <pre><code>impl Session {
-    pub fn start(conn: &amp;zbus::Connection, tx: Sender&lt;NoticeEvent&gt;,
+    pub async fn start(conn: &amp;zbus::Connection, tx: Sender&lt;NoticeEvent&gt;,
                  caps: Capabilities, info: ServerInfo)
-        -&gt; Result&lt;Rc&lt;Session&gt;, bnote::Error&gt;;     // 待实现，可以根据实际情况调整
+        -&gt; Result&lt;Rc&lt;Session&gt;, bnote::Error&gt;;
 }
 
 pub async fn close(conn: &amp;zbus::Connection, id: u32, reason: CloseReason)
-    -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整
+    -&gt; Result&lt;(), bnote::Error&gt;;
 
 pub async fn invoke_action(conn: &amp;zbus::Connection, id: u32, action_key: &amp;str)
-    -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整
+    -&gt; Result&lt;(), bnote::Error&gt;;
 
 pub async fn activation_token(conn: &amp;zbus::Connection, id: u32, token: &amp;str)
-    -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整</code></pre>
+    -&gt; Result&lt;(), bnote::Error&gt;;</code></pre>
 <ul class="note">
   <li><code>Session::start</code> 在总线上注册 <code>org.freedesktop.Notifications</code> 并常驻应答；能力与服务器信息由宿主声明，事件经 <code>tx</code> 流向宿主。</li>
+  <li><code>start</code> 为异步：对象注册与总线名申请都经由 zbus 的异步连接完成。</li>
+  <li>能力名须为字母数字与连字符，且 <code>icon-static</code> 与 <code>icon-multi</code> 互斥；不合法时 <code>start</code> 返回 <code>InvalidArgs</code>。</li>
   <li>三个回发函数对应规范的三个信号：关闭、动作已调用、激活令牌。</li>
 </ul>
 
 <h3 id="sec-4-2">4.2. 消息与应答</h3>
-<pre><code>pub enum NoticeEvent {          // 待实现，可以根据实际情况调整
+<pre><code>pub enum NoticeEvent {
     Notify { notice: Notice },
     Close { id: u32 },
 }
 
-pub enum CloseReason {          // 待实现，可以根据实际情况调整
+pub enum CloseReason {
     Expired,
     Dismissed,
     CloseRequest,
 }
 
-pub struct Capabilities {       // 待实现，可以根据实际情况调整
+pub struct Capabilities {
     pub entries: Vec&lt;String&gt;,
 }
 
-pub struct ServerInfo {         // 待实现，可以根据实际情况调整
+pub struct ServerInfo {
     pub name: String,
     pub vendor: String,
     pub version: String,
@@ -74,13 +76,13 @@ pub struct ServerInfo {         // 待实现，可以根据实际情况调整
 <table>
   <tr><th>消息</th><th>含义 / 宿主动作</th></tr>
   <tr><td><code>NoticeEvent::Notify</code></td><td>新通知或同 id 替换；宿主决定展示与生命周期</td></tr>
-  <tr><td><code>NoticeEvent::Close</code></td><td>客户端要求关闭指定通知；宿主移除后应调用 <code>close()</code> 回发原因 <code>CloseRequest</code></td></tr>
+  <tr><td><code>NoticeEvent::Close</code></td><td>客户端要求关闭指定通知；库会回发 <code>NotificationClosed</code>（原因 <code>CloseRequest</code>），宿主移除展示与缓存即可</td></tr>
   <tr><td><code>Capabilities</code></td><td><code>GetCapabilities</code> 应答；能力清单由宿主装配时声明</td></tr>
   <tr><td><code>ServerInfo</code></td><td><code>GetServerInformation</code> 应答</td></tr>
 </table>
 
 <h3 id="sec-4-3">4.3. 数据模型与转换</h3>
-<pre><code>pub struct Notice {             // 待实现，可以根据实际情况调整
+<pre><code>pub struct Notice {
     pub id: u32,
     pub app_name: String,
     pub icon: NoticeIcon,
@@ -96,12 +98,12 @@ pub struct Action { pub key: String, pub label: String }
 pub enum NoticeIcon { None, Name(String), Pixels { width: i32, height: i32, rgba: Vec&lt;u8&gt; } }</code></pre>
 <table>
   <tr><th>字段</th><th>定义</th><th>来源（规范转换）</th></tr>
-  <tr><td><code>id</code></td><td>通知唯一标识；0 表示由本库分配</td><td><code>replaces_id</code> 非 0 时沿用，否则新分配（规范 §Notify）</td></tr>
+  <tr><td><code>id</code></td><td>通知唯一标识（非 0）</td><td><code>replaces_id</code> 非 0 时沿用，否则由本库分配（规范 §9.1.2）</td></tr>
   <tr><td><code>app_name</code> / <code>summary</code> / <code>body</code></td><td>应用名 / 标题 / 正文</td><td><code>Notify</code> 同名参数原样</td></tr>
-  <tr><td><code>icon</code></td><td>图标三态：无 / 主题名 / 位图</td><td><code>app_icon</code> 参数与 hint <code>image-data</code> 系列合并归一</td></tr>
+  <tr><td><code>icon</code></td><td>图标三态：无 / 主题名或文件路径 / RGBA 位图</td><td><code>app_icon</code> 参数与 hint <code>image-data</code> 系列合并归一；位图统一为紧密排列的 RGBA8</td></tr>
   <tr><td><code>actions</code></td><td>键值对列表，键用于 <code>ActionInvoked</code> 回发</td><td><code>actions</code> 参数按（key, label）成对解析</td></tr>
   <tr><td><code>urgency</code></td><td>紧急度</td><td>hint <code>urgency</code>（byte 0/1/2）；缺省 Normal</td></tr>
-  <tr><td><code>expire_timeout_ms</code></td><td>请求的超时；<code>None</code>＝常驻（-1），0＝按宿主默认</td><td><code>expire_timeout</code> 参数归一</td></tr>
+  <tr><td><code>expire_timeout_ms</code></td><td>请求的超时；<code>None</code>＝客户端未指定（-1），由宿主决定；<code>Some(0)</code>＝常驻；<code>Some(ms)</code>＝毫秒</td><td><code>expire_timeout</code> 参数归一</td></tr>
 </table>
 <ul class="note">
   <li>协议原文细节以 <a href="reference/notification-spec.clean.html">reference/notification-spec.clean.html</a> 为唯一权威。</li>

@@ -1,5 +1,4 @@
-//! 交互式通知服务器测试器（随设计分支起草，API 契约见 ARCHITECTURE §4；
-//! 实现分支建 crate 后即可编译运行）。
+//! 交互式通知服务器测试器（API 契约见 ARCHITECTURE §4）。
 //!
 //! 以常驻 notification server 形式占用会话总线的 org.freedesktop.Notifications，
 //! stdout 打印全部库事件；stdin 命令驱动宿主侧行为，覆盖 bnote 的全部交互面：
@@ -13,7 +12,7 @@
 //!
 //! 外部客户端驱动示例：
 //!   notify-send [-u critical] [-r <replaces_id>] "标题" "正文"
-//!   dunstify -A "标签:键" "标题"      # 客户端阻塞等 ActionInvoked，本进程用 action 命令回发
+//!   dunstify -A "default,Open" "标题"      # 客户端阻塞等 ActionInvoked，本进程用 action 命令回发
 //!   gdbus call --session -d org.freedesktop.Notifications \
 //!     -o /org/freedesktop/Notifications \
 //!     -m org.freedesktop.Notifications.CloseNotification <id>
@@ -38,14 +37,22 @@ async fn main() -> Result<(), bnote::Error> {
     let mut name = "bnote-server".to_string();
     let mut vendor = "breadknife".to_string();
     let mut caps: Vec<String> = vec![
-        "actions".into(), "body".into(), "body-markup".into(), "icon-static".into(),
+        "actions".into(),
+        "body".into(),
+        "body-markup".into(),
+        "icon-static".into(),
     ];
     while let Some(a) = args.next() {
         match a.as_str() {
             "--name" => name = args.next().unwrap_or(name),
             "--vendor" => vendor = args.next().unwrap_or(vendor),
             "--caps" => {
-                caps = args.next().unwrap_or_default().split(',').map(str::to_string).collect()
+                caps = args
+                    .next()
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(str::to_string)
+                    .collect()
             }
             other => eprintln!("未知参数 {other}（支持 --name / --vendor / --caps）"),
         }
@@ -57,19 +64,25 @@ async fn main() -> Result<(), bnote::Error> {
         spec_version: "1.2".into(),
     };
 
-    let conn = zbus::Connection::session().await.map_err(bnote::Error::Bus)?;
+    let conn = zbus::Connection::session()
+        .await
+        .map_err(bnote::Error::Bus)?;
     let (etx, mut erx) = tokio::sync::mpsc::channel(16);
     let _session = Session::start(
         &conn,
         etx,
-        bnote::Capabilities { entries: caps.clone() },
+        bnote::Capabilities {
+            entries: caps.clone(),
+        },
         info.clone(),
-    )?;
+    )
+    .await?;
 
-    let (ctx, crx) = std::sync::mpsc::channel::<String>();
+    let (ctx, mut crx) = tokio::sync::mpsc::unbounded_channel::<String>();
     std::thread::spawn(move || {
         for line in std::io::stdin().lock().lines() {
-            if ctx.send(line.unwrap()).is_err() {
+            let Ok(line) = line else { break };
+            if ctx.send(line).is_err() {
                 break;
             }
         }
@@ -105,7 +118,8 @@ async fn main() -> Result<(), bnote::Error> {
                                 id, n.urgency, n.summary, n.body,
                                 if acts.is_empty() { "".into() } else { format!("动作{acts:?}") },
                                 match n.expire_timeout_ms {
-                                    None => "常驻".to_string(),
+                                    None => "宿主默认".to_string(),
+                                    Some(0) => "常驻".to_string(),
                                     Some(ms) => format!("超时 {ms}ms"),
                                 });
                         }
@@ -117,11 +131,13 @@ async fn main() -> Result<(), bnote::Error> {
                         do_close(&conn, &mut notices, id, parse_reason(reason)?).await?;
                     }
                     ["action", id, key] => {
-                        bnote::invoke_action(&conn, *id, key).await?;
+                        let id: u32 = id.parse().map_err(|_| bnote::Error::InvalidArgs("id 非数字".into()))?;
+                        bnote::invoke_action(&conn, id, key).await?;
                         println!("→ ActionInvoked #{id} {key}");
                     }
                     ["token", id, token] => {
-                        bnote::activation_token(&conn, *id, token).await?;
+                        let id: u32 = id.parse().map_err(|_| bnote::Error::InvalidArgs("id 非数字".into()))?;
+                        bnote::activation_token(&conn, id, token).await?;
                         println!("→ ActivationToken #{id} {token}");
                     }
                     ["info"] => {
@@ -140,18 +156,26 @@ async fn main() -> Result<(), bnote::Error> {
 }
 
 fn print_notice(n: &Notice) {
-    let acts: Vec<String> =
-        n.actions.iter().map(|a| format!("{}={}", a.key, a.label)).collect();
-    println!("← Notify #{} [{}]\n    应用：{}  图标：{:?}\n    标题：{}\n    正文：{}",
-        n.id, n.urgency, n.app_name, n.icon, n.summary, n.body);
+    let acts: Vec<String> = n
+        .actions
+        .iter()
+        .map(|a| format!("{}={}", a.key, a.label))
+        .collect();
+    println!(
+        "← Notify #{} [{}]\n    应用：{}  图标：{:?}\n    标题：{}\n    正文：{}",
+        n.id, n.urgency, n.app_name, n.icon, n.summary, n.body
+    );
     if !acts.is_empty() {
         println!("    动作：{acts:?}（回发：action {} <key>）", n.id);
     }
-    println!("    超时：{}",
+    println!(
+        "    超时：{}",
         match n.expire_timeout_ms {
-            None => "常驻".to_string(),
+            None => "宿主默认".to_string(),
+            Some(0) => "常驻".to_string(),
             Some(ms) => format!("{ms}ms"),
-        });
+        }
+    );
 }
 
 async fn do_close(
@@ -160,7 +184,9 @@ async fn do_close(
     id: &str,
     reason: CloseReason,
 ) -> Result<(), bnote::Error> {
-    let id: u32 = id.parse().map_err(|_| bnote::Error::InvalidArgs("id 非数字".into()))?;
+    let id: u32 = id
+        .parse()
+        .map_err(|_| bnote::Error::InvalidArgs("id 非数字".into()))?;
     bnote::close(conn, id, reason).await?;
     notices.remove(&id);
     println!("→ NotificationClosed #{id} ({reason})");

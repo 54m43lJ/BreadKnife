@@ -1,0 +1,13 @@
+[package]
+name = "bnote"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "org.freedesktop.Notifications protocol server for breadknife"
+
+[dependencies]
+tokio = { version = "1", default-features = false, features = ["sync"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
