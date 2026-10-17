@@ -147,7 +147,7 @@ footer {
 /* 任务栏条 */
 .mk-bar {
   background: #231F1F; border-bottom: 1px solid #9D7E4D; height: 30px;
-  border-radius: 4px 4px 0 0; display: flex; align-items: center;
+  display: flex; align-items: center;
   justify-content: space-between; padding: 0 8px; gap: 16px;
   font-family: "Noto Sans Mono", monospace; font-size: 12px; color: #D6CAB6;
 }
@@ -181,7 +181,7 @@ footer {
 }
 .mk-mrow.hi { background: #89338E; color: #FFF7E4; }
 .mk-mrow.dis { opacity: .45; }
-.mk-msep { height: 1px; background: #B0B4BC; margin: 3px 6px; }
+.mk-msep { height: 1px; background: #9D7E4D; margin: 3px 6px; }
 .mk-mi { width: 11px; height: 11px; border-radius: 3px; border: 1.6px solid currentColor; flex: none; }
 .mk-chk { width: 16px; text-align: center; font-size: 11px; color: #9D7E4D; }
 .mk-arr { margin-left: auto; font-size: 10px; opacity: .8; }
@@ -200,7 +200,7 @@ footer {
 
 /* 通知弹窗 */
 .mk-notif {
-  width: 300px; border-radius: 15px; border: 1px solid #B0B4BC;
+  width: 300px; border-radius: 15px; border: 1px solid #9D7E4D;
   background: #3E3542; color: #D6CAB6; padding: 10px 8px 12px;
   position: relative; font-size: 12px;
 }

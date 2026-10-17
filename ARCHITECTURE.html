@@ -26,6 +26,7 @@
   <li><strong>分层</strong>：bread daemon＝Model（无 GTK；信息源与全部映射的唯一持有者）；窗口进程＝View（GTK；只渲染与本地交互）。</li>
   <li><strong>操作执行原则</strong>：有副作用（有状态）的操作必走 daemon；不影响 daemon 追踪状态的操作允许（不强制）直通。</li>
   <li><strong>缺失降级</strong>：服务 / 后端缺失时——入口组件自动隐藏（如无电池设备的电池、服务缺席的网络），弹出面板内操作项灰置并提示。</li>
+  <li><strong>边框取色</strong>：所有边框与分隔线一律取 <code>gold</code>；无边框元素不受约束。</li>
 </ul>
 
 <h2 id="sec-3">3. 架构图</h2>
@@ -111,7 +112,7 @@
   </div>
 </div>
 <ul class="note">
-  <li>窗口高 30px，背景 <code>bg</code>，底边 1px <code>gold</code> 细线。</li>
+  <li>窗口高 30px、四角无圆角，背景 <code>bg</code>，底边 1px 细线。</li>
   <li>按钮：透明底、无边框、圆角 6px、padding 0；Hover 态填充 <code>surface</code>，文字色不变。</li>
   <li>内容布局为左（Workspace）—中（活动窗口标题）—右（托盘、控制中心入口）三区。</li>
 </ul>
@@ -141,7 +142,7 @@
 <h4 id="sec-3-10-3">3.10.3. 托盘与托盘菜单</h4>
 <div class="mk">
   <div class="mk-scene">
-    <div class="mk-bar" style="width:240px; border-radius:4px;">
+    <div class="mk-bar" style="width:240px">
       <div class="r">
         <div class="mk-tray">
           <div class="mk-tbtn"><svg width="15" height="15" viewBox="0 0 15 15"><path fill-rule="evenodd" fill="#1a1a1a" d="M7.5 1.5a6 6 0 1 0 0 12 6 6 0 0 0 0-12zm0 3.4a2.6 2.6 0 1 1 0 5.2 2.6 2.6 0 0 1 0-5.2z"/></svg></div>
@@ -164,7 +165,7 @@
   <li>图标按钮 22×22px、圆角 6px；失联图标置灰（不透明度 35%）。</li>
   <li>菜单容器圆角 8px、内边距 4px、无边框，以投影与任务栏分离；菜单行圆角 4px、水平内边距 10px、最小宽 120px。</li>
   <li>菜单文字取 <code>bg</code>；Hover 行 <code>purple</code> 填充配 <code>cream</code> 字；勾选标记 <code>gold</code>；子菜单箭头 <code>muted</code>；禁用行不透明度 45%。</li>
-  <li>分隔线 1px <code>muted</code>，上下边距 3px、水平边距 6px。</li>
+  <li>分隔线 1px，上下边距 3px、水平边距 6px。</li>
 </ul>
 
 <h4 id="sec-3-10-4">3.10.4. 控制中心</h4>
@@ -212,10 +213,10 @@
   </div>
 </div>
 <ul class="note">
-  <li>宽 300px，单条最高 400px；圆角 15px，边框 1px <code>muted</code>；内边距 12px／水平 8px。</li>
+  <li>宽 300px，单条最高 400px；圆角 15px，边框 1px；内边距 12px／水平 8px。</li>
   <li>图标左置 32px、按图标主题递归查找，图标与文字间距 16px。</li>
   <li>普通与低优先级：<code>surface</code> 底 <code>fg</code> 字，应用名弱文字 <code>gold</code>；紧急：<code>red</code> 底 <code>cream</code> 字。</li>
-  <li>多条自任务栏正下方纵向堆叠，条间分隔线 1px <code>muted</code>；同屏最多 10 条，超出显示隐藏计数。</li>
+  <li>多条自任务栏正下方纵向堆叠，条间分隔线 1px；同屏最多 10 条，超出显示隐藏计数。</li>
   <li>弹出位置、标题居中、关闭按钮与按键、超时行为见 <a href="README.html#界面交互">README.html「界面交互」</a>。</li>
 </ul>
 
