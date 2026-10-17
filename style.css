@@ -219,7 +219,8 @@ footer {
 
 /* 通知中心 */
 .mk-nc {
-  width: 480px; max-width: 100%; background: #231F1F; color: #D6CAB6;
+  width: 480px; max-width: 100%; margin: 2px auto 0;
+  background: #231F1F; color: #D6CAB6;
   border: 1px solid #9D7E4D; border-radius: 10px; padding: 4px; font-size: 12px;
 }
 .mk-nc-head { display: flex; justify-content: flex-end; padding: 0 0 8px; }
