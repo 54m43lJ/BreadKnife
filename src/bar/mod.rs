@@ -56,6 +56,8 @@ pub enum UiTask {
     TrayExpandDone { item: String, entry: i32, result: Result<wire::Response, String> },
     TrayActivateDone { item: String, result: Result<wire::Response, String> },
     TrayMenuReadDone { item: String, result: Result<wire::Response, String> },
+    /// 菜单跟踪悬停切换：token 为悬停驻留世代（过期回执丢弃）。
+    TrayHoverMenu { item: String, token: u64, result: Result<wire::Response, String> },
 }
 
 pub struct WindowApp {
@@ -165,6 +167,9 @@ impl WindowApp {
             }
             UiTask::TrayMenuReadDone { item, result } => {
                 self.tray.on_menu_read_done(&item, result)
+            }
+            UiTask::TrayHoverMenu { item, token, result } => {
+                self.tray.on_hover_menu_done(&item, token, result)
             }
         }
     }

@@ -159,6 +159,24 @@ impl TrayWidget {
             other => eprintln!("[tray] unexpected menu read reply: {other:?}"),
         }
     }
+
+    /// 悬停切换回执：世代未过期、仍有弹窗显示、且该 item 菜单尚未显示时才切换；
+    /// 读取失败或无可见条目（视作无菜单）保持现状。
+    pub fn on_hover_menu_done(&self, item: &str, token: u64, result: Result<Response, String>) {
+        if self.inner.popup.hover_generation() != token || !self.inner.popup.any_open() {
+            return;
+        }
+        if self.inner.menu_open_for(item) {
+            return;
+        }
+        let Ok(Response::Menu(snapshot)) = result else { return };
+        if !snapshot.items.iter().any(|m| m.visible) {
+            return;
+        }
+        if let Some(anchor) = self.inner.icons.borrow().get(item).cloned() {
+            show_menu(&self.inner, &anchor, item, snapshot);
+        }
+    }
 }
 
 // ── 图标增删改 ──
@@ -194,6 +212,24 @@ fn add_icon(inner: &Rc<TrayInner>, view: &TrayItemView) {
     }
 
     attach_gestures(inner, &button, &view.id);
+
+    // 菜单跟踪悬停切换（macOS 菜单栏式）：有弹窗显示时驻留即读该 item 菜单并替换
+    {
+        let inner2 = inner.clone();
+        let item = view.id.clone();
+        popup::hover_switch(&inner.popup, &button, move |token| {
+            if inner2.menu_open_for(&item) {
+                return; // 该项菜单已在显示
+            }
+            let ipc = inner2.ipc.clone();
+            let ui = inner2.ui.clone();
+            let item = item.clone();
+            std::thread::spawn(move || {
+                let result = ipc.request(Request::TrayMenuRead { item: item.clone() });
+                let _ = ui.send(UiTask::TrayHoverMenu { item, token, result });
+            });
+        });
+    }
 
     inner.container.append(&button);
     inner.icons.borrow_mut().insert(view.id.clone(), button);
