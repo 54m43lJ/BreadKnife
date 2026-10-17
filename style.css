@@ -215,14 +215,20 @@ footer {
 
 /* 通知中心 */
 .mk-nc {
-  width: 480px; max-width: 100%; background: #3E3542; color: #D6CAB6;
+  width: 480px; max-width: 100%; background: #231F1F; color: #D6CAB6;
   border: 1px solid #9D7E4D; border-radius: 10px; padding: 8px; font-size: 12px;
 }
-.mk-nc-head { display: flex; justify-content: flex-end; padding: 2px 4px 8px; }
-.mk-nc-clear { border: 1px solid #9D7E4D; border-radius: 6px; padding: 1px 8px; font-size: 11px; }
-.mk-nc-gh { font-weight: bold; padding: 4px 8px; }
+.mk-nc-head { display: flex; justify-content: flex-end; padding: 0 0 8px; }
+.mk-nc-clear { background: #D6CAB6; color: #231F1F; border-radius: 6px; padding: 2px 8px; font-size: 11px; }
+.mk-nc-gh {
+  background: #D6CAB6; color: #231F1F; border-radius: 6px;
+  font-weight: bold; padding: 3px 8px; margin: 4px 0;
+}
+.mk-nc-gh:first-of-type { margin-top: 0; }
 .mk-nc-gh .arr { font-size: 10px; margin-right: 6px; }
-.mk-nc-item { padding: 5px 8px 6px; border-bottom: 1px solid #9D7E4D; }
+.mk-nc-item {
+  background: #3E3542; border-radius: 8px; padding: 5px 8px 6px; margin-bottom: 4px;
+}
 .mk-nc-tr { display: flex; align-items: center; gap: 8px; }
 .mk-nc-t { font-weight: bold; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mk-nc-x { font-size: 12px; opacity: .7; flex: none; }
