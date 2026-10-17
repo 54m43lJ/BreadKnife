@@ -218,7 +218,7 @@ footer {
   width: 480px; max-width: 100%; background: #3E3542; color: #D6CAB6;
   border: 1px solid #9D7E4D; border-radius: 10px; padding: 8px; font-size: 12px;
 }
-.mk-nc-head { padding: 2px 4px 8px; }
+.mk-nc-head { display: flex; justify-content: flex-end; padding: 2px 4px 8px; }
 .mk-nc-clear { border: 1px solid #9D7E4D; border-radius: 6px; padding: 1px 8px; font-size: 11px; }
 .mk-nc-gh { font-weight: bold; padding: 4px 8px; }
 .mk-nc-gh .arr { font-size: 10px; margin-right: 6px; }
