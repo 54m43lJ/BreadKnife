@@ -23,7 +23,8 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        # 该仓库只发布完整版本号 tag（v10.3.0），不存在 v10 这种 major tag
+        uses: astral-sh/setup-uv@v10.3.0
 
       - name: Convert HTML to GFM
         run: |
