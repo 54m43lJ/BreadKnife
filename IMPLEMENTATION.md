@@ -183,39 +183,16 @@
 
 ## 13. 与 HTML 文档的对齐核对
 
-核对方式：以代码为权威逐条比对四份应用文档与 breadpan 成员文档；`✓` 为已对齐，`⚠` 为待更新（明细见 §13.1）。
+核对方式：以代码为权威逐条比对四份应用文档与 breadpan 成员文档；`✓` 为已对齐。
 
 | 文档 | 结论 | 说明 |
 |---|---|---|
 | README.html | ✓ 已对齐 | 界面交互表、工作区矩阵与三条说明、菜单交互三条说明、控制指令、个性化、运行管理、明确不做，全部与实现一致。 |
-| ARCHITECTURE.html | ✓ 已对齐 | §3.2–§3.10、§4.1–§4.5 与实现一致；§4.1 为契约子集，实现消费的事件为超集（另有 `activewindowv2` / `windowtitlev2` / `focusedmon` / `openwindow` / `closewindow` / `movewindow` 等触发重同步，不影响契约）；§4.4 线格式（4 字节长度 + JSON）为文档明示的实现细节。 |
-| CODE.html | ⚠ 部分对齐 | §1 文件树 ✓（仅缺 `src/tests.rs` 一行）；§2 为空 ✓（规约允许）；§3 多数条目仍是设计期草稿（带「待实现」标注，名称/签名与实现不同）；§4 流程骨架 ✓，若干调用的函数名与顺序与实现有差异。差异清单见 §13.1。 |
+| ARCHITECTURE.html | ✓ 已对齐 | §3.2–§3.10、§4.1–§4.5 与实现一致；§3.9 色板 14/14、§3.10 组件规格（栏高 / 按钮圆角 / 工作区尺寸 / 控制中心入口 / 滑块）逐项核对；§4.1 为契约子集，实现消费的事件为超集（另有 `activewindowv2` / `windowtitlev2` / `focusedmon` / `openwindow` / `closewindow` / `movewindow` 等触发重同步，不影响契约）；本次收尾据实现修正窗口退出与断连表述、补 `hello` 握手行；§4.4 线格式（4 字节长度 + JSON）为文档明示的实现细节。 |
+| CODE.html | ✓ 已对齐 | §1 文件树（含 `tests.rs`）、§3 各模块签名、§4 六条调用栈均已按代码回填；§2 为空，规约允许。 |
 | BUILD.html | ✓ 已对齐 | 依赖 / 编译与测试 / 运行 / 运行前提 / 调试要点与实现一致；原两处对 md 工作稿的引用已就地改写为自含表述（本次收尾）。 |
 | breadpan/README、ARCHITECTURE、CODE、BUILD | ✓ 抽检对齐 | CODE §3 文档化符号 18/18 均存在于源码；构建 / 测试命令与 CI 一致。本轮未做全文逐条复核（库文档在其自身交付线定稿）。 |
 | reference/ | — | 外部规范存档（Hyprland / SNI / 图标规范），非项目文档。 |
-
-### 13.1 CODE.html 待更新明细
-
-按文档规约（实现已存在 → 使用真实名称、去掉「待实现」标注），以下条目需要按代码回填：
-
-1. **§3.1 daemon/mod.rs**：实际入口 `pub fn run(control_path: &str) -> Result<(), String>`；`Daemon` 方法为 `run_loop` / `handle(DaemonEvent) -> bool` / `on_hyprland` / `resync` / `rebuild_workspace_slices` / `push_workspace_slices` / `spawn_window` / `kill_window` / `on_child_exited` / `on_tray` / `reread_tray_view` / `degrade_tray` / `on_window_request(u64, Request, Sender<Frame>)` / `exec_tray` / `on_control` / `open_windows` / `snapshot_for` / `push_to` / `broadcast` / `shutdown`。草稿中的 `start` / `on_hyprland_event` / `on_window_exit` / `push(window, …)` 不存在。
-2. **§3.2 daemon/hyprland.rs**：实际类型 `MonitorInfo` / `WorkspaceRef` / `WorkspaceInfo` / `WorkspaceRuleInfo` / `ClientInfo`；函数 `monitors` / `workspaces` / `clients` / `workspace_rules` / `rule_workspace` / `normalize_addr` / `workspace_of_client` / `dispatch_workspace(target)` / `watch(Sender<DaemonEvent>)`。草稿 `MonitorId(String)` 不存在；`HyprlandEvent` 变体为 `MonitorAdded/Removed`、`ActiveWindow{class,title}`、`ActiveWindowAddr`、`WindowTitle{addr,title}`、`Urgent{addr}`、`Resync`。
-3. **§3.3 daemon/notify.rs**：实际 `pub async fn serve(conn: &zbus::Connection, tx: Sender<DaemonEvent>) -> Result<(), zbus::Error>`。
-4. **§3.4 daemon/ipc.rs**：实际 `serve_control(path: &str, tx) -> io::Result<()>`、`serve_windows(path, tx) -> io::Result<()>`、`reply(out, id, Response)`、`push(out, Push)`、`hello_reply(out, id, WindowSnapshot)`。草稿 `IpcServer` / `listen` 不存在。
-5. **§3.5 bar/mod.rs**：实际 `pub fn run(monitor: &str, socket: &Path) -> Result<(), String>`；`WindowApp::create(app, monitor, socket) -> Result<Rc<Self>, String>`，另有 `handle_task` / `handle_push` / `apply_snapshot` 与 `UiTask` 枚举。草稿 `BarApp` 不存在。
-6. **§3.6 bar/ipc.rs**：实际 `IpcClient::connect(path, monitor, ui_tx) -> Result<Arc<Self>, String>`、`request(&self, Request) -> Result<Response, String>`；`daemon_alive()` 位于 `shared/protocol.rs`。
-7. **§3.7 bar/style.rs**：实际 `load(path: &str) -> Result<(), String>`、`reload(path: &str) -> Result<(), String>`（入参为 `&str`，错误为 `String`）。
-8. **§3.8 bar/modules/tray.rs**：实际 `TrayWidget::new(ipc: Arc<IpcClient>, ui: Sender<UiTask>, window: &gtk::Window, popup: Rc<PopupManager>) -> Self`，公开面为 `container` / `rebuild` / `apply` / `menu_changed` / `on_interact_done` / `on_expand_done` / `on_activate_done` / `on_menu_read_done` / `on_hover_menu_done`；`show_menu` 为内部函数。
-9. **§3.9 shared/protocol.rs**：消息类型之外新增 `Frame`（请求 / 应答 / 推送的统一帧）与 `ControlCommand`、线性编解码、路径与存活探测辅助；`Request` 实际含 `Hello`。消息语义仍以 ARCHITECTURE §4.4 为准。
-10. **§3.10 shared/model.rs**：实际 `WorkspaceState { id: i64, name: String, urgent, active, has_windows }`（草稿 `id: u32` 且缺 `name`）；`ActiveWindow { class, title }`；另有 `IconView`、`TrayItemView`、`MenuSnapshot` / `MenuItem` / `MenuItemType` / `ToggleType` / `ToggleState`、`SystemState` / `BatteryState` / `NetworkState` / `BluetoothState` / `VolumeState`、`NotificationRecord`、`WindowSnapshot`、`StateDelta`；草稿 `NotificationRecord::from` 不存在。
-11. **§4.1.1 启动**：实际顺序为 PID 文件 → `hyprland::watch` → `tray::start` → `serve_control` → `serve_windows` → `system::start` → `resync`（种入显示器并逐屏 spawn）→ 事件循环；草稿中的 `EventBus::start` / `ipc::listen` 名称不存在。
-12. **§4.1.2 窗口进程**：CSS 不在启动前加载，而是随首帧快照下发后加载；另有 UI 任务排空定时器（40ms）与 daemon 存活周期检查（2s）。
-13. **§4.2.1 / §4.2.2**：显示器增加 → `desired` 插入 + 重同步 spawn；快照在 `Hello` 握手后推送。`kill_window` 另有独立线程收割子进程。
-14. **§4.2.3**：实际为「请求失败 → 重连一次重试；daemon 存活由 2s 周期检查判定」；互动失败并非唯一触发点。
-15. **§4.2.4**：实际重启策略为 60s 内最多 5 次、每次延时 1s，超限放弃并移出 `desired`。
-16. **§4.3 控制指令**：`open` / `close` 只操作 `desired`；`reload` 广播 `Push::Reload`；`exit` 终止窗口 + `TrayHandle::shutdown()` + 删除运行时文件后退出。
-17. **§4.4 托盘右键**：实际还包含左键/中键/四向滚轮接线；菜单展开为 `TrayMenuExpand`、激活为 `TrayMenuActivate`、刷新为 `MenuChanged` → 根层重取；菜单为自绘 popover（含子层嵌套与悬停跟踪）。
-18. **§4.5 通知到达**：同 ID 更新、异 ID 入队、上限 50 条，然后广播；窗口列表保留 20 条。
 
 ## 14. 验证状态与已知边界
 

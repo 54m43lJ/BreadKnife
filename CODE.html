@@ -19,24 +19,25 @@
     ├── daemon/           # bread daemon（Model，无 GTK）
     │   ├── <a href="#sec-3-daemon-mod">mod.rs</a>        # 装配与事件循环；停机
     │   ├── <a href="#sec-3-hyprland">hyprland.rs</a>   # Hyprland IPC 只读监听：显示器 / 工作区 / 活动窗口
-    │   ├── tray.rs       # breadpan 组装（Tray::start）+ 事件泵 + 交互执行 + 菜单读取
-    │   ├── system.rs     # UPower / NetworkManager / MPRIS；pamixer / brightnessctl / ddcutil
+    │   ├── <a href="#sec-3-daemon-tray">tray.rs</a>       # breadpan 组装（Tray::start）+ 事件泵 + 交互执行 + 菜单读取
+    │   ├── <a href="#sec-3-system">system.rs</a>     # UPower / NetworkManager / MPRIS；pamixer / brightnessctl / ddcutil
     │   ├── <a href="#sec-3-notify">notify.rs</a>     # org.freedesktop.Notifications 实现（通知守护角色）
-    │   ├── windows.rs    # 窗口进程生命周期（spawn / kill / 崩溃重启）；显示器 → 窗口映射
+    │   ├── <a href="#sec-3-windows">windows.rs</a>    # 窗口进程生命周期（spawn / kill / 崩溃重启）；显示器 → 窗口映射
     │   └── <a href="#sec-3-daemon-ipc">ipc.rs</a>        # Unix socket 服务端：请求应答 + 状态推送
     ├── bar/              # bar 窗口进程（View，GTK4）
     │   ├── <a href="#sec-3-bar-mod">mod.rs</a>        # 装配与 GTK 主循环；层壳窗口实例；数据分发（喂给对应模块）
     │   ├── <a href="#sec-3-bar-ipc">ipc.rs</a>        # IPC 客户端：快照 / 推送订阅、请求投递
     │   ├── <a href="#sec-3-style">style.rs</a>      # 按 daemon 跟踪的路径加载 CSS；reload 重读
     │   └── modules/
-    │       ├── workspace.rs    # 工作区条（渲染 + 手势捕获）
-    │       ├── window_info.rs  # 活动窗口图标 / 标题 + 通知中心弹窗
-    │       ├── popup.rs        # 弹窗会话：grab 弹窗统一托管（根窗口 / 上级弹窗定位 · 任务栏内捕获关闭 · Escape / toggle）
+    │       ├── <a href="#sec-3-workspace">workspace.rs</a>    # 工作区条（渲染 + 手势捕获）
+    │       ├── <a href="#sec-3-window-info">window_info.rs</a>  # 活动窗口图标 / 标题 + 通知中心弹窗
+    │       ├── <a href="#sec-3-popup">popup.rs</a>        # 弹窗会话：grab 弹窗统一托管（根窗口 / 上级弹窗定位 · 任务栏内捕获关闭 · Escape / toggle）
     │       ├── <a href="#sec-3-tray">tray.rs</a>         # 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）
-    │       └── center.rs       # 控制中心入口与弹出面板
+    │       └── <a href="#sec-3-center">center.rs</a>       # 控制中心入口与弹出面板
     ├── shared/           # daemon / 窗口共用
     │   ├── <a href="#sec-3-protocol">protocol.rs</a>   # IPC 消息类型（请求 / 应答 / 推送）
     │   └── <a href="#sec-3-model">model.rs</a>      # 共享数据模型（窗口切片、状态增量）
+    ├── tests.rs          # 单元测试：协议回环 / 控制行解析 / 存活探测
     └── assets/
         └── bread.css     # 默认主题（变量定义）</code></pre>
 <ul class="note">
@@ -49,150 +50,470 @@
 <h2 id="sec-3">3. 内部类型与方法签名</h2>
 <ul class="note">
   <li>收录标准：只列关键内部类型与方法；条目只承载签名与一行用途，方法内部步骤归 <a href="#sec-4">§4</a> 调用栈，未列出者皆为局部实现细节；</li>
-  <li>标注 <code>//见 ARCHITECTURE …</code> 的条目为架构文档已定义符号的统一引用格式（Hyprland 事件 §4.1、控制指令 §4.2、IPC 消息 §4.4、数据模型 §4.5）；其余为 Rust 形体签名；无实现参考的草稿签名以注释标注「待实现，可以根据实际情况调整」。</li>
+  <li>标注 <code>//见 ARCHITECTURE …</code> 的条目为架构文档已定义语义的统一引用格式；其余为与实现同步的 Rust 形体签名。模型字段语义以 <a href="ARCHITECTURE.html#sec-4-5">ARCHITECTURE §4.5</a> 为契约。</li>
 </ul>
 
 <h3 id="sec-3-daemon-mod">3.1. daemon/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct Daemon { /* Hyprland 连接、breadpan 句柄、系统服务、窗口表、IPC 服务端 */ }
-pub struct WindowId;
+<pre><code>pub fn run(control_path: &amp;str) -&gt; Result&lt;(), String&gt;;
+
+pub struct Daemon { /* 事件通道、breadpan 句柄、系统状态、窗口表、显示器 / 工作区映射 */ }
+
+pub enum DaemonEvent {
+    Hyprland(hyprland::HyprlandEvent),
+    Tray(TrayEvent),
+    WindowMessage { id: u64, request: Request, out: Sender&lt;Frame&gt; },
+    Control(ControlCommand),
+    System(SystemState),
+    Notification(NotificationRecord),
+    ChildExited { monitor: String },
+    TrayView { id: String, view: TrayItemView },
+    TrayViewGone { id: String },
+}
+
 impl Daemon {
-    pub fn start() -&gt; Result&lt;Self, Error&gt;;
-    pub fn run(self) -&gt; Result&lt;(), Error&gt;;              // 事件循环（Hyprland / DBus / 托盘 / IPC）
-    pub fn on_control(&amp;mut self, cmd: ControlCommand);  // 待实现，可以根据实际情况调整
-    fn on_hyprland_event(&amp;mut self, ev: HyprlandEvent); // 待实现，可以根据实际情况调整
-    fn spawn_window(&amp;mut self, monitor: &amp;str);          // 待实现，可以根据实际情况调整
-    fn kill_window(&amp;mut self, monitor: &amp;str);           // 待实现，可以根据实际情况调整
-    fn on_window_exit(&amp;mut self, monitor: &amp;str);        // 待实现，可以根据实际情况调整
-    fn push(&amp;self, window: WindowId, msg: Push);        // 待实现，可以根据实际情况调整（定向推送）
-    fn broadcast(&amp;self, msg: Push);                     // 待实现，可以根据实际情况调整（全窗口推送）
+    fn run_loop(&amp;mut self);                                  // 事件循环；滴答超时档兼作重同步去抖窗口
+    fn handle(&amp;mut self, ev: DaemonEvent) -&gt; bool;           // false = 退出循环
+    fn on_hyprland(&amp;mut self, ev: hyprland::HyprlandEvent);
+    fn resync(&amp;mut self);                                    // 全量重读 + 窗口进程对齐 + 切片推送
+    fn rebuild_workspace_slices(&amp;mut self);
+    fn push_workspace_slices(&amp;mut self);
+    fn spawn_window(&amp;mut self, monitor: &amp;str);
+    fn kill_window(&amp;mut self, monitor: &amp;str);
+    fn on_child_exited(&amp;mut self, monitor: String);
+    fn on_tray(&amp;mut self, ev: TrayEvent);
+    fn reread_tray_view(&amp;mut self, id: String);              // 独立线程现场重读
+    fn degrade_tray(&amp;mut self);
+    fn on_window_request(&amp;mut self, id: u64, request: Request, out: Sender&lt;Frame&gt;);
+    fn exec_tray(&amp;self, out: &amp;Sender&lt;Frame&gt;, id: u64,
+                 f: impl FnOnce(&amp;TrayHandle) -&gt; Response + Send + 'static);
+    fn on_control(&amp;mut self, cmd: ControlCommand);
+    fn open_windows(&amp;mut self, name: String, monitor: Option&lt;String&gt;);
+    fn snapshot_for(&amp;self, monitor: &amp;str) -&gt; WindowSnapshot;
+    fn push_to(&amp;self, monitor: &amp;str, push: Push);
+    fn broadcast(&amp;self, push: Push);
+    fn shutdown(&amp;mut self);
 }
 
 pub enum ControlCommand;     //见 ARCHITECTURE §4.2</code></pre>
 
 <h3 id="sec-3-hyprland">3.2. daemon/hyprland.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct MonitorId(String);
-pub enum HyprlandEvent;     //见 ARCHITECTURE §4.1
+<pre><code>pub struct MonitorInfo { pub name: String, pub active_ws: Option&lt;WorkspaceRef&gt; }
+pub struct WorkspaceRef { pub id: i64 }
+pub struct WorkspaceInfo { pub id: i64, pub name: String, pub monitor: String, pub windows: u64 }
+pub struct WorkspaceRuleInfo { pub workspace_string: String, pub enabled: bool, pub monitor: String }
+pub struct ClientInfo { pub address: String, pub workspace: WorkspaceRef }
 
-pub fn monitors() -&gt; Vec&lt;MonitorId&gt;;    // 待实现，可以根据实际情况调整</code></pre>
+pub fn monitors() -&gt; Vec&lt;MonitorInfo&gt;;
+pub fn workspaces() -&gt; Vec&lt;WorkspaceInfo&gt;;
+pub fn clients() -&gt; Vec&lt;ClientInfo&gt;;
+pub fn workspace_rules() -&gt; Vec&lt;WorkspaceRuleInfo&gt;;
+pub fn rule_workspace(rule: &amp;WorkspaceRuleInfo) -&gt; Option&lt;(String, Option&lt;i64&gt;)&gt;;   // 静态选择器 → (名称, id 提示)
+pub fn normalize_addr(addr: &amp;str) -&gt; String;                                      // 去 0x 前缀、小写
+pub fn workspace_of_client(address: &amp;str) -&gt; Option&lt;i64&gt;;
+pub fn dispatch_workspace(target: &amp;str);                                          // Lua dispatch → 经典语法回退
+pub fn watch(tx: Sender&lt;DaemonEvent&gt;);                                            // socket2 只读监听线程
 
-<h3 id="sec-3-notify">3.3. daemon/notify.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub fn serve(conn: &amp;zbus::Connection) -&gt; Result&lt;(), Error&gt;;    // 待实现，可以根据实际情况调整</code></pre>
+pub enum HyprlandEvent {     //见 ARCHITECTURE §4.1
+    MonitorAdded(String),
+    MonitorRemoved(String),
+    ActiveWindow { class: String, title: String },
+    ActiveWindowAddr(String),
+    WindowTitle { addr: String, title: String },
+    Urgent { addr: String },
+    Resync,
+}</code></pre>
 
-<h3 id="sec-3-daemon-ipc">3.4. daemon/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct IpcServer;
-pub fn listen(path: &amp;Path) -&gt; Result&lt;IpcServer, Error&gt;;    // 待实现，可以根据实际情况调整</code></pre>
+<h3 id="sec-3-daemon-tray">3.3. daemon/tray.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn start(tx: Sender&lt;DaemonEvent&gt;) -&gt; Option&lt;TrayHandle&gt;;    // 进程级组装一次；失败降级空托盘
 
-<h3 id="sec-3-bar-mod">3.5. bar/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct WindowApp { /* IPC 客户端、层壳窗口、模块集 */ }
-impl WindowApp {
-    pub fn run(monitor: &amp;str) -&gt; Result&lt;(), Error&gt;;               // 连接 IPC → 取快照 → GTK 主循环
-    fn request(&amp;self, req: Request) -&gt; Result&lt;Response, Error&gt;;   // 待实现，可以根据实际情况调整
+pub fn view_of(item: TrayItem) -&gt; TrayItemView;
+pub fn outcome_of(outcome: breadpan::InteractionOutcome) -&gt; InteractionOutcome;
+
+pub fn interact(handle: &amp;TrayHandle, item: &amp;str, input: &amp;InteractInput)
+    -&gt; Result&lt;InteractionOutcome, breadpan::TrayError&gt;;
+pub fn menu_read(handle: &amp;TrayHandle, item: &amp;str)
+    -&gt; Result&lt;MenuSnapshot, breadpan::TrayError&gt;;
+pub fn menu_expand(handle: &amp;TrayHandle, item: &amp;str, entry: i32)
+    -&gt; Result&lt;MenuSnapshot, breadpan::TrayError&gt;;
+pub fn menu_activate(handle: &amp;TrayHandle, item: &amp;str, entry: i32)
+    -&gt; Result&lt;InteractionOutcome, breadpan::TrayError&gt;;</code></pre>
+
+<h3 id="sec-3-system">3.4. daemon/system.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn start(tx: Sender&lt;DaemonEvent&gt;);    // UPower / NetworkManager / BlueZ / MPRIS 订阅
+pub fn media_control(op: MediaOp);        // MPRIS 操作（阻塞调用线程）
+pub fn set_volume(value: u32);            // pamixer
+pub fn set_brightness(value: u32);        // brightnessctl / ddcutil</code></pre>
+
+<h3 id="sec-3-notify">3.5. daemon/notify.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub async fn serve(conn: &amp;zbus::Connection, tx: Sender&lt;DaemonEvent&gt;) -&gt; Result&lt;(), zbus::Error&gt;;</code></pre>
+
+<h3 id="sec-3-windows">3.6. daemon/windows.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct WindowProc {
+    pub child: std::process::Child,
+    pub out: Option&lt;Sender&lt;Frame&gt;&gt;,    // Hello 后登记的推送通道；None = 未接入 / 已断开
+    pub killing: bool,
+    pub started: Instant,
 }
 
-pub struct BarApp;                                       // 层壳窗口与模块装配（沿用 main 同名方法）
-impl BarApp {
-    pub fn create(app: &amp;Application, monitor: &amp;str, ipc: IpcClient) -&gt; Self;
-    fn build_modules(window: &amp;Window);                   // 待实现，可以根据实际情况调整
+pub fn spawn(tx: &amp;Sender&lt;DaemonEvent&gt;, monitor: &amp;str, window_socket: &amp;str) -&gt; Option&lt;WindowProc&gt;;</code></pre>
+
+<h3 id="sec-3-daemon-ipc">3.7. daemon/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn serve_control(path: &amp;str, tx: Sender&lt;DaemonEvent&gt;) -&gt; std::io::Result&lt;()&gt;;
+pub fn serve_windows(path: &amp;str, tx: Sender&lt;DaemonEvent&gt;) -&gt; std::io::Result&lt;()&gt;;
+
+pub fn reply(out: &amp;Sender&lt;Frame&gt;, id: u64, response: Response);
+pub fn push(out: &amp;Sender&lt;Frame&gt;, push: Push);
+pub fn hello_reply(out: &amp;Sender&lt;Frame&gt;, id: u64, snapshot: WindowSnapshot);    // 先快照推送、后应答</code></pre>
+
+<h3 id="sec-3-bar-mod">3.8. bar/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn run(monitor: &amp;str, socket: &amp;Path) -&gt; Result&lt;(), String&gt;;
+
+pub struct WindowApp { /* GTK 应用、IPC 客户端、四个模块 */ }
+
+pub enum UiTask {
+    Push(Push),
+    TrayInteractDone { item: String, result: Result&lt;Response, String&gt; },
+    TrayExpandDone { item: String, entry: i32, result: Result&lt;Response, String&gt; },
+    TrayActivateDone { item: String, result: Result&lt;Response, String&gt; },
+    TrayMenuReadDone { item: String, result: Result&lt;Response, String&gt; },
+    TrayHoverMenu { item: String, token: u64, result: Result&lt;Response, String&gt; },
+}
+
+impl WindowApp {
+    pub fn create(app: &amp;Application, monitor: &amp;str, socket: &amp;Path) -&gt; Result&lt;Rc&lt;Self&gt;, String&gt;;
+    fn handle_task(&amp;self, task: UiTask);
+    fn handle_push(&amp;self, push: Push);
+    fn apply_snapshot(&amp;self, snapshot: &amp;WindowSnapshot);
 }</code></pre>
 
-<h3 id="sec-3-bar-ipc">3.6. bar/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct IpcClient;
-pub fn connect(path: &amp;Path) -&gt; Result&lt;IpcClient, Error&gt;;    // 待实现，可以根据实际情况调整
-pub fn daemon_alive() -&gt; bool;                             // 待实现，可以根据实际情况调整（读 PID 文件探测 daemon 进程）</code></pre>
+<h3 id="sec-3-bar-ipc">3.9. bar/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct IpcClient { /* 连接、请求 id、等待者表、UI 队列 */ }
 
-<h3 id="sec-3-style">3.7. bar/style.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub fn load(path: &amp;Path) -&gt; Result&lt;(), Error&gt;;             // 待实现，可以根据实际情况调整</code></pre>
+impl IpcClient {
+    pub fn connect(path: &amp;Path, monitor: &amp;str, ui_tx: Sender&lt;UiTask&gt;) -&gt; Result&lt;Arc&lt;Self&gt;, String&gt;;
+    pub fn request(&amp;self, request: Request) -&gt; Result&lt;Response, String&gt;;    // 阻塞；失败重连一次重试
+}</code></pre>
 
-<h3 id="sec-3-tray">3.8. bar/modules/tray.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct TrayWidget;                                     // 待实现，可以根据实际情况调整
+<h3 id="sec-3-style">3.10. bar/style.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn load(path: &amp;str) -&gt; Result&lt;(), String&gt;;
+pub fn reload(path: &amp;str) -&gt; Result&lt;(), String&gt;;</code></pre>
+
+<h3 id="sec-3-workspace">3.11. bar/modules/workspace.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct WorkspaceWidget { pub container: gtk::Box, /* IPC、按钮表 */ }
+
+impl WorkspaceWidget {
+    pub fn new(ipc: Arc&lt;IpcClient&gt;) -&gt; Self;
+    pub fn rebuild(&amp;self, states: &amp;[WorkspaceState]);
+}</code></pre>
+
+<h3 id="sec-3-window-info">3.12. bar/modules/window_info.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct WindowInfoWidget { pub container: gtk::Box, /* 图标、标题、通知列表 */ }
+
+impl WindowInfoWidget {
+    pub fn new(window: &amp;gtk::Window, popup: Rc&lt;PopupManager&gt;) -&gt; Self;
+    pub fn set_active(&amp;self, active: &amp;ActiveWindow);
+    pub fn notify(&amp;self, record: NotificationRecord);
+}</code></pre>
+
+<h3 id="sec-3-popup">3.13. bar/modules/popup.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct PopupManager { /* 打开表、按下关闭记录、悬停锚点与轮询状态 */ }
+
+impl PopupManager {
+    pub fn install(window: &amp;gtk::Window) -&gt; Rc&lt;Self&gt;;
+    pub fn manage(self: &amp;Rc&lt;Self&gt;, popover: &amp;gtk::Popover);
+    pub fn open(self: &amp;Rc&lt;Self&gt;, popover: &amp;gtk::Popover, group: String);
+    pub fn close_group(&amp;self, group: &amp;str);
+    pub fn close_prefix(&amp;self, prefix: &amp;str);
+    pub fn close_all(&amp;self) -&gt; bool;
+    pub fn press_closed_contains(&amp;self, group: &amp;str) -&gt; bool;
+    pub fn any_open(&amp;self) -&gt; bool;
+    pub fn hover_generation(&amp;self) -&gt; u64;
+}
+
+pub fn attach(popover: &amp;gtk::Popover, parent: &amp;impl IsA&lt;gtk::Widget&gt;,
+              position: gtk::PositionType, halign: gtk::Align, valign: gtk::Align);
+pub fn point_at(popover: &amp;gtk::Popover, parent: &amp;impl IsA&lt;gtk::Widget&gt;,
+                anchor: &amp;impl IsA&lt;gtk::Widget&gt;);
+pub fn point_at_expanded(popover: &amp;gtk::Popover, parent: &amp;impl IsA&lt;gtk::Widget&gt;,
+                         anchor: &amp;impl IsA&lt;gtk::Widget&gt;, expand_x: f64);
+pub fn hover_switch&lt;F: Fn(u64) + 'static&gt;(manager: &amp;Rc&lt;PopupManager&gt;,
+                                          anchor: &amp;impl IsA&lt;gtk::Widget&gt;, switch: F);</code></pre>
+
+<h3 id="sec-3-tray">3.14. bar/modules/tray.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct TrayWidget { /* 图标容器、菜单会话、IPC、UI 队列、弹窗管理器 */ }
+
 impl TrayWidget {
-    pub fn new(ipc: IpcClient) -&gt; Self;                    // 待实现，可以根据实际情况调整
-    pub fn show_menu(&amp;self, snapshot: &amp;MenuSnapshot);      // 待实现，可以根据实际情况调整
+    pub fn new(ipc: Arc&lt;IpcClient&gt;, ui: Sender&lt;UiTask&gt;,
+               window: &amp;gtk::Window, popup: Rc&lt;PopupManager&gt;) -&gt; Self;
+    pub fn container(&amp;self) -&gt; gtk::Box;
+    pub fn rebuild(&amp;self, views: &amp;[TrayItemView]);
+    pub fn apply(&amp;self, update: TrayUpdate);
+    pub fn menu_changed(&amp;self, item: &amp;str);
+    pub fn on_interact_done(&amp;self, item: &amp;str, result: Result&lt;Response, String&gt;);
+    pub fn on_expand_done(&amp;self, item: &amp;str, entry: i32, result: Result&lt;Response, String&gt;);
+    pub fn on_activate_done(&amp;self, item: &amp;str, result: Result&lt;Response, String&gt;);
+    pub fn on_menu_read_done(&amp;self, item: &amp;str, result: Result&lt;Response, String&gt;);
+    pub fn on_hover_menu_done(&amp;self, item: &amp;str, token: u64, result: Result&lt;Response, String&gt;);
 }</code></pre>
 
-<h3 id="sec-3-protocol">3.9. shared/protocol.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub enum InteractInput;    //见 ARCHITECTURE §4.4
-pub enum MediaOp;          //见 ARCHITECTURE §4.4
+<h3 id="sec-3-center">3.15. bar/modules/center.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct CenterWidget { pub container: gtk::Box, /* 状态标签、滑块、弹出面板 */ }
 
-pub enum Request;          //见 ARCHITECTURE §4.4
-pub enum Response;         //见 ARCHITECTURE §4.4
-pub enum Push;             //见 ARCHITECTURE §4.4</code></pre>
+impl CenterWidget {
+    pub fn new(ipc: Arc&lt;IpcClient&gt;, window: &amp;gtk::Window, popup: Rc&lt;PopupManager&gt;) -&gt; Self;
+    pub fn set_system(&amp;self, system: &amp;SystemState);
+}</code></pre>
 
-<h3 id="sec-3-model">3.10. shared/model.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct WindowSnapshot;        //见 ARCHITECTURE §4.5
-pub struct WorkspaceState { id: u32, urgent: bool, active: bool, has_windows: bool }    // 形态见 README「界面交互」；色彩映射见 ARCHITECTURE §3.10
-pub struct ActiveWindow { class: String, title: String }
-pub struct StateDelta;            //见 ARCHITECTURE §4.4
-pub struct TrayUpdate;            //见 ARCHITECTURE §4.4
-pub struct NotificationRecord;    //见 ARCHITECTURE §4.5
-impl NotificationRecord {
-    pub fn from(args: NotifyArgs) -&gt; Self;    // 待实现，可以根据实际情况调整
+<h3 id="sec-3-protocol">3.16. shared/protocol.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub enum InteractInput {
+    Left { x: i32, y: i32 },
+    Middle { x: i32, y: i32 },
+    Right { x: i32, y: i32 },
+    ScrollUp { steps: i32 },
+    ScrollDown { steps: i32 },
+    ScrollLeft { steps: i32 },
+    ScrollRight { steps: i32 },
+}
+
+pub enum MediaOp { PlayPause, Next, Prev }
+
+pub enum Request {              //见 ARCHITECTURE §4.4
+    Hello { monitor: String },
+    TrayInteract { item: String, input: InteractInput },
+    TrayMenuRead { item: String },
+    TrayMenuExpand { item: String, entry: i32 },
+    TrayMenuActivate { item: String, entry: i32 },
+    WorkspaceSwitch { target: String },
+    MediaControl { op: MediaOp },
+    VolumeSet { value: u32 },
+    BrightnessSet { value: u32 },
+}
+
+pub enum Response {             //见 ARCHITECTURE §4.4
+    Ok,
+    Menu(MenuSnapshot),
+    Outcome(InteractionOutcome),
+    Error(String),
+}
+
+pub enum Push {                 //见 ARCHITECTURE §4.4
+    Snapshot(WindowSnapshot),
+    State(StateDelta),
+    Tray(TrayUpdate),
+    MenuChanged { item: String },
+    Notification(NotificationRecord),
+    Reload,
+}
+
+pub enum ControlCommand {       //见 ARCHITECTURE §4.2
+    Open { name: String, monitor: Option&lt;String&gt; },
+    Close { name: String, monitor: Option&lt;String&gt; },
+    OpenAll,
+    CloseAll,
+    Exit,
+    Reload,
+}
+
+pub enum Frame {
+    Request { id: u64, request: Request },
+    Response { id: u64, response: Response },
+    Push { push: Push },
+}
+
+pub fn write_frame(stream: &amp;mut UnixStream, frame: &amp;Frame) -&gt; io::Result&lt;()&gt;;
+pub fn read_frame(stream: &amp;mut UnixStream) -&gt; io::Result&lt;Frame&gt;;
+
+pub fn runtime_dir() -&gt; PathBuf;
+pub fn default_control_socket() -&gt; PathBuf;
+pub fn window_socket_for(control: &amp;Path) -&gt; PathBuf;
+pub fn pid_file() -&gt; PathBuf;
+pub fn daemon_alive() -&gt; bool;
+pub fn parse_control_line(line: &amp;str) -&gt; Option&lt;ControlCommand&gt;;</code></pre>
+
+<h3 id="sec-3-model">3.17. shared/model.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct WorkspaceState {     // 形态见 README「界面交互」；色彩映射见 ARCHITECTURE §3.10
+    pub id: i64,
+    pub name: String,
+    pub urgent: bool,
+    pub active: bool,
+    pub has_windows: bool,
+}
+
+pub struct ActiveWindow { pub class: String, pub title: String }
+
+pub enum IconView {
+    Name(String),
+    Path(String),
+    Pixmap { width: u32, height: u32, argb: Vec&lt;u8&gt; },
+}
+
+pub struct TrayItemView {
+    pub id: String,
+    pub title: Option&lt;String&gt;,
+    pub tooltip: Option&lt;String&gt;,
+    pub icon: IconView,
+    pub attention: bool,
+    pub alive: bool,
+    pub has_menu: bool,
+}
+
+pub enum TrayUpdate {
+    Added(TrayItemView),
+    Removed(String),
+    Changed(TrayItemView),
+}
+
+pub struct MenuSnapshot { pub parent_id: i32, pub revision: u32, pub items: Vec&lt;MenuItem&gt; }
+
+pub struct MenuItem {
+    pub id: i32,
+    pub item_type: MenuItemType,
+    pub label: String,
+    pub raw_label: String,
+    pub enabled: bool,
+    pub visible: bool,
+    pub children_display: bool,
+    pub toggle_type: Option&lt;ToggleType&gt;,
+    pub toggle_state: Option&lt;ToggleState&gt;,
+    pub icon_name: Option&lt;String&gt;,
+    pub icon_data: Option&lt;Vec&lt;u8&gt;&gt;,
+}
+
+pub enum MenuItemType { Standard, Separator }
+pub enum ToggleType { Checkmark, Radio }
+pub enum ToggleState { Off, On, Indeterminate }
+pub enum InteractionOutcome { Dispatched, Menu(MenuSnapshot) }
+
+pub struct SystemState {
+    pub battery: Option&lt;BatteryState&gt;,
+    pub network: Option&lt;NetworkState&gt;,
+    pub bluetooth: Option&lt;BluetoothState&gt;,
+    pub volume: Option&lt;VolumeState&gt;,
+    pub brightness: Option&lt;u32&gt;,
+}
+
+pub struct BatteryState { pub percent: u32, pub charging: bool }
+pub struct NetworkState { pub kind: String, pub connected: bool }
+pub struct BluetoothState { pub powered: bool, pub connected: u32 }
+pub struct VolumeState { pub percent: u32, pub muted: bool }
+
+pub struct NotificationRecord {
+    pub id: u32,
+    pub app_name: String,
+    pub icon: String,
+    pub summary: String,
+    pub body: String,
+}
+
+pub struct WindowSnapshot {     //见 ARCHITECTURE §4.5
+    pub monitor: String,
+    pub workspaces: Vec&lt;WorkspaceState&gt;,
+    pub active: ActiveWindow,
+    pub tray: Vec&lt;TrayItemView&gt;,
+    pub notifications: Vec&lt;NotificationRecord&gt;,
+    pub system: SystemState,
+    pub css_path: String,
+}
+
+pub struct StateDelta {         //见 ARCHITECTURE §4.4
+    pub workspaces: Option&lt;Vec&lt;WorkspaceState&gt;&gt;,
+    pub active: Option&lt;ActiveWindow&gt;,
+    pub system: Option&lt;SystemState&gt;,
 }</code></pre>
 
 <h2 id="sec-4">4. 关键流程调用栈（伪码）</h2>
 
 <h3 id="sec-4-1">4.1. 启动</h3>
 <h4 id="sec-4-1-1">4.1.1. daemon</h4>
-<pre><code>启动（bread [daemon]）
-├── notify::serve(conn)（通知守护注册）
-├── EventBus::start()（.socket2.sock 只读监听）
-├── Tray::start(config) → (handle, 事件通道)（登记中心就位 + 存量 Item 反向发现）
-├── ipc::listen(path)（Unix socket）
-├── hyprland::monitors()（显示器清单）
-├── 对每台显示器
-│    ├── spawn_window(mon)
-│    └── push(window, snapshot)（接入后首连全量）
-└── run()（事件循环）</code></pre>
+<pre><code>启动（bread / bread daemon → __daemon）
+├── protocol::pid_file() 校验（存活则拒绝）并写入自身 PID
+├── hyprland::watch(tx)（socket2 只读监听线程）
+├── tray::start(tx)（breadpan 组装；失败降级 None）
+├── ipc::serve_control(control_path, tx)
+├── ipc::serve_windows(window_path, tx)
+├── system::start(tx)（UPower / NetworkManager / BlueZ / MPRIS）
+├── Daemon::resync()
+│    ├── hyprland::monitors() / workspaces() / workspace_rules()
+│    ├── 首轮把显示器清单种入 desired（启动即逐屏 spawn）
+│    ├── clear_urgent_on_active_transition()
+│    ├── rebuild_workspace_slices()
+│    ├── spawn_window(mon)（desired ∩ 现存显示器 − 在册）
+│    └── push_workspace_slices()
+└── Daemon::run_loop()
+     ├── rx.recv_timeout(TICK) → Daemon::handle(ev)
+     └── 超时档：pending_resync → Daemon::resync()</code></pre>
 <h4 id="sec-4-1-2">4.1.2. 窗口进程</h4>
 <pre><code>启动（窗口进程，daemon spawn）
-├── ipc::connect(path)
-├── style::load(css_path)（路径来自快照）
-├── BarApp::create(app, monitor, ipc)（层壳窗口 + 模块装配）
-│    ├── window.init_layer_shell()（锚定 Top|Left|Right）
-│    ├── window.set_layer(Layer::Top)
-│    ├── window.set_monitor(Some(monitor))
-│    └── build_modules(window)
-└── app.run()（GTK 主循环）</code></pre>
+├── （未设 GSK_RENDERER 时）回退 cairo 渲染
+├── bar::run(monitor, socket)
+│    └── WindowApp::create(app, monitor, socket)
+│         ├── IpcClient::connect(socket, monitor, ui_tx)（Hello 握手 + reader 线程）
+│         ├── 层壳窗口：init_layer_shell / set_layer(Top) / 锚定 Left|Right|Top / namespace "bread" / auto_exclusive_zone_enable
+│         ├── find_monitor(name) → set_monitor / set_default_size；connect_geometry_notify 跟踪分辨率
+│         ├── PopupManager::install(window)
+│         ├── WorkspaceWidget::new / WindowInfoWidget::new / TrayWidget::new / CenterWidget::new
+│         ├── CenterBox 布局（workspace | info | tray + center）
+│         ├── glib::timeout_add_local(UI_DRAIN)（排空 UiTask）
+│         └── glib::timeout_add_seconds_local(2)（daemon_alive() 周期检查）
+├── app.run_with_args(&amp;[])
+└── 首帧：Push::Snapshot → WindowApp::apply_snapshot（含 CSS 加载）</code></pre>
 
 <h3 id="sec-4-2">4.2. 窗口进程生命周期</h3>
 <h4 id="sec-4-2-1">4.2.1. 上线（显示器增加）</h4>
-<pre><code>on_hyprland_event(MonitorAdded)
-└── spawn_window(mon)
-     ├── window_map.insert(mon, child)
-     └── push(window, snapshot)（接入后首连全量）</code></pre>
+<pre><code>Hyprland monitoradded(v2) → Daemon::on_hyprland
+├── desired.insert(monitor)
+└── pending_resync = true
+     └──（下一滴答）Daemon::resync()
+          ├── hyprland::monitors() / workspaces() / workspace_rules()
+          └── spawn_window(monitor) → windows::spawn(tx, monitor, window_path)
+窗口 Hello → Daemon::on_window_request
+└── ipc::hello_reply(out, id, snapshot_for(monitor))（先快照推送、后应答受理）</code></pre>
 <h4 id="sec-4-2-2">4.2.2. 退出路径①：daemon 终止窗口进程</h4>
-<pre><code>kill_window(mon)（exit / close / 显示器移除）
-├── child.kill()（终止窗口进程）
-└── window_map.remove(mon)</code></pre>
-<h4 id="sec-4-2-3">4.2.3. 退出路径②：窗口自主退出（daemon 死亡检测）</h4>
-<pre><code>ipc::request(req) → Err（面向 daemon 的互动失败）
-└── daemon_alive()（读 PID 文件 /run/user/$UID/bread.pid 探测 daemon 进程）
-     ├── daemon 已退出 → app.quit()
-     └── daemon 仍在 → 呈现错误、继续运行</code></pre>
+<pre><code>Daemon::kill_window(monitor)（exit / close / 显示器移除）
+├── WindowProc.killing = true
+├── drop(WindowProc.out)（断开下行）
+├── child.kill()
+└── 独立线程 child.wait()（收割，避免僵尸残留）</code></pre>
+<h4 id="sec-4-2-3">4.2.3. 退出路径②：窗口自主退出（daemon 消失）</h4>
+<pre><code>窗口：glib 定时（2s）protocol::daemon_alive()
+├── false → app.quit()
+└── true → 继续运行
+互动失败：IpcClient::request → 重连一次重试
+└── 仍失败 → Err（调用方记录；daemon 存亡由周期检查裁决）</code></pre>
 <h4 id="sec-4-2-4">4.2.4. 崩溃重启</h4>
-<pre><code>on_window_exit(mon)（daemon 仍存活；等待子进程退出）
-└── spawn_window(mon)（延时后重试；次数上限内，超限放弃并记录）</code></pre>
+<pre><code>windows::spawn 的探测线程：/proc/&lt;pid&gt;/stat 轮询（僵尸视为退出）
+└── 退出并延时后 → DaemonEvent::ChildExited → Daemon::on_child_exited
+     ├── killing = true → 返回（主动终止路径）
+     ├── 不在 desired → 返回
+     ├── 崩溃窗口期内计数 +1；超限 → desired.remove(monitor)
+     └── spawn_window(monitor)（崩溃重启；间隔由探测线程延时上报形成）</code></pre>
 
 <h3 id="sec-4-3">4.3. 控制指令</h3>
-<pre><code>on_control(cmd)
-├── Open / Close → spawn_window(mon) / kill_window(mon)
+<pre><code>ipc::serve_control → protocol::parse_control_line → DaemonEvent::Control → Daemon::on_control
+├── Open { name, monitor } → open_windows()（desired 更新 + pending_resync）
+├── Close { name, monitor } → desired.remove + kill_window()
+├── OpenAll / CloseAll → 作用于全部显示器
 ├── Reload → broadcast(Push::Reload)（窗口按跟踪路径重读 CSS）
-└── Exit → 对每台显示器 kill_window(mon) → handle.shutdown() → std::process::exit(0)</code></pre>
+└── Exit → kill_window(全部) → TrayHandle::shutdown() → shutdown_files() → std::process::exit(0)</code></pre>
 
-<h3 id="sec-4-4">4.4. 托盘右键（窗口 ↔ daemon）</h3>
-<pre><code>TrayWidget 手势：右键托盘图标
-├── ipc::request(Request::TrayInteract { item, input: Right(x, y) })
-│    └── daemon: right_click(item) → Outcome::Menu(snapshot)（阻塞在 daemon）
-│         └── Outcome::Dispatched → ContextMenu fallback（Item 自绘，宿主不渲染）
-├── TrayWidget::show_menu(snapshot)（GTK 弹窗渲染）
-├── 条目点击 → ipc::request(Request::TrayMenuActivate { item, entry })
-└── MenuChanged 推送 → ipc::request(Request::TrayMenuRead { item })（重取刷新）</code></pre>
+<h3 id="sec-4-4">4.4. 托盘交互与菜单（窗口 ↔ daemon）</h3>
+<pre><code>TrayWidget 手势（左 / 中 / 右 / 四向滚轮）
+├── ipc::request(Request::TrayInteract { item, input })
+│    └── daemon：tray::interact()（专用线程）
+│         ├── left_click_at / middle_click_at / right_click_at / scroll_*_by
+│         └── Outcome::Menu(snapshot) → Response::Outcome
+├── Outcome::Menu → show_menu()（根弹窗 + build_menu_layer；由 PopupManager 托管）
+├── 子层行（悬停驻留或点击）→ Request::TrayMenuExpand → open_sub_popover()（嵌套 popover、贴边对齐）
+├── 叶子行点击 → Request::TrayMenuActivate → on_activate_done（关闭菜单）
+├── Push::MenuChanged → menu_refresh()（重取根层，已展开子层先收）
+└── 悬停切换：popup::hover_switch → Request::TrayMenuRead → on_hover_menu_done（世代校验）</code></pre>
 
 <h3 id="sec-4-5">4.5. 通知到达</h3>
 <pre><code>DBus Notify 调用（daemon 通知守护）
-├── NotificationRecord::from(args)
-├── notifications.push(record)
-└── broadcast(Push::Notification(record))（窗口侧：计数刷新 + 当前显示器弹窗）</code></pre>
+├── notify::serve(conn, tx) → DaemonEvent::Notification(NotificationRecord)
+├── 同 id 替换 / 新 id 入队（上限见代码）
+└── broadcast(Push::Notification(record))
+     └── WindowApp::handle_push → WindowInfoWidget::notify（列表上限见代码）</code></pre>
 
 </main>
 </body>
