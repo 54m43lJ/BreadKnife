@@ -30,19 +30,22 @@
 <h2 id="sec-4">4. 接口</h2>
 
 <h3 id="sec-4-1">4.1. 宿主 API（Rust）</h3>
-<pre><code>pub async fn serve(conn: &amp;zbus::Connection, tx: Sender&lt;NoticeEvent&gt;)
+<pre><code>impl Session {
+    pub fn start(conn: &amp;zbus::Connection, tx: Sender&lt;NoticeEvent&gt;,
+                 caps: Capabilities, info: ServerInfo)
+        -&gt; Result&lt;Rc&lt;Session&gt;, bnote::Error&gt;;     // 待实现，可以根据实际情况调整
+}
+
+pub async fn close(conn: &amp;zbus::Connection, id: u32, reason: CloseReason)
     -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整
 
-pub fn close(conn: &amp;zbus::Connection, id: u32, reason: CloseReason)
+pub async fn invoke_action(conn: &amp;zbus::Connection, id: u32, action_key: &amp;str)
     -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整
 
-pub fn invoke_action(conn: &amp;zbus::Connection, id: u32, action_key: &amp;str)
-    -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整
-
-pub fn activation_token(conn: &amp;zbus::Connection, id: u32, token: &amp;str)
+pub async fn activation_token(conn: &amp;zbus::Connection, id: u32, token: &amp;str)
     -&gt; Result&lt;(), bnote::Error&gt;;                     // 待实现，可以根据实际情况调整</code></pre>
 <ul class="note">
-  <li><code>serve</code> 在总线上注册 <code>org.freedesktop.Notifications</code> 并常驻应答；宿主经 <code>tx</code> 收事件流。</li>
+  <li><code>Session::start</code> 在总线上注册 <code>org.freedesktop.Notifications</code> 并常驻应答；能力与服务器信息由宿主声明，事件经 <code>tx</code> 流向宿主。</li>
   <li>三个回发函数对应规范的三个信号：关闭、动作已调用、激活令牌。</li>
 </ul>
 

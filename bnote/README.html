@@ -25,6 +25,8 @@
 <h2 id="sec-3">3. 原型 / 参考资料</h2>
 <ul>
   <li>协议权威文本：<a href="reference/notification-spec.clean.html">reference/notification-spec.clean.html</a>（官方规范清理版）。</li>
+  <li>原型：交互式测试服务器 <code>examples/server.rs</code>——常驻占用 <code>org.freedesktop.Notifications</code>，stdout 打印全部事件；stdin 命令：<code>list</code>、<code>close &lt;id&gt; [reason]</code>、<code>action &lt;id&gt; &lt;key&gt;</code>、<code>token &lt;id&gt; &lt;token&gt;</code>、<code>info</code>、<code>quit</code>；启动参数 <code>--name / --vendor / --caps a,b,c</code>。</li>
+  <li>外部客户端驱动：<code>notify-send [-u critical] [-r id] "标题" "正文"</code>；<code>dunstify -A "标签:键" "标题"</code>（客户端阻塞等动作回发）；<code>gdbus call --session -d org.freedesktop.Notifications -o /org/freedesktop/Notifications -m org.freedesktop.Notifications.CloseNotification &lt;id&gt;</code>。</li>
 </ul>
 
 </main>

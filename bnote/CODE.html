@@ -13,12 +13,14 @@
 <h2 id="sec-1">1. 文件树</h2>
 <pre><code>bnote/
 ├── reference/          # 官方规范清理版（协议唯一权威文本）
-└── src/
-    ├── <a href="#sec-3-lib">lib.rs</a>        # 门面：会话装配、错误类型、再导出
-    ├── <a href="#sec-3-server">server.rs</a>     # org.freedesktop.Notifications 服务端方法应答
-    ├── <a href="#sec-3-signal">signal.rs</a>     # NotificationClosed / ActionInvoked / ActivationToken 发射
-    ├── <a href="#sec-3-hints">hints.rs</a>      # hints 解析与归一（urgency / actions / 图标 / 超时）
-    └── <a href="#sec-3-types">types.rs</a>      # Notice / NoticeEvent / 能力等共享类型</code></pre>
+├── src/
+│   ├── <a href="#sec-3-lib">lib.rs</a>        # 门面：会话装配、错误类型、再导出
+│   ├── <a href="#sec-3-server">server.rs</a>     # org.freedesktop.Notifications 服务端方法应答
+│   ├── <a href="#sec-3-signal">signal.rs</a>     # NotificationClosed / ActionInvoked / ActivationToken 发射
+│   ├── <a href="#sec-3-hints">hints.rs</a>      # hints 解析与归一（urgency / actions / 图标 / 超时）
+│   └── <a href="#sec-3-types">types.rs</a>      # Notice / NoticeEvent / 能力等共享类型
+└── examples/
+    └── <a href="#sec-3-example">server.rs</a>     # 交互式通知服务器测试器（用法见 README「原型 / 参考资料」）</code></pre>
 <ul class="note">
   <li>本库无 GTK、无业务状态：只做协议应答、信号发射与归一化；展示与生命周期决策全部归宿主。</li>
 </ul>
@@ -59,13 +61,13 @@ impl Server {
 
 <h3 id="sec-3-signal">3.3. src/signal.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub fn emit_closed(conn: &amp;zbus::Connection, id: u32, reason: CloseReason)
-    -&gt; Result&lt;(), bnote::Error&gt;;                                      // 待实现，可以根据实际情况调整
+    -&gt; impl Future&lt;Output = Result&lt;(), bnote::Error&gt;&gt;;            // 待实现，可以根据实际情况调整
 
 pub fn emit_action_invoked(conn: &amp;zbus::Connection, id: u32, action_key: &amp;str)
-    -&gt; Result&lt;(), bnote::Error&gt;;                                      // 待实现，可以根据实际情况调整
+    -&gt; impl Future&lt;Output = Result&lt;(), bnote::Error&gt;&gt;;            // 待实现，可以根据实际情况调整
 
 pub fn emit_activation_token(conn: &amp;zbus::Connection, id: u32, token: &amp;str)
-    -&gt; Result&lt;(), bnote::Error&gt;;                                      // 待实现，可以根据实际情况调整</code></pre>
+    -&gt; impl Future&lt;Output = Result&lt;(), bnote::Error&gt;&gt;;            // 待实现，可以根据实际情况调整</code></pre>
 <ul class="note">
   <li>ARCHITECTURE §4.1 的三个回发 API 即本模块的再导出。</li>
 </ul>
@@ -86,6 +88,12 @@ pub enum NoticeEvent;       //见 ARCHITECTURE §4.2
 pub enum CloseReason;       //见 ARCHITECTURE §4.2
 pub struct Capabilities;    //见 ARCHITECTURE §4.2
 pub struct ServerInfo;      //见 ARCHITECTURE §4.2</code></pre>
+
+<h3 id="sec-3-example">3.6. examples/server.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>async fn main() -&gt; Result&lt;(), bnote::Error&gt;;    // 交互式测试服务器：事件全量打印，stdin 驱动关闭 / 动作 / 令牌回发</code></pre>
+<ul class="note">
+  <li>命令面与外部客户端驱动方法见 <a href="README.html#sec-3">README「原型 / 参考资料」</a>。</li>
+</ul>
 
 <h2 id="sec-4">4. 关键流程调用栈（伪码）</h2>
 
