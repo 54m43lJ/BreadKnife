@@ -1,0 +1,15 @@
+@startuml breadknife-control-reload
+participant 调用方
+participant "bread 客户端" as cli
+participant "bread daemon" as daemon
+participant "窗口进程" as win
+
+调用方 -> cli: bread open / close / reload / exit 等
+cli -> daemon: bread.sock 行协议指令
+alt reload
+  daemon -> win: reload（按跟踪的 CSS 路径重读）
+  win --> daemon: 生效
+else open / close / exit
+  daemon -> win: spawn / 终止
+end
+@enduml

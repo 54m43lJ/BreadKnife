@@ -1,0 +1,12 @@
+@startuml breadknife-notification
+participant "任意应用" as app
+participant DBus
+participant "bread daemon" as daemon
+participant "窗口进程" as win
+
+app -> DBus: Notify
+DBus -> daemon: 通知参数（org.freedesktop.Notifications）
+daemon -> daemon: 组装并缓存通知记录
+daemon -> win: 推送（全部窗口）
+win -> win: 计数刷新；当前显示器弹窗
+@enduml

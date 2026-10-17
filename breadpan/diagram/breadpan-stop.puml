@@ -1,0 +1,31 @@
+@startuml breadpan-stop
+participant "消费方" as app
+participant "breadpan（watcher 模块）" as bp
+participant "会话总线" as bus
+participant "事件通道" as ch
+
+== 优雅退出（正常路径）==
+app -> bp: TrayHandle::shutdown()
+bp -> bp: set_stopped；begin_stopping
+bp -> bus: watcher::release（释放 Watcher 名）
+bus --> bp: NameOwnerChanged(Watcher 名, 属主 → "")
+bp -> bp: stopping 守卫命中 → 吞掉本信号
+bp -> bp: graceful_shutdown：清空簿记；通道 close
+ch --> app: recv() → None
+bp -> bp: self.join.take() → JoinHandle::join()
+
+== Displaced（异常丢失，极罕见）==
+bus --> bp: NameOwnerChanged(Watcher 名, 属主 → "")
+bp -> bp: stopping 守卫未命中 → report_displaced
+bp -> ch: events.send(Displaced)
+ch --> app: Displaced
+bp -> bp: 清空簿记；set_stopped；通道 close
+
+== Fatal（总线断连，异常终局）==
+bp -> bp: report_fatal → run() fatal 分支
+bp -> bus: watcher::release（释放 Watcher 名，尽力而为）
+bp -> bp: 清空簿记；set_stopped
+bp -> ch: events.send(Fatal)
+ch --> app: Fatal
+bp -> bp: 通道 close
+@enduml

@@ -1,0 +1,20 @@
+@startuml breadpan-startup
+participant 消费方
+participant "breadpan（watcher 模块）" as bp
+participant 会话总线
+participant "存量 Item" as item
+
+消费方 -> bp: start()
+bp -> 会话总线: 连接会话总线
+note right of bp
+  挂载协议面（org.kde / org.freedesktop 两前缀）
+end note
+bp -> 会话总线: 订阅变更 / 死亡清理信号（全局 match rule）\n+ 启动心跳任务
+bp -> item: 反向发现：ListNames 扫描 + 探测
+bp -> bp: 登记最小集入册
+bp -> bp: 逐个现场读取 → 入队 Snapshot（全部 Item）
+bp -> bp: 快照栅栏置位 → 启动节流任务
+bp -> 会话总线: 申请 Watcher 名（最后申请）
+会话总线 --> bp: 名字在位
+消费方 <-- bp: (Handle, 事件通道)
+@enduml

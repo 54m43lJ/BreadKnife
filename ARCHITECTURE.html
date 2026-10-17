@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadknife 架构规格</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+
+<h1>breadknife 架构规格</h1>
+<blockquote>
+  本文档面向使用方（用户与二次开发者）：总体架构、技术栈与运行模型、时序图、样式系统、接口契约与数据模型。
+  能力级边界以 <a href="README.html">README.html</a> 为权威，实现骨架见 <a href="CODE.html">CODE.html</a>。
+</blockquote>
+
+<h2 id="sec-1">1. 术语</h2>
+<ul class="note">
+  <li>托盘域术语（Watcher、Item、渲染直出等）沿用成员库定义，见
+  <a href="breadpan/ARCHITECTURE.html#sec-1">breadpan/ARCHITECTURE.html §1</a>，本文档不重复定义。</li>
+</ul>
+
+<h2 id="sec-2">2. 通用约定</h2>
+<ul>
+  <li><strong>分层</strong>：bread daemon＝Model（无 GTK；信息源与全部映射的唯一持有者）；窗口进程＝View（GTK；只渲染与本地交互）。</li>
+  <li><strong>操作执行原则</strong>：有副作用（有状态）的操作必走 daemon；不影响 daemon 追踪状态的操作允许（不强制）直通。</li>
+  <li><strong>缺失降级</strong>：服务 / 后端缺失时——入口组件自动隐藏（如无电池设备的电池、服务缺席的网络），弹出面板内操作项灰置并提示。</li>
+</ul>
+
+<h2 id="sec-3">3. 架构图</h2>
+
+<h3 id="sec-3-1">3.1. 总体架构</h3>
+<div class="diagram"><img src="diagram/breadknife-architecture.svg" alt="总体架构"></div>
+<ul class="note">
+  <li>Hyprland IPC 为 daemon 唯一持有的只读监听，驱动全窗口状态推送；</li>
+  <li>托盘域总线互动全部在 daemon 内的 breadpan，窗口零托盘协议词汇（只收数据）；</li>
+  <li>有副作用（有状态）操作经 daemon 执行；不影响 daemon 追踪状态的操作允许直通。</li>
+</ul>
+
+<h3 id="sec-3-2">3.2. 技术栈</h3>
+<table>
+  <tr><th>项</th><th>选型</th></tr>
+  <tr><td>语言 / GUI</td><td>Rust；GTK4（仅窗口进程）</td></tr>
+  <tr><td>进程与 IPC</td><td>bread daemon（无 GTK）+ 每显示器窗口进程；内部 Unix Socket（请求应答 + 状态推送）</td></tr>
+  <tr><td>Wayland 集成</td><td><code>gtk4-layer-shell</code>（窗口进程，Layer Surface 锚定）</td></tr>
+  <tr><td>DBus（daemon 侧）</td><td><code>zbus</code>——通知守护（<code>org.freedesktop.Notifications</code>，session bus）与 UPower / NetworkManager / BlueZ / MPRIS 消费；托盘域总线互动不在其列，全权由 breadpan 封装</td></tr>
+  <tr><td>合成器通信</td><td>Hyprland IPC（Unix Socket，daemon 只读监听）</td></tr>
+  <tr><td>托盘协议栈</td><td>breadpan 单库自包含：内置 Watcher 登记中心 + 逻辑 Host API + GTK 渲染直出——daemon 组装、窗口渲染（IconSource → 可绘制对象）；托盘协议词汇不出 daemon</td></tr>
+  <tr><td>调节后端</td><td>音量 <code>pamixer</code>；亮度 <code>brightnessctl</code>（内置面板）+ <code>ddcutil</code>（外接显示器，DDC/CI）——由 daemon 调起</td></tr>
+</table>
+
+<h3 id="sec-3-3">3.3. 运行模型</h3>
+<table>
+  <tr><th>项</th><th>规格</th></tr>
+  <tr><td>进程形态</td><td>bread daemon（<code>bread</code> 前台启动；<code>bread daemon</code> 自动后台化）+ 每显示器一个窗口进程；daemon PID 文件 <code>/run/user/$UID/bread.pid</code></td></tr>
+  <tr><td>窗口管理</td><td>daemon 维护 显示器 → 窗口进程 映射；显示器插拔 spawn / kill；窗口崩溃延时重启（有重试上限）</td></tr>
+  <tr><td>启动</td><td>daemon 建立 Hyprland 监听与托盘组装，逐屏 spawn 窗口进程；窗口连接 IPC、取全量快照后渲染</td></tr>
+  <tr><td>运行</td><td>daemon 汇聚事件（Hyprland / DBus / 托盘）→ 状态推送；窗口本地交互 → 经 daemon 执行</td></tr>
+  <tr><td>退出</td><td>daemon：控制指令 <code>exit</code> → 终止全部窗口进程 → 自身退出。窗口退出分两路：① daemon 主动终止（<code>exit</code> / <code>close</code> / 显示器移除）；② 周期性存活检查（PID 文件 + <code>/proc</code>）确认 daemon 已退出后自主退出</td></tr>
+</table>
+
+<h3 id="sec-3-4">3.4. 时序：启动</h3>
+<div class="diagram"><img src="diagram/breadknife-startup.svg" alt="时序：启动"></div>
+
+<h3 id="sec-3-5">3.5. 时序：显示器插拔</h3>
+<div class="diagram"><img src="diagram/breadknife-monitor-hotplug.svg" alt="时序：显示器插拔"></div>
+
+<h3 id="sec-3-6">3.6. 时序：控制指令与热重载</h3>
+<div class="diagram"><img src="diagram/breadknife-control-reload.svg" alt="时序：控制指令与热重载"></div>
+
+<h3 id="sec-3-7">3.7. 时序：托盘右键菜单</h3>
+<div class="diagram"><img src="diagram/breadknife-tray-menu.svg" alt="时序：托盘右键菜单"></div>
+
+<h3 id="sec-3-8">3.8. 时序：通知到达</h3>
+<div class="diagram"><img src="diagram/breadknife-notification.svg" alt="时序：通知到达"></div>
+
+<h3 id="sec-3-9">3.9. 样式基础变量</h3>
+<pre><code>/* ── 底板 ── */
+@define-color bg_primary #1b1816;
+@define-color bg_secondary #24211e;
+@define-color bg_hover #302c29;
+@define-color bg_active #3d3835;
+/* ── 文字 ── */
+@define-color fg_primary #ecd9a8;
+@define-color fg_secondary #b8a078;
+@define-color fg_muted #6b5d48;
+/* ── 强调色 ── */
+@define-color accent #5c3d7a;
+@define-color accent_hover #735294;
+/* ── 语义色 ── */
+@define-color success #4a9c6c;
+@define-color warning #c4954e;
+@define-color danger #b8453a;
+/* ── 边框 ── */
+@define-color border rgba(236, 217, 168, 0.08);
+@define-color border_strong rgba(236, 217, 168, 0.15);</code></pre>
+
+<h3 id="sec-3-10">3.10. 组件样式规范</h3>
+<table>
+  <tr><th>组件</th><th>样式</th></tr>
+  <tr><td>任务栏窗口</td><td>背景 <code>bg_primary</code>，底边框 <code>border_strong</code>，高度 30px</td></tr>
+  <tr><td>按钮</td><td>透明背景，圆角 6px，Hover 态 <code>bg_hover</code></td></tr>
+  <tr><td>Workspace 按钮</td><td>四要素矩阵见 <a href="README.html#界面交互">README.html「界面交互」</a>；色彩映射（均取既有色板）：背景色＝<code>fg_muted</code>、前景色＝<code>fg_primary</code>、警告色＝<code>warning</code>；尺寸（视觉契约，操作源在 <code>bread.css</code>）：无窗口小圆点直径 4px，有窗口长方形 20×15px（圆角半径 10px），活跃叠加小圆点直径 4px</td></tr>
+  <tr><td>控制中心入口</td><td>容器背景 <code>bg_secondary</code>，圆角 6px</td></tr>
+  <tr><td>滑块</td><td>滑轨高 4px，圆形滑块 12px，高亮 <code>accent</code></td></tr>
+</table>
+<ul class="note">
+  <li>CSS 文件路径由 daemon 控制与跟踪；窗口按该路径加载内容。<code>reload</code> 指令经 daemon 广播（契约见 <a href="#sec-4-2">§4.2</a>），窗口重读后改色即见。</li>
+</ul>
+
+<h2 id="sec-4">4. 接口</h2>
+
+<h3 id="sec-4-1">4.1. Hyprland IPC（daemon 只读监听）</h3>
+<p>路径：<code>$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock</code>。契约：只订阅不回复。</p>
+<table>
+  <tr><th>事件</th><th>契约</th></tr>
+  <tr><td><code>monitoradded</code> / <code>monitorremoved</code></td><td>daemon 创建 / 销毁对应窗口进程</td></tr>
+  <tr><td><code>workspace&gt;&gt;X</code></td><td>daemon 更新映射并推送工作区切片</td></tr>
+  <tr><td><code>activewindow</code></td><td>daemon 更新并推送活动窗口</td></tr>
+  <tr><td><code>urgent&gt;&gt;X</code></td><td>窗口请求关注 → 所在工作区紧急位置位（清除语义见 <a href="README.html#界面交互">README.html「界面交互」</a>）</td></tr>
+  <tr><td><code>configreloaded</code></td><td>daemon 全量重同步：重扫显示器清单、重建映射并对齐窗口进程</td></tr>
+</table>
+
+<h3 id="sec-4-2">4.2. Unix Socket（控制接口）</h3>
+<p>路径：<code>/run/user/$UID/bread.sock</code>；契约：文本行协议，一行一条指令，以 <code>\n</code> 结尾，处理结果不回写。由 <code>bread</code> 客户端转发（脚本亦可直接使用）。</p>
+<table>
+  <tr><th>指令</th><th>行为</th></tr>
+  <tr><td><code>open &lt;name&gt; [-m &lt;monitor&gt;]</code></td><td>打开指定窗口（缺省全部已连接显示器；<code>-m</code> 限定显示器）</td></tr>
+  <tr><td><code>close &lt;name&gt; [-m &lt;monitor&gt;]</code></td><td>关闭指定窗口（同 <code>open</code> 的显示器口径）</td></tr>
+  <tr><td><code>open-all</code> / <code>close-all</code></td><td>打开 / 关闭全部窗口</td></tr>
+  <tr><td><code>exit</code></td><td>退出 daemon（终止全部窗口进程）</td></tr>
+  <tr><td><code>reload</code></td><td>热重载：广播全部窗口按跟踪的 CSS 路径重读</td></tr>
+</table>
+
+<h3 id="sec-4-3">4.3. 托盘库组装契约（daemon 侧）</h3>
+<table>
+  <tr><th>项</th><th>契约</th></tr>
+  <tr><td>组装</td><td>daemon 进程内 <code>Tray::start</code> 一次完成：登记中心（Watcher 角色）在会话总线就位、存量 Item 反向发现、事件通道建立（库契约见 <a href="breadpan/ARCHITECTURE.html#sec-4-1">breadpan/ARCHITECTURE.html §4.1</a>）</td></tr>
+  <tr><td>封装边界</td><td>托盘域总线互动 100% 由 breadpan 封装于 daemon：窗口进程不接触 SNI / DBusMenu 协议细节、不持有托盘 DBus 连接，只接收数据（IconSource / MenuSnapshot）并渲染</td></tr>
+  <tr><td>执行位置</td><td>全部托盘调用（交互、菜单读取）在 daemon 内执行——breadpan 的同步阻塞发生在 daemon，不冻结任何窗口</td></tr>
+  <tr><td>驱动源</td><td>breadpan 事件（快照、生命周期、属性、菜单变更、回执）是托盘 UI 更新的唯一驱动源，经 daemon 转换为窗口推送</td></tr>
+</table>
+
+<h3 id="sec-4-4">4.4. Daemon ↔ 窗口 IPC 契约</h3>
+<p>传输：Unix Socket（daemon 为服务端）；两类消息——窗口 → daemon 的请求（均有应答）与 daemon → 窗口的推送；首连握手后由 daemon 推送全量快照，此后增量衔接。消息名为契约级命名，载荷语义为契约；线格式（帧编码）与序列化命名为实现细节。</p>
+<h4>窗口 → daemon（请求，均有应答）</h4>
+<table>
+  <tr><th>消息</th><th>载荷 / 应答</th></tr>
+  <tr><td><code>hello</code></td><td>窗口接入握手：显示器名 → 先推全量快照、后应答受理</td></tr>
+  <tr><td><code>tray.menu_read</code></td><td>item id → 根层菜单快照</td></tr>
+  <tr><td><code>tray.menu_expand</code></td><td>item id、条目 id → 子层菜单快照</td></tr>
+  <tr><td><code>tray.interact</code></td><td>item id、输入（left / middle / right / scroll_*，含坐标或步数）→ 路由结果（<code>Dispatched</code> / <code>Menu</code> 快照）</td></tr>
+  <tr><td><code>tray.menu_activate</code></td><td>item id、条目 id → 受理</td></tr>
+  <tr><td><code>workspace.switch</code></td><td>工作区 id → 受理</td></tr>
+  <tr><td><code>media.control</code></td><td>MPRIS 操作 → 受理</td></tr>
+  <tr><td><code>volume.set</code> / <code>brightness.set</code></td><td>目标值 → 受理</td></tr>
+</table>
+<h4>daemon → 窗口（推送）</h4>
+<table>
+  <tr><th>消息</th><th>载荷</th></tr>
+  <tr><td><code>snapshot</code></td><td>首连全量：显示器切片（工作区状态、活动窗口）、托盘项、系统状态、通知、CSS 路径</td></tr>
+  <tr><td><code>state</code></td><td>增量：工作区 / 活动窗口 / 系统状态</td></tr>
+  <tr><td><code>tray</code></td><td>托盘项增 / 删 / 改（携带 Item 数据，含 IconSource）</td></tr>
+  <tr><td><code>menu_changed</code></td><td>定向：弹窗打开期间的菜单刷新触发</td></tr>
+  <tr><td><code>notification</code></td><td>通知记录（推送全部窗口）</td></tr>
+  <tr><td><code>reload</code></td><td>按 daemon 跟踪的路径重读 CSS</td></tr>
+</table>
+<ul class="note">
+  <li>大对象（如位图图标）可经 fd 传递升级（memfd + <code>SCM_RIGHTS</code>），协议骨架不变；</li>
+  <li>断开处理：互动失败时窗口重连一次（按首连流程再取全量快照）；周期性存活检查（PID 文件）确认 daemon 已退出则自主退出。</li>
+</ul>
+
+<h3 id="sec-4-5">4.5. 数据模型与转换</h3>
+<table>
+  <tr><th>模型</th><th>内容</th><th>转换</th></tr>
+  <tr><td>显示器映射表</td><td>显示器 ID → 窗口进程（daemon 持有）</td><td>Hyprland 插拔事件 → spawn / kill 窗口进程</td></tr>
+  <tr><td>工作区映射表</td><td>工作区 ID → 所属显示器；本屏工作区清单＝现存工作区 ∪ 绑定到本屏的静态 workspace 规则（有规则无窗口＝非活跃工作区，见 <a href="README.html#界面交互">README.html「界面交互」</a>；daemon 持有）</td><td>启动/插拔/配置重载时全量重建（按名去重 + id 排序）；<code>workspace&gt;&gt;X</code> → 切片推送</td></tr>
+  <tr><td>控制指令</td><td>行文本 → { open, close, open-all, close-all, exit, reload }</td><td>Socket 读入 → daemon 指令分发</td></tr>
+  <tr><td>通知记录</td><td>应用名、图标、摘要、正文、通知 ID（daemon 持有）</td><td>DBus Notify 调用参数 → 缓存 → 推送全部窗口</td></tr>
+  <tr><td>托盘 Item 视图</td><td>图标（IconSource）、状态、标题、提示（ToolTip）、有无菜单、存活标记（daemon → 窗口）</td><td>breadpan 现场读取 → 状态推送；窗口渲染直出为可绘制对象；alive=false → 置灰样式</td></tr>
+  <tr><td>窗口切片</td><td>单窗口所需状态：本屏工作区、活动窗口、托盘、通知、CSS 路径</td><td>daemon 状态变更 → 切片增量推送；首连全量</td></tr>
+  <tr><td>样式变量集</td><td>底板/文字/强调/语义/边框五组 CSS 变量（清单见 <a href="#sec-3-9">§3.9</a>）；文件路径由 daemon 跟踪</td><td>窗口按路径加载 → GTK 样式表 → 组件呈现（reload 广播重读）</td></tr>
+</table>
+
+</main>
+</body>
+</html>

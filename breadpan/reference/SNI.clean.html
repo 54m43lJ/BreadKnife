@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Status Notifier Item Specification</title>
+</head>
+<body>
+<p>Cleaned offline copy, styling removed. Authoritative text: <a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/">https://specifications.freedesktop.org/status-notifier-item/latest-single/</a></p>
+<hr>
+<h2 id="index">
+  Status Notifier Item Specification
+</h2>
+<p>Authors: Marco Martin <code>&lt;mart@kde.org&gt;</code>Aaron Seigo <code>&lt;aseigo@kde.org&gt;</code><br>Publication Date: TBD, Version: Version 0.1</p>
+<dl>
+  <dt>
+    <a href="#introduction">1 Introduction</a>
+  </dt>
+  <dt>
+    <a href="#basic-design">2 Basic Design</a>
+  </dt>
+  <dt>
+    <a href="#status-notifier-item">3 StatusNotifierItem</a>
+  </dt>
+  <dt>
+    <a href="#status-notifier-watcher">4 StatusNotifierWatcher</a>
+  </dt>
+  <dt>
+    <a href="#status-notifier-host">5 StatusNotifierHost</a>
+  </dt>
+  <dt>
+    <a href="#icon-pixmap">6 Icon pixmap</a>
+  </dt>
+  <dt>
+    <a href="#markup">7 Markup</a>
+  </dt>
+</dl>
+<h2 id="introduction">
+  1 Introduction
+</h2>
+<p>
+  This specification defines the management of visual items, usually icons used for reporting the status of an application to the user or provide quick access to common actions performed by that application. It is intended to be complementary but not directly related with the Freedesktop's Desktop Notifications specification and is aimed as a replacement to the Freedesktop System tray specification, though more model-view oriented, giving more freedom to the workspace how to graphically represent the items coherent to its visual style language.
+</p>
+<p>
+  This specification does not define what the aspect of the Notification Items will be, this is strictly implementation specific.
+</p>
+<p>
+  Example use cases include:
+</p>
+<ul>
+  <li>
+    <p>
+      Mixer volume control.
+    </p>
+  </li>
+  <li>
+    <p>
+      Battery indicator.
+    </p>
+  </li>
+  <li>
+    <p>
+      Instant messenger on-line status.
+    </p>
+  </li>
+  <li>
+    <p>
+      Generic application information and actions, like media player controls.
+    </p>
+  </li>
+</ul>
+<h2 id="basic-design">
+  2 Basic Design
+</h2>
+<p>
+  The Status Notifier Item system relies on inter-process communication via D-BUS and is composed of three parts:
+</p>
+<ul>
+  <li>
+    <p>
+      <a href="#status-notifier-item"><code>StatusNotifierItem</code></a>: Each application that wants to utilize status notifiers registers its own <code>StatusNotifierItem</code> to the session bus.
+    </p>
+  </li>
+  <li>
+    <p>
+      <a href="#status-notifier-watcher"><code>StatusNotifierWatcher</code></a>: Service used to keep track of every active instance of <code>StatusNotifierItem</code>, used by StatusNotifierHost to get the list of all items. It also notifies it when items are added and removed.
+    </p>
+  </li>
+  <li>
+    <p>
+      <a href="#status-notifier-host"><code>StatusNotifierHost</code></a>: An application that wants to provide a visualization of the existing <code>StatusNotifierItem</code> instances must register a <code>StatusNotifierHost</code> in the session bus.
+    </p>
+  </li>
+</ul>
+<h2 id="status-notifier-item">
+  3 StatusNotifierItem
+</h2>
+<p>
+  Each application can register an arbitrary number of Status Notifier Items by registering on the session bus the service <code>org.freedesktop.StatusNotifierItem-PID-ID</code>, where <code>PID</code> is the process id of the application and <code>ID</code> is an arbitrary numeric unique identifier between different instances registered by the same application.
+</p>
+<p>
+  As soon as a new instance of a <code>StatusNotifierItem</code> is created, the application must register the unique instance name to the <a href="#status-notifier-watcher">StatusNotifierWatcher</a>.
+</p>
+<p>
+  Each instance of StatusNotifierItem must provide an object called StatusNotifierItem with the following properties, methods and signals described in the following sections.
+</p>
+<h3 id="status-notifier-item-properties">
+  3.1 Properties
+</h3>
+<h4 id="status-notifier-item-properties-category">
+  3.1.1 org.freedesktop.StatusNotifierItem.Category
+</h4>
+<p>
+  <code>STRING org.freedesktop.StatusNotifierItem.Category ();</code>
+</p>
+<p>
+  Describes the category of this item.
+</p>
+<p>
+  The allowed values for the <code>Category</code> property are:
+</p>
+<ul>
+  <li>
+    <p>
+      <code>ApplicationStatus</code>: The item describes the status of a generic application, for instance the current state of a media player. In the case where the category of the item can not be known, such as when the item is being proxied from another incompatible or emulated system, ApplicationStatus can be used a sensible default fallback.
+    </p>
+  </li>
+  <li>
+    <p>
+      <code>Communications</code>: The item describes the status of communication oriented applications, like an instant messenger or an email client.
+    </p>
+  </li>
+  <li>
+    <p>
+      <code>SystemServices</code>: The item describes services of the system not seen as a stand alone application by the user, such as an indicator for the activity of a disk indexing service.
+    </p>
+  </li>
+  <li>
+    <p>
+      <code>Hardware</code>: The item describes the state and control of a particular hardware, such as an indicator of the battery charge or sound card volume control.
+    </p>
+  </li>
+</ul>
+<h4 id="status-notifier-item-properties-id">
+  3.1.2 org.freedesktop.StatusNotifierItem.Id
+</h4>
+<p>
+  <code>STRING org.freedesktop.StatusNotifierItem.Id ();</code>
+</p>
+<p>
+  It's a name that should be unique for this application and consistent between sessions, such as the application name itself.
+</p>
+<h4 id="status-notifier-item-properties-title">
+  3.1.3 org.freedesktop.StatusNotifierItem.Title
+</h4>
+<p>
+  <code>STRING org.freedesktop.StatusNotifierItem.Title ();</code>
+</p>
+<p>
+  It's a name that describes the application, it can be more descriptive than <code>Id</code>.
+</p>
+<h4 id="status-notifier-item-properties-status">
+  3.1.4 org.freedesktop.StatusNotifierItem.Status
+</h4>
+<p>
+  <code>STRING org.freedesktop.StatusNotifierItem.Status ();</code>
+</p>
+<p>
+  Describes the status of this item or of the associated application.
+</p>
+<p>
+  The allowed values for the <code>Status</code> property are:
+</p>
+<p>
+  <code>Passive</code>: The item doesn't convey important information to the user, it can be considered an "idle" status and is likely that visualizations will chose to hide it.
+</p>
+<p>
+  <code>Active</code>: The item is active, is more important that the item will be shown in some way to the user.
+</p>
+<p>
+  <code>NeedsAttention</code>: The item carries really important information for the user, such as battery charge running out and is wants to incentive the direct user intervention. Visualizations should emphasize in some way the items with NeedsAttention status.
+</p>
+<h4 id="status-notifier-item-properties-windowid">
+  3.1.5 org.freedesktop.StatusNotifierItem.WindowId
+</h4>
+<p>
+  <code>UINT32 org.freedesktop.StatusNotifierItem.WindowId ();</code>
+</p>
+<p>
+  It's the windowing-system dependent identifier for a window, the application can chose one of its windows to be available through this property or just set 0 if it's not interested.
+</p>
+<h4 id="status-notifier-item-properties-iconname">
+  3.1.6 org.freedesktop.StatusNotifierItem.IconName
+</h4>
+<p>
+  <code>STRING org.freedesktop.StatusNotifierItem.IconName ();</code>
+</p>
+<p>
+  The StatusNotifierItem can carry an icon that can be used by the visualization to identify the item.
+</p>
+<p>
+  An icon can either be identified by its Freedesktop-compliant icon name, carried by this property of by the icon data itself, carried by the property <code>IconPixmap</code>. Visualizations are encouraged to prefer icon names over icon pixmaps if both are available (FIXME: still not very defined: could the pixmap be used as fallback if an icon name is not found?)
+</p>
+<h4 id="status-notifier-item-properties-iconpixmap">
+  3.1.7 org.freedesktop.StatusNotifierItem.IconPixmap
+</h4>
+<p>
+  <code>ARRAY(INT, INT, ARRAY BYTE) org.freedesktop.StatusNotifierItem.IconPixmap ();</code>
+</p>
+<p>
+  <a href="#icon-pixmap">Icon pixmap</a> to use for displaying the icon of the item.
+</p>
+<h4 id="status-notifier-item-properties-overlayiconname">
+  3.1.8 org.freedesktop.StatusNotifierItem.OverlayIconName
+</h4>
+<p>
+  <code>STRING org.freedesktop.StatusNotifierItem.OverlayIconName ();</code>
+</p>
+<p>
+  The Freedesktop-compliant name of an icon. This can be used by the visualization to indicate extra state information, for instance as an overlay for the main icon.
+</p>
+<h4 id="status-notifier-item-properties-overlayiconpixmap">
+  3.1.9 org.freedesktop.StatusNotifierItem.OverlayIconPixmap
+</h4>
+<p>
+  <code>ARRAY(INT, INT, ARRAY BYTE) org.freedesktop.StatusNotifierItem.OverlayIconPixmap ();</code>
+</p>
+<p>
+  <a href="#icon-pixmap">Icon pixmap</a> to use for the <a href="#status-notifier-item-properties-overlayiconname">overlay icon</a>.
+</p>
+<h4 id="status-notifier-item-properties-attentioniconname">
+  3.1.10 org.freedesktop.StatusNotifierItem.AttentionIconName
+</h4>
+<p>
+  <code>STRING org.freedesktop.StatusNotifierItem.AttentionIconName ();</code>
+</p>
+<p>
+  The Freedesktop-compliant name of an icon. this can be used by the visualization to indicate that the item is in <code>RequestingAttention</code> state.
+</p>
+<h4 id="status-notifier-item-properties-attentioniconpixmap">
+  3.1.11 org.freedesktop.StatusNotifierItem.AttentionIconPixmap
+</h4>
+<p>
+  <code>ARRAY(INT, INT, ARRAY BYTE) org.freedesktop.StatusNotifierItem.AttentionIconPixmap ();</code>
+</p>
+<p>
+  <a href="#icon-pixmap">Icon pixmap</a> to use for the <a href="#status-notifier-item-properties-attentioniconname">attention icon</a>.
+</p>
+<h4 id="status-notifier-item-properties-attentionmoviename">
+  3.1.12 org.freedesktop.StatusNotifierItem.AttentionMovieName
+</h4>
+<p>
+  <code>STRING org.freedesktop.StatusNotifierItem.AttentionMovieName ();</code>
+</p>
+<p>
+  An item can also specify an animation associated to the RequestingAttention state. This should be either a Freedesktop-compliant icon name or a full path. The visualization can chose between the movie or <code>AttentionIconPixmap</code> (or using neither of those) at its discretion.
+</p>
+<h4 id="status-notifier-item-properties-tooltip">
+  3.1.13 org.freedesktop.StatusNotifierItem.ToolTip
+</h4>
+<p>
+  <code>(STRING, ARRAY(INT, INT, ARRAY BYTE), STRING, STRING) org.freedesktop.StatusNotifierItem.ToolTip ();</code>
+</p>
+<p>
+  Data structure that describes extra information associated to this item, that can be visualized for instance by a tooltip (or by any other mean the visualization consider appropriate. Components are:
+</p>
+<p>
+  STRING: Freedesktop-compliant name for an icon.
+</p>
+<p>
+  ARRAY(INT, INT, ARRAY BYTE): icon data
+</p>
+<p>
+  STRING: Title for this tooltip
+</p>
+<p>
+  STRING: Descriptive text for this tooltip. It can contain also a subset of the HTML markup language, for a list of allowed tags see <a href="#markup">Markup</a>.
+</p>
+<h4 id="status-notifier-item-properties-itemismenu">
+  3.1.14 org.freedesktop.StatusNotifierItem.ItemIsMenu
+</h4>
+<p>
+  <code>BOOL</code>: The item only support the context menu, the visualization should prefer showing the menu or sending <code>ContextMenu()</code> instead of <code>Activate()</code>
+</p>
+<h4 id="status-notifier-item-properties-menu">
+  3.1.15 org.freedesktop.StatusNotifierItem.Menu
+</h4>
+<p>
+  OBJECT PATH: DBus path to an object which should implement the com.canonical.dbusmenu interface
+</p>
+<h3 id="status-notifier-item-methods">
+  3.2 Methods
+</h3>
+<h4 id="status-notifier-item-methods-contextmenu">
+  3.2.1 ContextMenu
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierItem.ContextMenu (INT x, INT y);</code>
+</p>
+<p>
+  Asks the status notifier item to show a context menu, this is typically a consequence of user input, such as mouse right click over the graphical representation of the item.
+</p>
+<p>
+  The x and y parameters are in screen coordinates and is to be considered an hint to the item about where to show the context menu.
+</p>
+<h4 id="status-notifier-item-methods-activate">
+  3.2.2 Activate
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierItem.Activate (INT x, INT y);</code>
+</p>
+<p>
+  Asks the status notifier item for activation, this is typically a consequence of user input, such as mouse left click over the graphical representation of the item. The application will perform any task is considered appropriate as an activation request.
+</p>
+<p>
+  The x and y parameters are in screen coordinates and is to be considered an hint to the item where to show eventual windows (if any).
+</p>
+<h4 id="status-notifier-item-methods-secondaryactivate">
+  3.2.3 SecondaryActivate
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierItem.SecondaryActivate (INT x, INT y);</code>
+</p>
+<p>
+  Is to be considered a secondary and less important form of activation compared to Activate. This is typically a consequence of user input, such as mouse middle click over the graphical representation of the item. The application will perform any task is considered appropriate as an activation request.
+</p>
+<p>
+  The x and y parameters are in screen coordinates and is to be considered an hint to the item where to show eventual windows (if any).
+</p>
+<h4 id="status-notifier-item-methods-scroll">
+  3.2.4 Scroll
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierItem.Scroll (INT delta, STRING orientation);</code>
+</p>
+<p>
+  The user asked for a scroll action. This is caused from input such as mouse wheel over the graphical representation of the item.
+</p>
+<p>
+  The delta parameter represent the amount of scroll, the orientation parameter represent the horizontal or vertical orientation of the scroll request and its legal values are horizontal and vertical.
+</p>
+<h3 id="status-notifier-item-signals">
+  3.3 Signals
+</h3>
+<h4 id="status-notifier-item-signals-newtitle">
+  3.3.1 NewTitle
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierItem.NewTitle ();</code>
+</p>
+<p>
+  The item has a new title: the graphical representation should read it again immediately.
+</p>
+<h4 id="status-notifier-item-signals-newicon">
+  3.3.2 NewIcon
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierItem.NewIcon ();</code>
+</p>
+<p>
+  The item has a new icon: the graphical representation should read it again immediately.
+</p>
+<h4 id="status-notifier-item-signals-newattentionicon">
+  3.3.3 NewAttentionIcon
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierItem.NewAttentionIcon ();</code>
+</p>
+<p>
+  The item has a new attention icon: the graphical representation should read it again immediately.
+</p>
+<h4 id="status-notifier-item-signals-newoverlayicon">
+  3.3.4 NewOverlayIcon
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierItem.NewOverlayIcon ();</code>
+</p>
+<p>
+  The item has a new overlay icon: the graphical representation should read it again immediately.
+</p>
+<h4 id="status-notifier-item-signals-newtooltip">
+  3.3.5 NewToolTip
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierItem.NewToolTip ();</code>
+</p>
+<p>
+  The item has a new tooltip: the graphical representation should read it again immediately.
+</p>
+<h4 id="status-notifier-item-signals-newstatus">
+  3.3.6 NewStatus
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierItem.NewStatus (STRING status);</code>
+</p>
+<p>
+  The item has a new status, that is passed as an argument of the signal.
+</p>
+<h2 id="status-notifier-watcher">
+  4 StatusNotifierWatcher
+</h2>
+<p>
+  There will be a single <code>org.freedesktop.StatusNotifierWatcher</code> service instance registered on the session but at any given time. The StatusNotifierWatcher service is used to keep track of StatusNotifierItem instances, enumerate them and notify when new ones are registered or old ones are unregistered.
+</p>
+<p>
+  It is also used to keep track of org.freedesktop.StatusNotifierHost instances, to have an easy way to know if there is at least one service registered as the visualization host for the status notifier items.
+</p>
+<h3 id="status-notifier-watcher-properties">
+  4.1 Properties
+</h3>
+<h4 id="status-notifier-watcher-properties-registered-status-notifier-items">
+  4.1.1 RegisteredStatusNotifierItems
+</h4>
+<p>
+  <code>ARRAY(STRING) org.freedesktop.StatusNotifierWatcher.RegisteredStatusNotifierItems ();</code>
+</p>
+<p>
+  List containing all the registered instances of StatusNotifierItem. All elements of the array should correspond to services actually running on the session bus at the moment of the method call.
+</p>
+<h4 id="status-notifier-watcher-properties-is-status-notifier-host-registered">
+  4.1.2 IsStatusNotifierHostRegistered
+</h4>
+<p>
+  <code>BOOL org.freedesktop.StatusNotifierWatcher.IsStatusNotifierHostRegistered ();</code>
+</p>
+<p>
+  True if at least one <code>StatusNotifierHost</code> has been registered with <a href="#status-notifier-watcher-methods-register-status-notifier-host">RegisterStatusNotifierHost</a> and is currently running. If no StatusNotifierHost are registered and running, all <code>StatusNotifierItem</code> instances should fall back using the Freedesktop System tray specification.
+</p>
+<h4 id="status-notifier-watcher-properties-protocol-version">
+  4.1.3 ProtocolVersion
+</h4>
+<p>
+  <code>INT org.freedesktop.StatusNotifierWatcher.ProtocolVersion ();</code>
+</p>
+<p>
+  The version of the protocol the StatusNotifierWatcher instance implements.
+</p>
+<h3 id="status-notifier-watcher-methods">
+  4.2 Methods
+</h3>
+<h4 id="status-notifier-watcher-methods-register-status-notifier-item">
+  4.2.1 RegisterStatusNotifierItem
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierWatcher.RegisterStatusNotifierItem (STRING service);</code>
+</p>
+<p>
+  Register a StatusNotifierItem into the StatusNotifierWatcher, in the form of its full name on the session bus, for instance org.freedesktop.StatusNotifierItem-4077-1. A StatusNotifierItem instance must be registered to the watcher in order to be noticed from both the watcher and the StatusNotifierHost instances. If the registered StatusNotifierItem goes away from the session bus, the StatusNotifierWatcher should automatically notice it and remove it from the list of registered services.
+</p>
+<h4 id="status-notifier-watcher-methods-register-status-notifier-host">
+  4.2.2 RegisterStatusNotifierHost
+</h4>
+<p>
+  <code>VOID org.freedesktop.StatusNotifierWatcher.RegisterStatusNotifierHost (STRING service);</code>
+</p>
+<p>
+  Register a StatusNotifierHost into the StatusNotifierWatcher, in the form of its full name on the session bus, for instance org.freedesktop.StatusNotifierHost-4005. Every NotficationHost instance that intends to display StatusNotifierItem representations should register to StatusNotifierWatcher with this method. The StatusNotifierWatcher should automatically notice if an instance of StatusNotifierHost goes away.
+</p>
+<h3 id="status-notifier-watcher-signals">
+  4.3 Signals
+</h3>
+<h4 id="status-notifier-watcher-signals-status-notifier-item-registered">
+  4.3.1 StatusNotifierItemRegistered
+</h4>
+<p>
+  <code>BOOL org.freedesktop.StatusNotifierWatcher.StatusNotifierItemRegistered (STRING service);</code>
+</p>
+<p>
+  A new StatusNotifierItem has been registered, the argument of the signal is the session bus name of the instance. StatusNotifierHost implementation should listen this signal to know when they should update their representation of the items.
+</p>
+<h4 id="status-notifier-watcher-signals-status-notifier-item-unregistered">
+  4.3.2 StatusNotifierItemUnregistered
+</h4>
+<p>
+  <code>BOOL org.freedesktop.StatusNotifierWatcher.StatusNotifierItemUnregistered (STRING service);</code>
+</p>
+<p>
+  A StatusNotifierItem instance has disappeared from the bus, the argument of the signal is the session bus name of the instance. StatusNotifierHost implementation should listen this signal to know when they should update their representation of the items.
+</p>
+<h4 id="status-notifier-watcher-signals-status-notifier-host-registered">
+  4.3.3 StatusNotifierHostRegistered
+</h4>
+<p>
+  <code>BOOL org.freedesktop.StatusNotifierWatcher.StatusNotifierHostRegistered ();</code>
+</p>
+<p>
+  A new StatusNotifierHost has been registered, the StatusNotifierItem instances knows that they can use this protocol instead of the Freedesktop System tray protocol.
+</p>
+<h2 id="status-notifier-host">
+  5 StatusNotifierHost
+</h2>
+<p>
+  StatusNotifierHost corresponds an object in an application that does the actual graphical representation of StatusNotifierItem instances.
+</p>
+<p>
+  Instances of this service are registered on the Dbus session bus, under a name on the form org.freedesktop.StatusNotifierHost-id where id is an unique identifier, that keeps the names unique on the bus, such as the process-id of the application or another type of identifier if more that one StatusNotifierHost is registered by the same process.
+</p>
+<p>
+  StatusNotifierHost instances don't need any particular property, method or signal registered to the bus. What is important is the presence of the service on the bus, to inform StatusNotifierWatcher that a StatusNotifierItem representation is currently running on the system.
+</p>
+<h2 id="icon-pixmap">
+  6 Icon pixmap
+</h2>
+<p>
+  Icon pixmaps can be transferred over the bus by a particular serialization of their data, capable of representing multiple resolutions of the same image or a brief animation of images of the same size.
+</p>
+<p>
+  Icon pixmaps are transferred in an array of raw image data structures of signature <code>a(iiay)</code>, with each one describing the width, height, and image data respectively. The data is represented in <code>ARGB32</code> format and is in the network byte order, to make easy the communication over the network between little and big endian machines.
+</p>
+<h2 id="markup">
+  7 Markup
+</h2>
+<p>
+  The sub text of a tooltip may contain markup. The markup is XML-based, and consists of a small subset of XHTML.
+</p>
+<p>
+  The following tags should be supported by the StatusNotifierHost visualization. Though it is optional, it is recommended. StatusNotifierHost that do not support these tags should filter them out.
+</p>
+<p>
+  <code>&lt;b&gt; ... &lt;/b&gt;</code> Bold
+</p>
+<p>
+  <code>&lt;i&gt; ... &lt;/i&gt;</code> Italic
+</p>
+<p>
+  <code>&lt;u&gt; ... &lt;/u&gt;</code> Underline
+</p>
+<p>
+  <code>&lt;a href="..."&gt; ... &lt;/a&gt;</code> Hyperlink
+</p>
+<p>
+  <code>&lt;img src="..." alt="..."/&gt;</code> Image
+</p>
+<p>
+  Images can be used with absolute pathnames as image source. The alt text is mandatory.
+</p>
+<p>
+  A full-blown HTML implementation is not required of this spec, and notifications should never take advantage of tags that are not listed above. As tooltips are not a substitute for complex dialogs, advanced layout is not necessary, and may in fact limit the number of systems where this system can run on, due to memory usage and screen space. Such examples are PDAs, certain cell phones, and slow PCs or laptops with little memory.
+</p>
+<p>
+  For the same reason, a full XML or XHTML implementation using XSLT or CSS stylesheets is not part of this specification. Information that must be presented in a more complex form should use an application-specific dialog, a web browser, or some other display mechanism.
+</p>
+<p>
+  The tags specified above mark up the content in a way that allows them to be stripped out on some implementations without impacting the actual content.
+</p>
+</body>
+</html>

@@ -49,41 +49,16 @@ jobs:
             pkg-config \
             meson \
             ninja-build \
-            valac \
-            valadoc \
-            gobject-introspection \
-            libgirepository1.0-dev \
             libgtk-4-dev \
             libglib2.0-dev \
-            libgdk-pixbuf2.0-dev \
-            libpango1.0-dev \
-            libcairo2-dev \
             libwayland-dev \
-            wayland-protocols \
-            libjson-glib-dev \
-            git
+            dbus
 
       - name: Build gtk4-layer-shell
         run: |
           git clone --depth 1 https://github.com/wmww/gtk4-layer-shell.git
           cd gtk4-layer-shell
           meson setup build -Dexamples=false -Ddocs=false -Dtests=false
-          sudo meson install -C build
-          sudo ldconfig
-
-      - name: Build appmenu-glib-translator
-        run: |
-          git clone --depth 1 https://github.com/rilian-la-te/vala-panel-appmenu.git
-          cd vala-panel-appmenu/subprojects/appmenu-glib-translator
-          meson setup build
-          sudo meson install -C build
-          sudo ldconfig
-
-      - name: Build astal-tray
-        run: |
-          git clone https://github.com/aylur/astal.git
-          cd astal/lib/tray
-          meson setup build
           sudo meson install -C build
           sudo ldconfig
 
@@ -102,6 +77,12 @@ jobs:
           key: ${{ runner.os }}-x86_64-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-x86_64-cargo-
+
+      - name: Test breadpan (library)
+        run: dbus-run-session -- cargo test --manifest-path breadpan/Cargo.toml --locked
+
+      - name: Test breadknife (app)
+        run: cargo test --locked
 
       - name: Build Release
         run: cargo build --release --bin bread --target x86_64-unknown-linux-gnu --locked

@@ -1,0 +1,22 @@
+@startuml breadpan-menu
+participant 消费方
+participant breadpan
+participant "Item（dbusmenu）" as item
+
+消费方 -> breadpan: 入口
+note right of breadpan
+  right_click / left_click(menu_only) 路由命中（§3.6）；
+  或 menu() / menu_expand()
+  （弹窗打开期间 MenuChanged 重取）
+end note
+breadpan -> item: AboutToShow(parent)
+note right of item
+  常规前置：触发 Item 惰性构建 / 刷新
+end note
+item --> breadpan: 需要更新?
+breadpan -> item: GetLayout(parent, 1 层)
+breadpan -> item: GetGroupProperties
+item --> breadpan: 布局 + 属性
+breadpan -> breadpan: 组装该层快照
+breadpan --> 消费方: InteractionOutcome::Menu
+@enduml

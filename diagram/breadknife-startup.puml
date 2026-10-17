@@ -1,0 +1,24 @@
+@startuml breadknife-startup
+participant 启动者
+participant "bread daemon" as daemon
+participant Hyprland
+participant breadpan
+participant "窗口进程" as win
+
+启动者 -> daemon: bread（前台）/ bread daemon（后台化）
+daemon -> daemon: 连接会话总线（通知守护注册）
+daemon -> Hyprland: 建立只读监听（.socket2.sock）
+daemon -> breadpan: Tray::start()
+note right of breadpan
+  登记中心就位 + 存量 Item 反向发现
+end note
+breadpan --> daemon: (handle, 事件通道)
+daemon -> Hyprland: 扫描显示器
+Hyprland --> daemon: 显示器清单
+daemon -> daemon: 建立 显示器 → 工作区 / 窗口 映射
+daemon -> daemon: 启动 IPC 服务端（Unix socket）
+daemon -> win: spawn 窗口进程（逐显示器）
+win -> daemon: 连接 IPC
+daemon --> win: 全量快照（工作区切片 / 托盘 / 系统状态 / CSS 路径）
+win -> win: 渲染（layer-shell + 模块）
+@enduml
