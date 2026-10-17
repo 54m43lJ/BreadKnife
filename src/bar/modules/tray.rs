@@ -35,6 +35,8 @@ struct TrayInner {
     icons: RefCell<BTreeMap<String, gtk::Button>>,
     /// 当前打开的根菜单会话（一个窗口同时至多一个根弹窗）。
     menu: RefCell<Option<MenuSession>>,
+    /// 已展开的子层：(弹窗, 锚行)——行级悬停去留判定（经典菜单语义，见 close_subs_not_at）。
+    subs: RefCell<Vec<(gtk::Popover, gtk::Button)>>,
     /// 待展开条目登记：子层请求飞行中的行锚（item, entry) → row。
     pending_rows: RefCell<HashMap<(String, i32), gtk::Button>>,
 }
@@ -59,6 +61,7 @@ impl TrayWidget {
             ui,
             icons: RefCell::new(BTreeMap::new()),
             menu: RefCell::new(None),
+            subs: RefCell::new(Vec::new()),
             pending_rows: RefCell::new(HashMap::new()),
         });
         Self { inner }
@@ -348,16 +351,6 @@ fn show_menu(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: 
     popup::point_at(&popover, &inner.window, anchor);
     let content = build_menu_layer(inner, item, &snapshot);
     popover.set_child(Some(&content));
-    // 子层打开时指针移回根层：先收子层（抓取随子层释放），随后点击直达根层条目
-    {
-        let inner2 = inner.clone();
-        let item2 = item.to_string();
-        let motion = gtk::EventControllerMotion::new();
-        motion.connect_enter(move |_c, _x, _y| {
-            inner2.popup.close_prefix(&format!("tray:{item2}:sub"));
-        });
-        popover.add_controller(motion);
-    }
     {
         let inner2 = inner.clone();
         popover.connect_closed(move |_| {
@@ -431,6 +424,17 @@ fn build_menu_row(inner: &Rc<TrayInner>, item: &str, entry: &MenuItem) -> gtk::B
         row.set_sensitive(false);
     }
 
+    // 行级悬停统一规则：进入任意层级的行 → 收起"锚点非本行且不含本行"的子层
+    {
+        let inner2 = inner.clone();
+        let row_handle = row.clone();
+        let motion = gtk::EventControllerMotion::new();
+        motion.connect_enter(move |_c, _x, _y| {
+            close_subs_not_at(&inner2, &row_handle);
+        });
+        row.add_controller(motion);
+    }
+
     let inner2 = inner.clone();
     let item = item.to_string();
     let entry_id = entry.id;
@@ -477,7 +481,8 @@ fn open_sub_popover(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, sna
         eprintln!("[tray] submenu reply without root menu session");
         return;
     };
-    inner.popup.close_prefix(&format!("tray:{item}:sub"));
+    // 展开新子层前按同一悬停规则清场（防异步回执竞态：先前行的子层不该残留）
+    close_subs_not_at(inner, anchor);
     let popover = gtk::Popover::new();
     popover.add_css_class("menu-popover");
     popup::attach(
@@ -490,8 +495,33 @@ fn open_sub_popover(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, sna
     popup::point_at(&popover, &root, anchor);
     let content = build_menu_layer(inner, item, &snapshot);
     popover.set_child(Some(&content));
+    // 子层登记（锚行）供行级悬停去留判定；收场随 closed 自动除名
+    {
+        let inner2 = inner.clone();
+        let p = popover.clone();
+        popover.connect_closed(move |_| {
+            inner2.subs.borrow_mut().retain(|(sp, _)| sp != &p);
+        });
+    }
+    inner.subs.borrow_mut().push((popover.clone(), anchor.clone()));
     inner.popup.manage(&popover);
     inner.popup.clone().open(&popover, format!("tray:{item}:sub"));
+}
+
+/// 行级悬停统一规则（经典菜单语义，根行与子行同规则）：
+/// 进入行 R 时，收起所有"锚点不是 R 且不含 R"的子层——即
+/// 悬停其它条目收起相关子层；回到父条目/菜单空白/离开菜单均保留。
+fn close_subs_not_at(inner: &Rc<TrayInner>, hovered: &gtk::Button) {
+    let targets: Vec<gtk::Popover> = inner
+        .subs
+        .borrow()
+        .iter()
+        .filter(|(p, anchor)| anchor != hovered && !hovered.is_ancestor(p))
+        .map(|(p, _)| p.clone())
+        .collect();
+    for p in targets {
+        p.popdown(); // 同步派发 closed → 除名；此刻不得持有 subs 借用
+    }
 }
 
 /// MenuChanged 重取刷新：根层或已展开路径——首版重取根层并重建
