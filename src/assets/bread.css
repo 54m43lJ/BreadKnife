@@ -154,8 +154,14 @@ button:hover {
     background-color: alpha(@warning, 0.25);
 }
 
-/* ── 自绘菜单弹窗 ── */
+/* ── 自绘菜单弹窗（macOS 式：无气泡尾、贴边平铺面板）── */
 .menu-popover {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+.menu-popover contents {
     background-color: @bg_secondary;
     border-radius: 8px;
     border: 1px solid @border_strong;

@@ -287,6 +287,26 @@ pub fn point_at(
     )));
 }
 
+/// 打开前定位（贴边变体）：锚点矩形左右各外扩 `expand_x`——子菜单借此把面板
+/// 边缘与父面板相接（外扩量＝父面板内衬 padding + border，见 bread.css）。
+pub fn point_at_expanded(
+    popover: &gtk::Popover,
+    parent: &impl IsA<gtk::Widget>,
+    anchor: &impl IsA<gtk::Widget>,
+    expand_x: f64,
+) {
+    let Some(b) = anchor.compute_bounds(parent) else {
+        eprintln!("[popup] anchor bounds unavailable; popover left unanchored");
+        return;
+    };
+    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+        (b.x() as f64 - expand_x).round() as i32,
+        b.y().round() as i32,
+        (b.width() as f64 + 2.0 * expand_x).round() as i32,
+        b.height().round() as i32,
+    )));
+}
+
 /// 悬停切换驻留时长：防指针掠过误切换。
 pub const HOVER_DWELL: Duration = Duration::from_millis(150);
 
