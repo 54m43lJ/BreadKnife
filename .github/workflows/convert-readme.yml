@@ -1,0 +1,59 @@
+name: Convert README
+
+on:
+  push:
+    branches: [ main ]    # 每次 merge 到 main 都跑一遍，与 tag / release 无关
+  workflow_dispatch:      # 允许手动触发，方便测试
+
+# 连续 merge 时只保留最新一次运行，避免两个 run 同时 push 互相踩
+concurrency:
+  group: convert-readme-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read          # 顶层默认只读，最小权限
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # 仅此 job 授予写入权限
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+
+      - name: Convert HTML to GFM
+        run: |
+          # docs2markdown 默认输出 GitHub Flavored Markdown (ghfm)
+          # 第二个参数直接指定输出文件为 README.md
+          uvx docs2markdown README.html README.md
+
+      - name: Verify only README.md is modified
+        run: |
+          set -euo pipefail
+          # 提取所有被修改/新增/删除的文件路径（忽略状态码）
+          CHANGED_FILES=$(git status --porcelain | awk '{print $2}')
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No changes detected. Nothing to commit."
+            exit 0
+          fi
+
+          if [ "$CHANGED_FILES" != "README.md" ]; then
+            echo "::error::Unexpected files modified:"
+            echo "$CHANGED_FILES"
+            echo "Only README.md is allowed to change."
+            exit 1
+          fi
+
+          echo "✓ Validation passed: only README.md is modified."
+
+      - name: Commit and push
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          # GITHUB_TOKEN 的推送不会再次触发工作流（GitHub 防递归机制），无死循环风险
+          commit_message: "docs: 由 README.html 自动生成 README.md [skip ci]"
+          file_pattern: README.md   # 双保险：只 git add README.md
