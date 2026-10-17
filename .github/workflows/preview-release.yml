@@ -58,7 +58,8 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/wmww/gtk4-layer-shell.git
           cd gtk4-layer-shell
-          meson setup build -Dexamples=false -Ddocs=false -Dtests=false
+          # 仅需 C 库与 pkg-config：关闭 introspection/vapi（其默认开启，会要求 gobject-introspection-1.0）
+          meson setup build -Dexamples=false -Ddocs=false -Dtests=false -Dintrospection=false -Dvapi=false
           sudo meson install -C build
           sudo ldconfig
 
