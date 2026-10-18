@@ -232,6 +232,16 @@
       <div class="mk-nc-gh"><span class="arr">▸</span>应用 B</div>
     </div>
   </div>
+  <div class="mk-scene">
+    <div class="mk-bar" style="width:640px"><div style="margin:0 auto">活动窗口标题</div></div>
+    <div class="mk-nc">
+      <div class="mk-nc-unavail">
+        <div class="mk-nc-unavail-ic">!</div>
+        <div class="mk-nc-unavail-t">通知中心暂时不可用</div>
+        <div class="mk-nc-unavail-b">另一个通知服务正在运行，bread 正在等待接管。</div>
+      </div>
+    </div>
+  </div>
 </div>
 <ul class="note">
   <li>面板顶边紧贴任务栏底边，高度绑定于任务栏。</li>
@@ -240,6 +250,8 @@
   <li>聚合标题与清理按钮：<code>fg</code> 底 <code>bg</code> 字，圆角 6px，与托盘同语言。</li>
   <li>每条消息：<code>surface</code> 底 <code>fg</code> 字（配色对齐通知弹窗）、圆角 8px；标题至多 1 行、正文至多 2 行，超出裁剪显示省略号；关闭按钮与标题同行置右。</li>
   <li>顶部一键清理全部按钮，位于右上角。</li>
+  <li>排队态：通知中心不可用时，面板保持相同外框与定位，内容区居中显示「通知中心暂时不可用」与一行等待说明；不显示清理按钮、应用分组与消息卡，取得总线名后恢复正常列表 / 空态。</li>
+  <li>排队提示：bread 启动时总线名被其他通知服务占用，按普通优先级通知弹窗模板提示一次——应用名 <code>bread</code>、标题「通知中心暂时不可用」、正文「另一个通知服务正在运行，bread 将在其退出后接管。」；样式与生命周期同 <a href="#sec-3-10-5">§3.10.5</a> 普通优先级（<code>surface</code> 底、<code>fg</code> 字、应用名 <code>gold</code>、30s），不进入通知中心缓存，取得总线名后立即关闭。</li>
   <li>弹出触发、悬停查看全文与左键/中键行为见 <a href="README.html#界面交互">README.html「界面交互」</a>。</li>
 </ul>
 
@@ -297,11 +309,12 @@
 <h4>daemon → 窗口（推送）</h4>
 <table>
   <tr><th>消息</th><th>载荷</th></tr>
-  <tr><td><code>snapshot</code></td><td>首连全量：显示器切片（工作区状态、活动窗口）、托盘项、系统状态、通知、CSS 路径</td></tr>
-  <tr><td><code>state</code></td><td>增量：工作区 / 活动窗口 / 系统状态</td></tr>
+  <tr><td><code>snapshot</code></td><td>首连全量：显示器切片（工作区状态、活动窗口）、托盘项、系统状态、通知、通知中心可用性、CSS 路径</td></tr>
+  <tr><td><code>state</code></td><td>增量：工作区 / 活动窗口 / 系统状态 / 通知中心可用性</td></tr>
   <tr><td><code>tray</code></td><td>托盘项增 / 删 / 改（携带 Item 数据，含 IconSource）</td></tr>
   <tr><td><code>menu_changed</code></td><td>定向：弹窗打开期间的菜单刷新触发</td></tr>
   <tr><td><code>notification</code></td><td>通知记录（推送全部窗口）</td></tr>
+  <tr><td><code>notification_prompt</code></td><td>通知中心不可用的本地提示（普通优先级弹窗模板，不进入通知缓存）</td></tr>
   <tr><td><code>reload</code></td><td>按 daemon 跟踪的路径重读 CSS</td></tr>
 </table>
 <ul class="note">
@@ -316,8 +329,10 @@
   <tr><td>工作区映射表</td><td>工作区 ID → 所属显示器；本屏工作区清单＝现存工作区 ∪ 绑定到本屏的静态 workspace 规则（有规则无窗口＝非活跃工作区，见 <a href="README.html#界面交互">README.html「界面交互」</a>；daemon 持有）</td><td>启动/插拔/配置重载时全量重建（按名去重 + id 排序）；<code>workspace&gt;&gt;X</code> → 切片推送</td></tr>
   <tr><td>控制指令</td><td>行文本 → { open, close, open-all, close-all, exit, reload }</td><td>Socket 读入 → daemon 指令分发</td></tr>
   <tr><td>通知记录</td><td>应用名、图标、摘要、正文、通知 ID（daemon 持有）</td><td>DBus Notify 调用参数 → 缓存 → 推送全部窗口</td></tr>
+  <tr><td>通知中心可用性</td><td>布尔值（daemon 持有）</td><td>bnote <code>SessionState</code> → Queued 为 false、Available 为 true；状态变化推送全部窗口</td></tr>
+  <tr><td>通知中心提示</td><td>标题、正文（daemon 生成）</td><td>排队发生时经 <code>notification_prompt</code> 推送；窗口按普通优先级弹窗模板呈现，不进入通知缓存</td></tr>
   <tr><td>托盘 Item 视图</td><td>图标（IconSource）、状态、标题、提示（ToolTip）、有无菜单、存活标记（daemon → 窗口）</td><td>breadpan 现场读取 → 状态推送；窗口渲染直出为可绘制对象；alive=false → 置灰样式</td></tr>
-  <tr><td>窗口切片</td><td>单窗口所需状态：本屏工作区、活动窗口、托盘、通知、CSS 路径</td><td>daemon 状态变更 → 切片增量推送；首连全量</td></tr>
+  <tr><td>窗口切片</td><td>单窗口所需状态：本屏工作区、活动窗口、托盘、通知、通知中心可用性、CSS 路径</td><td>daemon 状态变更 → 切片增量推送；首连全量</td></tr>
   <tr><td>样式变量集</td><td>底板/文字/强调/语义/边框五组 CSS 变量（清单见 <a href="#sec-3-9">§3.9</a>）；文件路径由 daemon 跟踪</td><td>窗口按路径加载 → GTK 样式表 → 组件呈现（reload 广播重读）</td></tr>
 </table>
 

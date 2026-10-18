@@ -34,28 +34,55 @@ pub async fn start(
 
 1. 校验能力清单（见 §4.6）；
 2. 注册 `/org/freedesktop/Notifications` 接口；
-3. 申请 `org.freedesktop.Notifications` 总线名。
+3. 创建 `DBusProxy` 并先订阅 `NameAcquired`；
+4. 申请 `org.freedesktop.Notifications` 总线名。
 
-先注册对象、再申请名字，避免名字生效后调用到达时接口尚未就位。`request_name` 失败时会把刚注册的接口移除，避免留下半装配状态。
+先注册对象、再申请名字，避免名字生效后调用到达时接口尚未就位。任何一步失败都会把刚注册的接口移除，避免留下半装配状态。
 
-### 1.3 不抢占已有通知守护
+### 1.3 不抢占已有通知守护，排队等待接管
 
-`request_name` 使用 zbus 默认标志，即 `DoNotQueue`，不请求替换现有所有者。桌面已有 dunst / mako / 桌面环境通知守护时，`start` 返回 `Error::Bus`。这是预期行为，不是库内自动降级。
+申请总线名使用**空 flags**：
+
+```rust
+RequestNameFlags::empty()
+```
+
+不能使用 zbus 的默认 flags。`RequestNameFlags::default()` 实际是 `AllowReplacement | ReplaceExisting | DoNotQueue`，会替换别人并允许别人替换自己，与目标行为相反。
+
+空 flags 的语义：
+
+- 不请求替换当前 owner；
+- 不允许其他连接替换自己；
+- 名字被占用时进入总线队列。
+
+因此已有 dunst / mako 占用名字时，`Session::start` 返回 `Ok`，`Session::state()` 为 `SessionState::Queued`；当前 owner 退出后，`NameAcquired` 触发，状态变为 `Available`，之前排队的首个通知调用由总线投递。
 
 ### 1.4 一个连接只能装配一个会话
 
-同一连接上重复 `Session::start` 时，`object_server().at()` 返回 `false`，库返回 `Error::InvalidArgs`。不同连接之间仍由总线名所有权决定谁成功。
+同一连接上重复 `Session::start` 时，`object_server().at()` 返回 `false`，库返回 `Error::InvalidArgs`。不同连接之间由总线队列决定接管顺序。
 
-### 1.5 没有 `stop` / `Drop` 清理
+### 1.5 状态观察
 
-`Session` 只持有 `zbus::Connection`；接口和总线名归连接所有。当前没有：
+`Session::state()` 返回当前 `Available` / `Queued`；`Session::subscribe()` 返回 `watch::Receiver<SessionState>`。宿主应先订阅再读状态，避免在两者之间漏掉排队期间的接管：
 
-- `Session::stop()`；
-- `Drop` 中注销接口或释放总线名。
+```rust
+let mut changes = session.subscribe();
+match session.state() {
+    SessionState::Available => { /* 好消息 */ }
+    SessionState::Queued => { /* 暂时不可用 */ }
+}
+```
 
-因此，只要连接还活着，服务就继续存在；宿主需要停服时应释放连接或自行调用 zbus 的 `ObjectServer::remove` / `Connection::release_name`。这是当前实现的已知缺口，不应被理解为“会话对象销毁即停服”。
+### 1.6 没有 `stop` / 释放名字
 
-### 1.6 事件通道背压
+`Session` 只持有 `zbus::Connection`、状态发送端与排队接管任务。`Drop` 会中止排队接管任务，但**不会**：
+
+- 注销 `/org/freedesktop/Notifications` 接口；
+- 释放已取得或仍在队列中的总线名。
+
+接口和名字归连接所有。只要连接还活着，服务就继续存在；宿主需要停服时应释放连接或自行调用 zbus 的 `ObjectServer::remove` / `Connection::release_name`。这是当前实现的已知缺口。
+
+### 1.7 事件通道背压
 
 库接收 `tokio::sync::mpsc::Sender<NoticeEvent>`。`notify` 与 `close_notification` 都会 `await` 发送事件：
 
@@ -64,7 +91,7 @@ pub async fn start(
 
 示例使用容量 16 的有界通道。
 
-### 1.7 `close()` 依赖已注册接口
+### 1.8 `close()` 依赖已注册接口
 
 宿主回发关闭的 `close(conn, id, reason)` 通过 `ObjectServer` 查找 `server::Server` 接口来更新协议层在册集合。如果接口不存在，或 id 已不在册，函数直接返回 `Ok(())`，不再发射信号。这样：
 
@@ -239,7 +266,7 @@ conn.emit_signal(None, PATH, INTERFACE, "NotificationClosed", &(id, reason))
 - **不处理其他 hints**：`category`、`desktop-entry`、`resident`、`transient`、`sound-file`、`sound-name`、`suppress-sound`、`x`、`y` 等均不进入 `Notice`。
 - **不加载图标**：`NoticeIcon::Name` 保存主题名、文件路径或 URI 原文；库不查主题、不读文件、不解析 `file://`。宿主必须自行区分并加载。
 - **不管理生命周期**：没有计时器、通知缓存、超时、持久化或通知中心逻辑；`expire_timeout_ms` 只是建议值。
-- **不提供 D-Bus 激活服务文件**：bnote 是库，不安装 `org.freedesktop.Notifications.service`；宿主必须自己先启动并完成 `Session::start`。
+- **明确不做 D-Bus 激活**：bnote 不安装 `org.freedesktop.Notifications.service`、不提供 stub；bread 未运行时由 dunst 等服务自己的 service 文件被总线拉起。bread 运行后只按空 flags 排队接管名字。
 - **不校验动作回发**：不检查 `ActionInvoked` 的 key 是否存在于原通知，也不检查通知是否仍在册。
 - **不支持 16 位图像与多帧动画**：`image-data` 只取单帧 8 位数据。
 - **不实现 `icon-multi`**：能力可以声明，但库没有动画帧模型；如果需要动画，宿主需要扩展类型。
@@ -252,10 +279,11 @@ conn.emit_signal(None, PATH, INTERFACE, "NotificationClosed", &(id, reason))
 示例必须使用：
 
 ```rust
-let _session = Session::start(&conn, etx, caps, info).await?;
+let session = Session::start(&conn, etx, caps, info).await?;
+let mut changes = session.subscribe();
 ```
 
-`Session` 返回 `Rc`，示例把它绑定在 `main` 的局部作用域内，保证连接与接口在事件循环期间存活。
+`Session` 返回 `Rc`，示例把它绑定在 `main` 的局部作用域内，保证连接、接口与状态广播在事件循环期间存活；`changes.changed()` 用于观察排队后的接管。
 
 ### 6.2 stdin 不能直接塞进 `tokio::select!`
 
@@ -286,14 +314,18 @@ let _session = Session::start(&conn, etx, caps, info).await?;
 - 示例 `token` 命令；
 - 示例 `close <id> expired` 与客户端 `CloseNotification`；
 - 重复 `CloseNotification` 返回空消息 D-Bus Error；
-- `gdbus` 传入 `image-data` 并观察 RGBA 归一结果。
+- `gdbus` 传入 `image-data` 并观察 RGBA 归一结果；
+- 双实例：第一个 `Available`；第二个 `Queued`；第一个退出后第二个 `Available` 并收到后续 `Notify`；
+- 第二连接以 `ReplaceExisting` 请求名字：返回 `InQueue` / `Exists`，当前 owner 不变。
 
 ## 7. 建议回填文档
 
 | 细节 | 建议落点 | 状态 |
 |---|---|---|
 | `Session::start` 异步、注册顺序、失败回滚 | ARCHITECTURE §4.1、CODE §3.1 | 已回填主要签名 |
-| 无 `stop` / `Drop` 清理 | ARCHITECTURE §4.1 | 待补 |
+| 空 flags 排队、不替换、不允许被替换 | ARCHITECTURE §4.1、CODE §4.3 | 已回填 |
+| `SessionState` / `watch` 状态广播 | ARCHITECTURE §4.1、CODE §3.1 | 已回填 |
+| 无 `stop` / 释放名字；`Drop` 仅中止接管任务 | ARCHITECTURE §4.1 | 待补 |
 | 事件通道背压与接收端关闭行为 | ARCHITECTURE §4.1 / CODE §4.1 | 待补 |
 | 未知 id 的错误名与空消息 | CODE §3.2 | 待补 |
 | id 分配从 1 开始、回绕、跳过 0 与在册 id | CODE §3.2 | 待补 |
@@ -302,13 +334,13 @@ let _session = Session::start(&conn, etx, caps, info).await?;
 | `OwnedValue`、hints 别名、RGBA 归一细节 | CODE §3.4、ARCHITECTURE §4.3 | 已回填主要签名/字段，归一细节待补 |
 | body markup 原样透传、actions 能力不强制 | ARCHITECTURE §4.3 | 待补 |
 | `NoticeIcon::Name` 同时承载主题名/路径/URI | ARCHITECTURE §4.3 | 部分回填 |
-| 无 D-Bus 激活服务文件 | BUILD | 待补 |
+| 无 D-Bus 激活：允许 dunst 在 bread 未运行时被拉起 | ARCHITECTURE §4.1、BUILD | 已回填 |
 | 16 位图像与 `icon-multi` 不支持 | ARCHITECTURE §4.3 | 待补 |
 | 示例 stdin 异步桥接、dunstify 参数格式 | BUILD | 已回填主要用法 |
 
 ## 8. 后续可补的实现项
 
-- `Session::stop()` 或 `Drop` 清理，显式注销接口并释放总线名；
+- `Session::stop()` 显式注销接口并释放总线名（`Drop` 当前只中止排队接管任务）；
 - 把 `image-path` 的 `file://` URI 归一为本地路径，或增加 `NoticeIcon::Path`；
 - 16 位图像与多帧 `icon-multi` 模型；
 - 对 `ActionInvoked` / `ActivationToken` 做在册 id 与动作键校验（如果需要更严格的宿主保护）；

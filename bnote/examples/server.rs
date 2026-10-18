@@ -1,7 +1,8 @@
 //! 交互式通知服务器测试器（API 契约见 ARCHITECTURE §4）。
 //!
-//! 以常驻 notification server 形式占用会话总线的 org.freedesktop.Notifications，
-//! stdout 打印全部库事件；stdin 命令驱动宿主侧行为，覆盖 bnote 的全部交互面：
+//! 以常驻 notification server 形式运行：名字空闲时占用会话总线的
+//! org.freedesktop.Notifications，被占用时排队等待接管；
+//! stdout 打印全部库事件与状态变化；stdin 命令驱动宿主侧行为，覆盖 bnote 的全部交互面：
 //!
 //!   list                    列出在册通知
 //!   close <id> [reason]     宿主侧关闭并回发 NotificationClosed（expired|dismissed|request，默认 request）
@@ -20,7 +21,7 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
 
-use bnote::{CloseReason, Notice, NoticeEvent, ServerInfo, Session};
+use bnote::{CloseReason, Notice, NoticeEvent, ServerInfo, Session, SessionState};
 
 const HELP: &str = "\
 命令：
@@ -68,7 +69,7 @@ async fn main() -> Result<(), bnote::Error> {
         .await
         .map_err(bnote::Error::Bus)?;
     let (etx, mut erx) = tokio::sync::mpsc::channel(16);
-    let _session = Session::start(
+    let session = Session::start(
         &conn,
         etx,
         bnote::Capabilities {
@@ -77,6 +78,7 @@ async fn main() -> Result<(), bnote::Error> {
         info.clone(),
     )
     .await?;
+    let mut state_rx = session.subscribe();
 
     let (ctx, mut crx) = tokio::sync::mpsc::unbounded_channel::<String>();
     std::thread::spawn(move || {
@@ -88,7 +90,13 @@ async fn main() -> Result<(), bnote::Error> {
         }
     });
 
-    println!("通知服务器已就绪（org.freedesktop.Notifications）\n{HELP}");
+    match session.state() {
+        SessionState::Available => println!("通知服务器已就绪（org.freedesktop.Notifications）"),
+        SessionState::Queued => {
+            println!("通知服务器已启动：总线名被占用，排队等待接管");
+        }
+    }
+    println!("{HELP}");
     let mut notices: BTreeMap<u32, Notice> = BTreeMap::new();
 
     loop {
@@ -103,6 +111,16 @@ async fn main() -> Result<(), bnote::Error> {
                     notices.remove(&id);
                 }
                 None => break,
+            },
+            state = state_rx.changed() => {
+                if state.is_ok() {
+                    match *state_rx.borrow() {
+                        SessionState::Available => {
+                            println!("← 已取得 org.freedesktop.Notifications，通知服务可用");
+                        }
+                        SessionState::Queued => println!("← 通知服务重新排队"),
+                    }
+                }
             },
             cmd = crx.recv() => {
                 let Some(line) = cmd else { break };

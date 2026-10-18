@@ -34,12 +34,14 @@
 <h2 id="sec-3">3. 内部类型与方法签名</h2>
 
 <h3 id="sec-3-lib">3.1. src/lib.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct Session { /* 总线连接 */ }
+<pre><code>pub struct Session { /* 总线连接、状态广播、排队接管任务 */ }
 
 impl Session {
     pub async fn start(conn: &amp;zbus::Connection, tx: Sender&lt;NoticeEvent&gt;,
                  caps: Capabilities, info: ServerInfo)
         -&gt; Result&lt;Rc&lt;Self&gt;, bnote::Error&gt;;
+    pub fn state(&amp;self) -&gt; SessionState;
+    pub fn subscribe(&amp;self) -&gt; watch::Receiver&lt;SessionState&gt;;
     pub fn connection(&amp;self) -&gt; &amp;zbus::Connection;
 }
 
@@ -64,6 +66,7 @@ impl Server {
 <ul class="note">
   <li>四个方法与规范 §9.1 一一对应；id 分配与 <code>replaces_id</code> 归一在 <code>notify</code> 内完成。</li>
   <li><code>close_notification</code> 移除在册 id、投递 <code>NoticeEvent::Close</code>，并回发原因 <code>CloseRequest</code> 的 <code>NotificationClosed</code>；id 不存在时返回 D-Bus Error。</li>
+  <li><code>Session::start</code> 申请名字时使用空 flags（见 CODE §4.3）：名字被占时由总线排队，不替换当前 owner。</li>
 </ul>
 
 <h3 id="sec-3-signal">3.3. src/signal.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -98,6 +101,7 @@ pub struct HintSet {   //见 ARCHITECTURE §4.3
 <pre><code>pub struct Notice;          //见 ARCHITECTURE §4.3
 pub enum NoticeEvent;       //见 ARCHITECTURE §4.2
 pub enum CloseReason;       //见 ARCHITECTURE §4.2
+pub enum SessionState;      //见 ARCHITECTURE §4.1
 pub struct Capabilities;    //见 ARCHITECTURE §4.2
 pub struct ServerInfo;      //见 ARCHITECTURE §4.2</code></pre>
 
@@ -127,6 +131,21 @@ pub struct ServerInfo;      //见 ARCHITECTURE §4.2</code></pre>
     └── signal::emit_closed(id, reason)</code></pre>
 <ul class="note">
   <li>两条路径都必须恰好发射一次 <code>NotificationClosed</code>（规范 §9.2.1）；宿主对已在册集合之外的 id 调用 <code>close()</code> 不会重复发射。</li>
+</ul>
+
+<h3 id="sec-4-3">4.3. 启动、排队与接管</h3>
+<pre><code>Session::start()
+├── validate_capabilities()
+├── object_server().at(PATH, Server)
+├── DBusProxy::receive_name_acquired_with_args(BUS_NAME)
+├── request_name_with_flags(BUS_NAME, RequestNameFlags::empty())
+│   ├── PrimaryOwner / AlreadyOwner → state Available
+│   ├── InQueue → state Queued
+│   └── 其他失败 → unregister() → 返回 Error
+└── NameAcquired → state Available（仅排队路径）</code></pre>
+<ul class="note">
+  <li>空 flags 表示不请求替换、不允许被替换、名字被占时排队；不使用 zbus 的默认 flags。</li>
+  <li>状态经 <code>watch</code> 广播；宿主应在 <code>start</code> 后先 <code>subscribe()</code> 再读 <code>state()</code>，避免漏掉排队期间的接管。</li>
 </ul>
 
 </main>

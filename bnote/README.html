@@ -20,14 +20,16 @@
 <ul>
   <li>本库无图形界面；「用户」即宿主进程。</li>
   <li>宿主装配会话后订阅通知事件流；对外回发（关闭、动作、激活令牌）通过显式 API 调用，见 <a href="ARCHITECTURE.html">ARCHITECTURE.html</a>。</li>
+  <li>总线名被其他通知服务占用时，会话进入排队状态（<code>SessionState::Queued</code>）；宿主通过 <code>state</code> / <code>subscribe</code> 观察，取得名字后恢复 <code>Available</code>。</li>
 </ul>
 
 <h2 id="sec-3">3. 原型 / 参考资料</h2>
 <ul>
   <li>协议权威文本：<a href="reference/notification-spec.clean.html">reference/notification-spec.clean.html</a>（官方规范清理版）。</li>
-  <li>原型：交互式测试服务器 <code>examples/server.rs</code>——常驻占用 <code>org.freedesktop.Notifications</code>，stdout 打印全部事件；stdin 命令：<code>list</code>、<code>close &lt;id&gt; [reason]</code>、<code>action &lt;id&gt; &lt;key&gt;</code>、<code>token &lt;id&gt; &lt;token&gt;</code>、<code>info</code>、<code>quit</code>；启动参数 <code>--name / --vendor / --caps a,b,c</code>。</li>
+  <li>原型：交互式测试服务器 <code>examples/server.rs</code>——常驻运行，名字空闲时占用 <code>org.freedesktop.Notifications</code>，被占用时排队等待接管；stdout 打印全部事件与状态变化；stdin 命令：<code>list</code>、<code>close &lt;id&gt; [reason]</code>、<code>action &lt;id&gt; &lt;key&gt;</code>、<code>token &lt;id&gt; &lt;token&gt;</code>、<code>info</code>、<code>quit</code>；启动参数 <code>--name / --vendor / --caps a,b,c</code>。</li>
   <li>外部客户端驱动：<code>notify-send [-u critical] [-r id] "标题" "正文"</code>；<code>dunstify -A "键,标签" "标题"</code>（客户端阻塞等动作回发）；<code>gdbus call --session -d org.freedesktop.Notifications -o /org/freedesktop/Notifications -m org.freedesktop.Notifications.CloseNotification &lt;id&gt;</code>。</li>
   <li>构建、隔离总线运行与测试见 <a href="BUILD.html">BUILD.html</a>。</li>
+  <li>双实例演示：第二个实例进入排队，第一个退出后自动接管并打印状态变化。</li>
 </ul>
 
 <footer>

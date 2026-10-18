@@ -9,16 +9,21 @@ mod server;
 pub mod signal;
 mod types;
 
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, mpsc::Sender};
+use enumflags2::BitFlag;
+use futures_util::StreamExt;
+use tokio::sync::{Mutex, mpsc::Sender, watch};
 use zbus::Connection;
+use zbus::fdo::{DBusProxy, RequestNameFlags, RequestNameReply};
 
 pub use signal::{emit_action_invoked, emit_activation_token, emit_closed};
 pub use types::{
-    Action, Capabilities, CloseReason, Notice, NoticeEvent, NoticeIcon, ServerInfo, Urgency,
+    Action, Capabilities, CloseReason, Notice, NoticeEvent, NoticeIcon, ServerInfo, SessionState,
+    Urgency,
 };
 
 pub(crate) const BUS_NAME: &str = "org.freedesktop.Notifications";
@@ -61,13 +66,16 @@ impl From<zbus::Error> for Error {
 /// 已注册的通知服务会话。
 pub struct Session {
     conn: Connection,
+    state: watch::Sender<SessionState>,
+    acquisition: RefCell<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl Session {
-    /// 在 `conn` 上注册 `/org/freedesktop/Notifications` 并占用
+    /// 在 `conn` 上注册 `/org/freedesktop/Notifications` 并申请
     /// `org.freedesktop.Notifications` 总线名。
     ///
-    /// 返回后服务即可接收方法调用；事件经 `tx` 流向宿主。
+    /// 名字空闲时立即成为 owner；被其他服务占用时进入总线队列，返回时状态为
+    /// [`SessionState::Queued`]。取得名字后通过 [`Session::subscribe`] 观察状态变化。
     pub async fn start(
         conn: &Connection,
         tx: Sender<NoticeEvent>,
@@ -85,18 +93,94 @@ impl Session {
             )));
         }
 
-        if let Err(error) = conn.request_name(BUS_NAME).await {
-            let _ = conn.object_server().remove::<server::Server, _>(PATH).await;
-            return Err(error.into());
+        let dbus = match DBusProxy::new(conn).await {
+            Ok(proxy) => proxy,
+            Err(error) => {
+                unregister(conn).await;
+                return Err(error.into());
+            }
+        };
+
+        // 先订阅 NameAcquired，再申请名字，避免排队期间漏掉接管信号。
+        let mut acquired = match dbus.receive_name_acquired_with_args(&[(0, BUS_NAME)]).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                unregister(conn).await;
+                return Err(error.into());
+            }
+        };
+
+        // flags 为空：不请求替换、不允许被替换、名字被占时排队。
+        let reply = match conn
+            .request_name_with_flags(BUS_NAME, RequestNameFlags::empty())
+            .await
+        {
+            Ok(reply) => reply,
+            Err(error) => {
+                unregister(conn).await;
+                return Err(error.into());
+            }
+        };
+
+        let initial = match reply {
+            RequestNameReply::PrimaryOwner | RequestNameReply::AlreadyOwner => {
+                SessionState::Available
+            }
+            RequestNameReply::InQueue => SessionState::Queued,
+            RequestNameReply::Exists => {
+                unregister(conn).await;
+                return Err(Error::InvalidArgs(format!(
+                    "unexpected RequestName reply for {BUS_NAME}: Exists"
+                )));
+            }
+        };
+
+        let (state_tx, _) = watch::channel(initial);
+        let session = Rc::new(Self {
+            conn: conn.clone(),
+            state: state_tx.clone(),
+            acquisition: RefCell::new(None),
+        });
+
+        if initial == SessionState::Queued {
+            let state_tx = state_tx.clone();
+            let task = tokio::spawn(async move {
+                if acquired.next().await.is_some() {
+                    let _ = state_tx.send_replace(SessionState::Available);
+                }
+            });
+            *session.acquisition.borrow_mut() = Some(task);
         }
 
-        Ok(Rc::new(Self { conn: conn.clone() }))
+        Ok(session)
+    }
+
+    /// 当前总线名状态。
+    pub fn state(&self) -> SessionState {
+        *self.state.borrow()
+    }
+
+    /// 订阅状态变化；已发生的状态可直接由 [`Session::state`] 读取。
+    pub fn subscribe(&self) -> watch::Receiver<SessionState> {
+        self.state.subscribe()
     }
 
     /// 本会话使用的总线连接。
     pub fn connection(&self) -> &Connection {
         &self.conn
     }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        if let Some(task) = self.acquisition.get_mut().take() {
+            task.abort();
+        }
+    }
+}
+
+async fn unregister(conn: &Connection) {
+    let _ = conn.object_server().remove::<server::Server, _>(PATH).await;
 }
 
 /// 回发 `NotificationClosed`，并从协议层在册集合移除 `id`。

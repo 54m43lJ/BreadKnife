@@ -21,7 +21,7 @@
 <table>
   <tr><th>项</th><th>说明</th></tr>
   <tr><td>Rust 工具链</td><td>rustup / cargo（edition 2024）</td></tr>
-  <tr><td>crate 依赖</td><td><code>zbus</code>（tokio 特性）、<code>tokio</code>（sync）</td></tr>
+  <tr><td>crate 依赖</td><td><code>zbus</code>（tokio 特性）、<code>tokio</code>（sync）、<code>futures-util</code>、<code>enumflags2</code></td></tr>
   <tr><td>运行环境</td><td>DBus session bus；无需 GTK、Wayland/X11 或额外系统库</td></tr>
   <tr><td>测试客户端</td><td>可选：<code>notify-send</code> / <code>dunstify</code> / <code>gdbus</code></td></tr>
 </table>
@@ -41,8 +41,9 @@ cargo clippy --all-targets -- -D warnings</code></pre>
 <pre><code>dbus-run-session -- cargo run --example server -- \
   --name bnote-server --vendor breadknife --caps actions,body,body-markup,icon-static</code></pre>
 <ul class="note">
-  <li>示例常驻占用 <code>org.freedesktop.Notifications</code>，stdout 打印全部事件，stdin 接受 <code>list</code> / <code>close</code> / <code>action</code> / <code>token</code> / <code>info</code> / <code>quit</code>；</li>
-  <li>真实桌面上已有通知守护（dunst / mako / 桌面环境内置）时总线名申请失败，须先停掉既有守护，或用 <code>dbus-run-session</code> 在空总线上演示；</li>
+  <li>示例常驻占用 <code>org.freedesktop.Notifications</code>，stdout 打印全部事件与状态变化，stdin 接受 <code>list</code> / <code>close</code> / <code>action</code> / <code>token</code> / <code>info</code> / <code>quit</code>；</li>
+  <li>双实例演示：第二个实例打印排队状态（<code>Queued</code>），第一个退出后第二个自动取得总线名并打印 <code>Available</code>；</li>
+  <li>真实桌面上已有通知守护（dunst / mako / 桌面环境内置）时，示例进入排队，停掉既有守护后自动接管；也可用 <code>dbus-run-session</code> 在空总线上演示；</li>
   <li>隔离会话中的客户端须在同一 <code>dbus-run-session</code> 命令内启动，例如另开 shell 后设置 <code>DBUS_SESSION_BUS_ADDRESS</code>。</li>
 </ul>
 

@@ -76,6 +76,15 @@ pub struct ServerInfo {
     pub spec_version: String,
 }
 
+/// 通知服务会话在总线上的可用状态。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionState {
+    /// 已持有 `org.freedesktop.Notifications`，通知可用。
+    Available,
+    /// 总线名被其他服务持有；当前排队，等待其退出后接管。
+    Queued,
+}
+
 /// 归一后的通知。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {

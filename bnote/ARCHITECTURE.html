@@ -30,10 +30,17 @@
 <h2 id="sec-4">4. 接口</h2>
 
 <h3 id="sec-4-1">4.1. 宿主 API（Rust）</h3>
-<pre><code>impl Session {
+<pre><code>pub enum SessionState {
+    Available,
+    Queued,
+}
+
+impl Session {
     pub async fn start(conn: &amp;zbus::Connection, tx: Sender&lt;NoticeEvent&gt;,
                  caps: Capabilities, info: ServerInfo)
         -&gt; Result&lt;Rc&lt;Session&gt;, bnote::Error&gt;;
+    pub fn state(&amp;self) -&gt; SessionState;
+    pub fn subscribe(&amp;self) -&gt; watch::Receiver&lt;SessionState&gt;;
 }
 
 pub async fn close(conn: &amp;zbus::Connection, id: u32, reason: CloseReason)
@@ -47,6 +54,8 @@ pub async fn activation_token(conn: &amp;zbus::Connection, id: u32, token: &amp;
 <ul class="note">
   <li><code>Session::start</code> 在总线上注册 <code>org.freedesktop.Notifications</code> 并常驻应答；能力与服务器信息由宿主声明，事件经 <code>tx</code> 流向宿主。</li>
   <li><code>start</code> 为异步：对象注册与总线名申请都经由 zbus 的异步连接完成。</li>
+  <li>总线名使用空 flags 申请：不请求替换现有 owner，也不允许他人替换自己；名字被占用时进入队列，<code>state</code> 为 <code>Queued</code>，取得名字后变为 <code>Available</code>。</li>
+  <li>本库不安装 D-Bus service 文件，也不提供 stub；bread 未运行时不会因通知调用被总线拉起。</li>
   <li>能力名须为字母数字与连字符，且 <code>icon-static</code> 与 <code>icon-multi</code> 互斥；不合法时 <code>start</code> 返回 <code>InvalidArgs</code>。</li>
   <li>三个回发函数对应规范的三个信号：关闭、动作已调用、激活令牌。</li>
 </ul>
