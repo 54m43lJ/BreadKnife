@@ -2,21 +2,23 @@
 
 <a id="top"></a>
 
-Documents per project, in HTML. The development docs split by boundary: upper (users, dependent software) → USER · none (internal only) → CORE · lower (data sources, dependencies) → PROVIDER.
+Documents per project, in HTML — the development docs split by boundary:
 
-| # | Document | Boundary | Content |
-|--:|----------|----------|---------|
-| 1 | [README](#readme) | — | WHAT & WHY · user interactions · prototype |
-| 2 | [USER](#user) | upper — end users / dependent software | protocols · conventions · APIs · workflows |
-| 3 | [CORE](#core) | none — internal only | internal data structures & APIs · call stacks |
-| 4 | [PROVIDER](#provider) | lower — data sources / dependencies | protocols · conventions · APIs · workflows — only when such a boundary exists |
-| 5 | BUILD.html | — | written after development: how to use & build on the project; not a design-phase document, but kept |
+| # | Document | Boundary | Content | Elsewhere |
+|--:|----------|----------|---------|-----------|
+| 1 | [README](#readme) | — | WHAT & WHY · user interactions · prototype | — |
+| 2 | [USER](#user) | upper — end users / dependent software | protocols · conventions · APIs · workflows · UI (graphical programs) | internal mechanics → [CORE](#core) · underlying sources → [PROVIDER](#provider) |
+| 3 | [CORE](#core) | none — internal only; anything with no counterpart outside the project | internal data structures & APIs · call stacks · SBOM | usage-facing → [USER](#user) · provider boundary → [PROVIDER](#provider) |
+| 4 | [PROVIDER](#provider) | lower — underlying data sources / dependencies (system services, IPC, hardware, daemons, network endpoints, …); omit when absent | protocols · conventions · APIs · workflows | whole-system view → [USER](#user) · internal handling → [CORE](#core) |
+| 5 | [BUILD](#build) | written after development | how to use & build on the project | — |
 
 **End goal** — a set of design constraints immediately useful to any developer implementing the code.
 
 **AVOID at all costs** — comparisons to historical design · rationale for a specific design choice (broad general principles excepted).
 
-## Global constraints <a href="#top">↑</a>
+## Global constraints
+
+[↑](#top)
 
 | # | Constraint | Rule |
 |--:|-----------|------|
@@ -30,16 +32,19 @@ Documents per project, in HTML. The development docs split by boundary: upper (u
 | 8 | One block, one flow | a code block is a single continuous content; disjoint pieces → separate blocks/subsections |
 | 9 | CONVENTIONS chapter | USER / CORE / PROVIDER each keep one, right after the first chapter (may stay empty); stated once there, referenced from the affected sections |
 
-## Readme <a href="#top">↑</a>
+## Readme
 
-1. **WHAT & WHY** — IDEAL: the problem to solve · GOAL: what success looks like
+[↑](#top)
+
+1. **WHAT & WHY** — IDEAL: the problem to solve · GOAL: what success looks like · non-goals (optional)
 2. **User interactions**
 3. **Prototype/mock** (if applicable) — code, pictures or videos
+4. **Project map** — optional; root project of a multi-project repo only · ASCII tree of the project family
+5. **Credits** — always present, always last
 
-## User <a href="#top">↑</a>
+## User
 
-Everything a customer — a dependent app, an end user — directly interacts with: protocols, conventions, APIs, workflows.
-Internal mechanics → [CORE](#core) · underlying data sources → [PROVIDER](#provider)
+[↑](#top)
 
 **Rules**
 - finer requirements not expressible by a straightforward mechanism → complement at the end of the section; last resort — prefer mechanism over specific constraint
@@ -48,61 +53,70 @@ Internal mechanics → [CORE](#core) · underlying data sources → [PROVIDER](#
 1. **TERMS** — domain keywords, never synonymized, full definition; when used, no further explanation
 2. **CONVENTIONS** — shared across interfaces (Global constraints #9)
 3. **DIAGRAMS** — mechanisms are the preferred documentation form
-   - general architecture — how the application interacts with others (component diagram)
-   - workflows — business language; terms/API names only for well-known standards; sequence / swimlane-activity form per [Diagrams](#diagrams)
+   - general architecture — how the application interacts with others (Component Diagram)
+   - workflows — business language; terms/API names only for well-known standards; Sequence Diagram / Activity Diagram with Swimlanes, form per [Diagrams](#diagrams-plantuml)
 4. **INTERFACES**
    - exposed API specifications — code, or pseudocode for multi-language support
    - message types incl. errors — pseudocode definition block + table of meaning & suggested action
    - data models — objects of exposed APIs (bare code/pseudocode, no comments) · field table (external specs referenced) · transformations (exact data object names)
+5. **UI** — optional; graphical programs only
+   - palette — color tokens and their semantic roles
+   - visual presentation — the per-component visual contract (geometry, states, styling); drawn samples preferred over prose
 
-## Core <a href="#top">↑</a>
+## Core
 
-Internal mechanics only: data structures & APIs that only the project itself accesses, and the run logic as call-stack trees.
-Usage-facing → [USER](#user) · provider boundary → [PROVIDER](#provider)
+[↑](#top)
 
 **Rules**
 - not exhaustive — key execution paths only: startup, key events, shutdown
 - symbols already defined in USER/PROVIDER → one-line declaration with trailing `//见 USER §xx.xx` / `//见 PROVIDER §xx.xx` — project language, no body, no redefinition; everything else syntactically valid in the project language
-- no engineering constants (bus names, periods, capacities, …) — tuned against the real system, they live in code alone, trade-off → implementation notes when it matters; a literal may appear only inline in a call stack, where that flow depends on it; exception: UI visual literals (dimensions, radii, font sizes, …) pin the visual contract and may be stated in interface/style sections (e.g. USER's component style spec) — CSS/code stays the operational source of truth
+- no engineering constants (bus names, periods, capacities, …) — tuned against the real system, they live in code alone, trade-off → implementation notes when it matters; a literal may appear only inline in a call stack, where that flow depends on it; exception: UI visual literals (dimensions, radii, font sizes, …) pin the visual contract and may be stated in USER's UI chapters — CSS/code stays the operational source of truth
 - no implementation reference → draft meaningful names/signatures marked `待实现，可以根据实际情况调整` (call-stack lines use the drafted names, no marker at the call site); a reference exists (main branch, breadpan, std / GTK APIs) → use its real names
 
 **Chapters**
 1. **File tree** — final code structure; each entry states what the module serves and links to its signatures subsection (no subsection → plain entry)
 2. **CONVENTIONS** — shared across interfaces (Global constraints #9)
-3. **Internal types & method signatures** — one subsection per source file, in file-tree order, titled by file name, linking back to the file tree; signature + at most a one-line purpose note — internals (call chains, branching, fallbacks, ordering) belong to the call-stack section
-4. **Call stack tree** — actual execution of key program logic
+3. **SBOM** — dependency libraries in one table: name · what it serves in this project; version & license stay in the package manifest
+4. **Internal types & method signatures** — one subsection per source file, in file-tree order, titled by file name, linking back to the file tree · methods: signature + at most a one-line purpose note — internals (call chains, branching, fallbacks, ordering) belong to the call-stack section · data structures & messages: type definitions, the comments are the explanation — no field tables
+5. **Call stack tree** — actual execution of key program logic
    - lines carry calls or judgments only — every line points at a concrete call (`module::fn(args)`, DBus method, event send, …); a judgment/branch condition is the sole exception
    - at most one trailing comment per call — a comment is not a tree node (no `├──`/`└──` of its own), but the ancestor spine `│` continues through its line
    - motivations, policies, trade-offs beyond one comment line → prose after the block
 
-## Provider <a href="#top">↑</a>
+## Provider
 
-Exists only when the project depends on underlying data sources/services (system services, IPC buses, hardware, daemons, network endpoints, …); otherwise omitted.
-Everything toward those dependencies: their protocols, conventions, APIs, workflows.
-Whole-system placement → USER's general architecture · internal handling → [CORE](#core)
+[↑](#top)
 
 **Rules**
 - contractual = the consumed subset only; the full authoritative definition is the official documentation (mirror in `reference/` when applicable) — linked, never copied
-- workflow diagrams name the provider's methods/messages crossing the boundary; the project's internal call structure never appears — that is CORE's call-stack tree
+- workflow diagrams name the provider's methods/messages crossing the boundary; the project's internal call structure never appears in them
 
 **Chapters**
 1. **TERMS** — provider-specific keywords, never synonymized, full definition; when used, no further explanation
 2. **CONVENTIONS** — shared across the provider boundary (Global constraints #9)
-3. **DIAGRAMS** — boundary workflows; sequence / swimlane-activity form per [Diagrams](#diagrams)
+3. **DIAGRAMS** — boundary workflows; Sequence Diagram / Activity Diagram with Swimlanes, form per [Diagrams](#diagrams-plantuml)
 4. **INTERFACES**
    - consumed API specifications — code, or pseudocode for multi-language support
    - message types sent/received on this boundary, incl. errors — pseudocode definition block + table of meaning & suggested action
    - data models — objects crossing this boundary (bare code/pseudocode, no comments) · field table (external spec as authority) · transformations between provider ↔ project data objects (exact names)
 
-## Diagrams: PlantUML <a href="#top">↑</a>
+## Diagrams: PlantUML
 
-<a id="diagrams"></a>
+[↑](#top)
 
-Applies to USER & PROVIDER. Mermaid is banned outright; ASCII graphs / actual pictures for everything else.
+Applies to USER & PROVIDER. Every diagram is drawn with PlantUML — Component Diagram, Sequence Diagram and Activity Diagram with Swimlanes alike; Mermaid and ASCII graphs are banned outright, actual pictures for everything else.
 Sources (`*.puml`) and exports (`*.svg`) live in the owning project's own `diagram/` — the folder follows its project, never a repo-wide root; the SVG is embedded via `<img>` with a relative path (`diagram/…`).
 
-1. **Form by complexity** — general architecture: component diagram · at most one branch decision (<2 nesting levels): sequence diagram · more branching: activity diagram, one swimlane per participant
+1. **Form by complexity** — general architecture: Component Diagram · at most one branch decision (<2 nesting levels): Sequence Diagram · more branching: Activity Diagram with Swimlanes, one swimlane per participant
 2. **Vertical layout** — branch-heavy flows as guard-clause cascades: checks run sequentially, each branch ends `stop` — never nested `if/else`, which PlantUML spreads side-by-side
 3. **Labels** — in the documentation language; short messages, details into notes
 4. **Source is authoritative** — edit `*.puml`, re-export (`plantuml -tsvg <project>/diagram/*.puml`), commit both together; never hand-edit the exported image, never let source and image diverge
 5. **Embedding** — wrap in `<div class="diagram">`, natural size, horizontal scroll when wider than the page (same mode as `<pre>`); never scale down
+
+## BUILD
+
+[↑](#top)
+
+**Rules**
+- produced once development is complete — not written during the design phase, but kept as part of the project
+- guides other developers in using and building on the project
