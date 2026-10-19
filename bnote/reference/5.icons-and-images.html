@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>5. Icons and Images — Desktop Notifications Specification</title>
+</head>
+<body>
+<p>Cleaned offline copy, styling removed. Authoritative text: <a href="https://specifications.freedesktop.org/notification-spec/latest/icons-and-images.html">https://specifications.freedesktop.org/notification-spec/latest/icons-and-images.html</a></p>
+<hr>
+<div id="icons-and-images"><h2>5 Icons and Images </h2><p>
+   A notification can optionally have an associated icon and/or image.
+  </p><p>
+   The icon is defined by the "app_icon" parameter.
+   The image can be defined by the "image-path", the "image-data" hint or the
+   deprecated "icon_data" hint.
+  </p><div id="id-1.6.4"><h3>5.1 Priorities </h3><p>
+    An implementation which only displays one image or icon must choose which one
+    to display using the following order:
+    </p><ol><li><p>"image-data"</p></li><li><p>"image-path"</p></li><li><p>app_icon parameter</p></li><li><p>for compatibility reason, "icon_data"</p></li></ol><p>
+   </p><p>
+    An implementation which can display both the image and icon must show the
+    icon from the "app_icon" parameter and choose which image to display using
+    the following order:
+    </p><ol><li><p>"image-data"</p></li><li><p>"image-path"</p></li><li><p>for compatibility reason, "icon_data"</p></li></ol><p>
+   </p></div><div id="icons-and-images-formats"><h3>5.2 Formats </h3><p>
+    The "image-data" and "icon_data" hints should be a D-Bus structure
+    of signature (iiibiiay).  The components of this structure are as follows:
+    </p><ol><li><p>width (i): Width of image in pixels</p></li><li><p>height (i): Height of image in pixels</p></li><li><p>rowstride (i): Distance in bytes between row starts</p></li><li><p>has_alpha (b): Whether the image has an alpha channel</p></li><li><p>bits_per_sample (i): Must always be 8</p></li><li><p>channels (i): If has_alpha is TRUE, must be 4, otherwise 3</p></li><li><p>data (ay): The image data, in RGB byte order</p></li></ol><p>
+    This image format is derived from <a href="https://docs.gtk.org/gdk-pixbuf/">gdk-pixbuf (https://docs.gtk.org/gdk-pixbuf/)</a>.
+  </p><p>
+    The "app_icon" parameter and "image-path" hint should be either an URI
+    (file:// is the only URI schema supported right now) or a name in a
+    freedesktop.org-compliant icon theme (not a GTK+ stock ID).
+   </p></div></div>
+</body>
+</html>

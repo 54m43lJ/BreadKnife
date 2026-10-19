@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>6. Categories — Desktop Notifications Specification</title>
+</head>
+<body>
+<p>Cleaned offline copy, styling removed. Authoritative text: <a href="https://specifications.freedesktop.org/notification-spec/latest/categories.html">https://specifications.freedesktop.org/notification-spec/latest/categories.html</a></p>
+<hr>
+<div id="categories"><h2>6 Categories </h2><p>
+   Notifications can optionally have a type indicator. Although neither
+   client or nor server must support this, some may choose to. Those servers
+   implementing categories may use them to intelligently display
+   the notification in a certain way, or group notifications of similar
+   types.
+  </p><p>
+   Categories are in
+   <code><em>class.specific</em></code> form.
+   <code>class</code> specifies the generic type of notification, and
+   <code>specific</code> specifies the more specific type of
+   notification.
+  </p><p>
+   If a specific type of notification does not exist for your notification,
+   but the generic kind does, a notification of type
+   <code><em>class</em></code> is acceptable.
+  </p><p>
+   Third parties, when defining their own categories, should discuss
+   the possibility of standardizing on the hint with other parties, preferably
+   in a place such as the
+   <a href="http://freedesktop.org/mailman/listinfo/xdg">xdg (http://freedesktop.org/mailman/listinfo/xdg)</a>
+   mailing list at
+   <a href="http://freedesktop.org/">freedesktop.org (http://freedesktop.org/)</a>. If it
+   warrants a standard, it will be added to the table above. If no
+   consensus is reached, the category should be in the form of
+   "<code>x-<em>vendor</em>.<em>class</em>.<em>name</em></code>."
+  </p><p>
+   The following table lists standard notifications as defined by this spec.
+   More will be added in time.
+  </p><div id="id-1.7.7"><h6>Table 2: Categories </h6><table><colgroup><col><col></colgroup><thead><tr><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>"call"</code></td><td>
+	A generic audio or video call notification that doesn't fit into
+	any other category.
+      </td></tr><tr><td><code>"call.ended"</code></td><td>
+	An audio or video call was ended.
+      </td></tr><tr><td><code>"call.incoming"</code></td><td>
+	A audio or video call is incoming.
+      </td></tr><tr><td><code>"call.unanswered"</code></td><td>
+	An incoming audio or video call was not answered.
+      </td></tr><tr><td><code>"device"</code></td><td>
+       A generic device-related notification that doesn't fit into
+       any other category.
+      </td></tr><tr><td><code>"device.added"</code></td><td>A device, such as a USB device, was added to the system.</td></tr><tr><td><code>"device.error"</code></td><td>A device had some kind of error.</td></tr><tr><td><code>"device.removed"</code></td><td>
+       A device, such as a USB device, was removed from the system.
+      </td></tr><tr><td><code>"email"</code></td><td>
+       A generic e-mail-related notification that doesn't fit into any
+       other category.
+      </td></tr><tr><td><code>"email.arrived"</code></td><td>A new e-mail notification.</td></tr><tr><td><code>"email.bounced"</code></td><td>A notification stating that an e-mail has bounced.</td></tr><tr><td><code>"im"</code></td><td>
+       A generic instant message-related notification that doesn't fit
+       into any other category.
+      </td></tr><tr><td><code>"im.error"</code></td><td>An instant message error notification.</td></tr><tr><td><code>"im.received"</code></td><td>A received instant message notification.</td></tr><tr><td><code>"network"</code></td><td>
+       A generic network notification that doesn't fit into any other
+       category.
+      </td></tr><tr><td><code>"network.connected"</code></td><td>
+       A network connection notification, such as successful sign-on to a
+       network service. This should not be confused with
+       <code>device.added</code> for new network devices.
+      </td></tr><tr><td><code>"network.disconnected"</code></td><td>
+       A network disconnected notification. This should not be confused with
+       <code>device.removed</code> for disconnected network devices.
+      </td></tr><tr><td><code>"network.error"</code></td><td>
+       A network-related or connection-related error.
+      </td></tr><tr><td><code>"presence"</code></td><td>
+       A generic presence change notification that doesn't fit into
+       any other category, such as going away or idle.
+      </td></tr><tr><td><code>"presence.offline"</code></td><td>An offline presence change notification.</td></tr><tr><td><code>"presence.online"</code></td><td>An online presence change notification.</td></tr><tr><td><code>"transfer"</code></td><td>
+       A generic file transfer or download notification that doesn't fit
+       into any other category.
+      </td></tr><tr><td><code>"transfer.complete"</code></td><td>A file transfer or download complete notification.</td></tr><tr><td><code>"transfer.error"</code></td><td>A file transfer or download error.</td></tr></tbody></table></div></div>
+</body>
+</html>

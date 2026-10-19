@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>8. Hints — Desktop Notifications Specification</title>
+</head>
+<body>
+<p>Cleaned offline copy, styling removed. Authoritative text: <a href="https://specifications.freedesktop.org/notification-spec/latest/hints.html">https://specifications.freedesktop.org/notification-spec/latest/hints.html</a></p>
+<hr>
+<div id="hints"><h2>8 Hints </h2><p>
+   Hints are a way to provide extra data to a notification server that
+   the server may be able to make use of.
+  </p><p>
+   Neither clients nor notification servers are required to support any
+   hints. Both sides should assume that hints are not passed, and should
+   ignore any hints they do not understand.
+  </p><p>
+   Third parties, when defining their own hints, should discuss the
+   possibility of standardizing on the hint with other parties, preferably
+   in a place such as the
+   <a href="http://freedesktop.org/mailman/listinfo/xdg">xdg (http://freedesktop.org/mailman/listinfo/xdg)</a>
+   mailing list at
+   <a href="http://freedesktop.org/">freedesktop.org (http://freedesktop.org/)</a>. If it
+   warrants a standard, it will be added to the table above. If no
+   consensus is reached, the hint name should be in the form of
+   <code>"x-<em>vendor</em>-<em>name</em>."</code>
+  </p><p>
+   The value type for the hint dictionary in D-Bus is of the
+   <code>DBUS_TYPE_VARIANT</code> container type. This allows different
+   data types (string, integer, boolean, etc.) to be used for hints. When
+   adding a dictionary of hints, this type must be used, rather than putting
+   the actual hint value in as the dictionary value.
+  </p><p>
+   The following table lists the standard hints as defined by this
+   specification. Future hints may be proposed and added to this list
+   over time. Once again, implementations are not required to support these.
+  </p><div id="id-1.9.7"><h6>Table 4: Standard Hints </h6><table><colgroup><col><col></colgroup><thead><tr><th>Name</th><th>Value Type</th><th>Description</th><th>Spec Version</th></tr></thead><tbody><tr><td><code>"action-icons"</code></td><td>BOOLEAN</td><td>
+       When set, a server that has the "action-icons" capability will
+       attempt to interpret any action identifier as a named icon.
+       The localized display name will be used to annotate the icon
+       for accessibility purposes.  The icon name should be compliant
+       with the Freedesktop.org Icon Naming Specification.
+      </td><td>&gt;= 1.2</td></tr><tr><td><code>"category"</code></td><td>STRING</td><td>
+       The type of notification this is.
+      </td><td> </td></tr><tr><td><code>"desktop-entry"</code></td><td>STRING</td><td>
+       This specifies the name of the desktop filename representing the
+       calling program. This should be the same as the prefix used for the
+       application's .desktop file. An example would be "rhythmbox" from
+       "rhythmbox.desktop". This can be used by the daemon to retrieve the
+       correct icon for the application, for logging purposes, etc.
+      </td><td> </td></tr><tr><td><code>"image-data"</code></td><td>(iiibiiay)</td><td>
+        This is a raw data image format which describes the width, height,
+        rowstride, has alpha, bits per sample, channels and image data
+        respectively.
+      </td><td>&gt;= 1.2</td></tr><tr><td><code>"image_data"</code></td><td>(iiibiiay)</td><td>
+        <em>Deprecated</em>. Use image-data instead.
+      </td><td>= 1.1</td></tr><tr><td><code>"image-path"</code></td><td>STRING</td><td>
+        Alternative way to define the notification image. See <a href="5.icons-and-images.html" title="5. Icons and Images">Icons and Images</a>.
+      </td><td>&gt;= 1.2</td></tr><tr><td><code>"image_path"</code></td><td>STRING</td><td>
+        <em>Deprecated</em>. Use image-path instead.
+      </td><td>= 1.1</td></tr><tr><td><code>"icon_data"</code></td><td>(iiibiiay)</td><td>
+        <em>Deprecated</em>. Use image-data instead.
+      </td><td>&lt; 1.1</td></tr><tr><td><code>"resident"</code></td><td>BOOLEAN</td><td>
+       When set the server will not automatically remove the
+       notification when an action has been invoked.  The notification
+       will remain resident in the server until it is explicitly
+       removed by the user or by the sender.  This hint is likely only
+       useful when the server has the "persistence" capability.
+      </td><td>&gt;= 1.2</td></tr><tr><td><code>"sound-file"</code></td><td>STRING</td><td>
+       The path to a sound file to play when the notification pops up.
+      </td><td> </td></tr><tr><td><code>"sound-name"</code></td><td>STRING</td><td>
+       A themeable named sound from the freedesktop.org
+       <a href="http://0pointer.de/public/sound-naming-spec.html">sound naming specification (http://0pointer.de/public/sound-naming-spec.html)</a>
+       to play when the notification pops up. Similar to icon-name, only for
+       sounds. An example would be "message-new-instant".
+      </td><td> </td></tr><tr><td><code>"suppress-sound"</code></td><td>BOOLEAN</td><td>
+       Causes the server to suppress playing any sounds, if it has that
+       ability. This is usually set when the client itself is going to
+       play its own sound.
+      </td><td> </td></tr><tr><td><code>"transient"</code></td><td>BOOLEAN</td><td>
+       When set the server will treat the notification as transient
+       and by-pass the server's persistence capability, if it should
+       exist.
+      </td><td>&gt;= 1.2</td></tr><tr><td><code>"x"</code></td><td>INT32</td><td>
+       Specifies the X location on the screen that the notification should
+       point to. The <code>"y"</code> hint must also be specified.
+      </td><td> </td></tr><tr><td><code>"y"</code></td><td>INT32</td><td>
+       Specifies the Y location on the screen that the notification should
+       point to. The <code>"x"</code> hint must also be specified.
+      </td><td> </td></tr><tr><td><code>"urgency"</code></td><td>BYTE</td><td>
+       The urgency level.
+      </td><td> </td></tr></tbody></table></div></div>
+</body>
+</html>

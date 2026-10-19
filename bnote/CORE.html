@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>bnote — 实现骨架</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>bnote 实现骨架</h1>
+
+<h2 id="sec-1">1. 文件树</h2>
+<pre><code>bnote/
+├── Cargo.toml          # crate 清单：依赖与版本
+├── reference/          # 官方规范清理版（第 2–9 章，分章文件）
+└── src/
+    ├── <a href="#sec-4-lib">lib.rs</a>        # 门面：公开类型再导出、Error
+    ├── <a href="#sec-4-handle">handle.rs</a>     # Session / SessionHandle / NoticeReceiver
+    ├── <a href="#sec-4-bus">bus.rs</a>        # 内部总线域：连接、运行时、命令桥、停机
+    ├── <a href="#sec-4-events">events.rs</a>     # NoticeEvent 队列与投递
+    ├── <a href="#sec-4-server">server.rs</a>     # <a href="PROVIDER.html#sec-4-1">org.freedesktop.Notifications</a> 服务端方法应答
+    ├── <a href="#sec-4-signal">signal.rs</a>     # <a href="PROVIDER.html#sec-4-2">NotificationClosed / ActionInvoked / ActivationToken</a> 发射
+    ├── <a href="#sec-4-hints">hints.rs</a>      # hints 解析与归一（urgency / image-data / image-path）
+    └── <a href="#sec-4-types">types.rs</a>      # Notice / NoticeEvent / SessionConfig 等共享类型</code></pre>
+<ul class="note">
+  <li>本库自持连接与运行时：宿主不装配 zbus/tokio；事件流异步，回发命令同步。</li>
+  <li>文件树中的服务名与信号名是模块职责标识；协议定义与行为以 <a href="PROVIDER.html#sec-4">PROVIDER §4</a> 为准。</li>
+</ul>
+
+<h2 id="sec-2">2. 通用约定</h2>
+<ul>
+  <li>规范条文引用一律指向 <code>reference/</code> 下对应章节文件的小节，不在注释里复述协议原文。</li>
+  <li>公开面只出现 bnote 类型；zbus / tokio / 连接句柄仅限 CORE 内部。</li>
+</ul>
+
+<h2 id="sec-3">3. SBOM</h2>
+<table>
+  <tr><th>依赖</th><th>用途</th></tr>
+  <tr><td><code>zbus</code></td><td>DBus 会话总线实现：连接管理、接口注册、Value 类型</td></tr>
+  <tr><td><code>tokio</code></td><td>内部运行时、命令通道、事件通道</td></tr>
+</table>
+
+<h2 id="sec-4">4. 内部类型与方法签名</h2>
+
+<h3 id="sec-4-lib">4.1. src/lib.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub use handle::{NoticeReceiver, Session, SessionHandle};
+pub use types::{Capabilities, CloseReason, Notice, NoticeEvent, ServerInfo, SessionConfig};
+
+pub enum Error;             //见 USER §4.2</code></pre>
+
+<h3 id="sec-4-handle">4.2. src/handle.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct Session;          //见 USER §4.1
+pub struct SessionHandle;    //见 USER §4.1
+pub struct NoticeReceiver;   //见 USER §4.1
+
+pub(crate) struct RuntimeShared {       // 待实现，可以根据实际情况调整
+    pub(crate) bus: Bus,
+    pub(crate) join: Mutex&lt;Option&lt;JoinHandle&lt;()&gt;&gt;&gt;,
+}
+
+impl RuntimeShared {
+    pub(crate) fn shutdown(&amp;self);      // 待实现，可以根据实际情况调整
+}</code></pre>
+
+<h3 id="sec-4-bus">4.3. src/bus.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>#[derive(Clone)]
+pub(crate) struct Bus {                    // 待实现，可以根据实际情况调整
+    pub(crate) conn: zbus::Connection,
+    pub(crate) rt: Handle,
+    pub(crate) events: Arc&lt;EventQueue&gt;,
+    // 其余字段：命令/停机标记/心跳/启动期状态
+}
+
+impl Bus {
+    /// 内部线程 + CurrentThread 运行时；ready 交付装配结果
+    pub(crate) fn spawn_runtime(config: SessionConfig)   // 待实现，可以根据实际情况调整
+        -&gt; (mpsc::Receiver&lt;Result&lt;Bus, Error&gt;&gt;, JoinHandle&lt;()&gt;);
+    /// 同步桥：命令派发到内部运行时，阻塞等待结果或超时
+    pub(crate) fn cmd&lt;T, F&gt;(&amp;self, f: F) -&gt; Result&lt;T, Error&gt;   // 待实现，可以根据实际情况调整
+    where
+        T: Send + 'static,
+        F: FnOnce(Bus) -&gt; Fut + Send + 'static,
+        Fut: Future&lt;Output = Result&lt;T, Error&gt;&gt; + Send + 'static;
+    /// 运行时上派发后台任务（受理即忘）
+    pub(crate) fn spawn&lt;F&gt;(&amp;self, f: F);                  // 待实现，可以根据实际情况调整
+    pub(crate) fn shutdown(&amp;self);                        // 待实现，可以根据实际情况调整
+}</code></pre>
+
+<h3 id="sec-4-events">4.4. src/events.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub(crate) struct EventQueue {          // 待实现，可以根据实际情况调整
+    tx: mpsc::UnboundedSender&lt;NoticeEvent&gt;,
+}
+
+impl EventQueue {
+    pub(crate) fn new() -&gt; (Arc&lt;Self&gt;, NoticeReceiver);     // 待实现，可以根据实际情况调整
+    pub(crate) fn send(&amp;self, ev: NoticeEvent);            // 待实现，可以根据实际情况调整
+    pub(crate) fn close(&amp;self);                            // 待实现，可以根据实际情况调整
+}</code></pre>
+
+<h3 id="sec-4-server">4.5. src/server.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub(crate) struct NotifyParams {       // 待实现，可以根据实际情况调整
+    pub app_name: String,
+    pub replaces_id: u32,
+    pub app_icon: String,
+    pub summary: String,
+    pub body: String,
+    pub actions: Vec&lt;String&gt;,
+    pub hints: HashMap&lt;String, zbus::Value&gt;,
+    pub expire_timeout: i32,
+}
+
+pub(crate) struct Server { /* zbus 接口实例，持有 Bus 句柄 */ }   // 待实现，可以根据实际情况调整
+
+impl Server {
+    pub(crate) async fn notify(&amp;self, params: NotifyParams) -&gt; Result&lt;u32, Error&gt;;   // 待实现，可以根据实际情况调整
+    pub(crate) async fn close_notification(&amp;self, id: u32) -&gt; Result&lt;(), Error&gt;;     // 待实现，可以根据实际情况调整
+    fn get_capabilities(&amp;self) -&gt; Capabilities;                                      // 待实现，可以根据实际情况调整
+    fn get_server_information(&amp;self) -&gt; ServerInfo;                                  // 待实现，可以根据实际情况调整
+}
+
+fn build_notice(params: NotifyParams, hints: HintSet, id: u32) -&gt; Notice;           // 待实现，可以根据实际情况调整</code></pre>
+<ul class="note">
+  <li>四个方法与 <a href="reference/9.dbus-protocol.html#commands">规范 §9.1</a> 一一对应（协议面见 <a href="PROVIDER.html#sec-4-1">PROVIDER §4.1</a>）；<code>NotifyParams</code> 为 zbus 方法解包后的原始参数。</li>
+  <li><code>close_notification</code> 直接回发 <code>NotificationClosed(CloseRequest)</code>，并向宿主发送 <code>NoticeEvent::Close</code>。</li>
+</ul>
+
+<h3 id="sec-4-signal">4.6. src/signal.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub(crate) fn emit_closed(bus: &amp;Bus, id: u32, reason: CloseReason)          // 待实现，可以根据实际情况调整
+    -&gt; impl Future&lt;Output = Result&lt;(), Error&gt;&gt;;
+
+pub(crate) fn emit_action_invoked(bus: &amp;Bus, id: u32, action_key: &amp;str)     // 待实现，可以根据实际情况调整
+    -&gt; impl Future&lt;Output = Result&lt;(), Error&gt;&gt;;
+
+pub(crate) fn emit_activation_token(bus: &amp;Bus, id: u32, token: &amp;str)        // 待实现，可以根据实际情况调整
+    -&gt; impl Future&lt;Output = Result&lt;(), Error&gt;&gt;;</code></pre>
+
+<h3 id="sec-4-hints">4.7. src/hints.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub(crate) fn parse(hints: &amp;HashMap&lt;String, zbus::Value&gt;) -&gt; HintSet;   // 待实现，可以根据实际情况调整
+
+pub(crate) struct HintSet {       // 待实现，可以根据实际情况调整
+    pub urgency: Urgency,
+    pub icon: NoticeIcon,      // image-data / image-path 归一；无图标为 None
+}</code></pre>
+<ul class="note">
+  <li><code>hints</code> 只承载 hint 派生字段；<code>actions</code> 与 <code>expire_timeout</code> 由 <code>Server::notify</code> 从 <code>NotifyParams</code> 读取。</li>
+</ul>
+
+<h3 id="sec-4-types">4.8. src/types.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct Notice;          //见 USER §4.3
+pub struct NoticeEvent;     //见 USER §4.2
+pub enum CloseReason;       //见 USER §4.2
+pub struct Capabilities;    //见 USER §4.3
+pub struct ServerInfo;      //见 USER §4.3
+pub struct SessionConfig;   //见 USER §4.3
+pub struct Action;          //见 USER §4.3
+pub enum Urgency;           //见 USER §4.3
+pub enum NoticeIcon;        //见 USER §4.3</code></pre>
+
+<h2 id="sec-5">5. 关键流程调用栈（伪码）</h2>
+
+<h3 id="sec-5-1">5.1. 启动</h3>
+<pre><code>宿主 → Session::start(config)   // 阻塞至就绪；返回 (SessionHandle, NoticeReceiver)
+├── Bus::spawn_runtime(config) → 内部线程 + CurrentThread 运行时
+├── Bus::cmd(connect) → zbus::Connection::session().await
+├── Bus::cmd(request_name) → conn.request_name_with_flags("org.freedesktop.Notifications", DoNotQueue)
+└── Bus::cmd(mount) → conn.object_server().at("/org/freedesktop/Notifications", Server { bus }).await</code></pre>
+
+<h3 id="sec-5-2">5.2. 通知到达</h3>
+<pre><code>DBus Notify 调用 → Server::notify(params).await
+├── hints = hints::parse(&amp;params.hints)
+├── id = 分配 id（replaces_id 非 0 沿用，否则新分配）
+├── notice = build_notice(params, hints, id)
+└── bus.events.send(NoticeEvent::Notify { notice })</code></pre>
+
+<h3 id="sec-5-3">5.3. 客户端请求关闭</h3>
+<pre><code>客户端 CloseNotification 调用 → Server::close_notification(id).await
+├── signal::emit_closed(&amp;bus, id, CloseReason::CloseRequest).await
+└── bus.events.send(NoticeEvent::Close { id })</code></pre>
+<ul class="note">
+  <li>宿主收到 <code>NoticeEvent::Close</code> 时信号已经发出，只需移除 UI；<code>CloseReason::CloseRequest</code> 不再由宿主传入。</li>
+</ul>
+
+<h3 id="sec-5-4">5.4. 宿主关闭</h3>
+<pre><code>宿主 → SessionHandle::close(id, reason)   // 同步，等待内部命令完成或超时
+└── Bus::cmd(|bus| signal::emit_closed(&amp;bus, id, reason))
+     └── signal::emit_closed(&amp;bus, id, reason).await</code></pre>
+<ul class="note">
+  <li><code>SessionHandle</code> 的 <code>close</code> / <code>invoke_action</code> / <code>activation_token</code> / <code>shutdown</code> 都是阻塞契约；GTK 程序或其它同步宿主自行放到工作线程。</li>
+</ul>
+
+<h3 id="sec-5-5">5.5. 动作回发</h3>
+<pre><code>宿主 → SessionHandle::invoke_action(id, key)
+└── Bus::cmd(|bus| signal::emit_action_invoked(&amp;bus, id, key))
+     └── signal::emit_action_invoked(&amp;bus, id, key).await</code></pre>
+
+<h3 id="sec-5-6">5.6. 激活令牌回发</h3>
+<pre><code>宿主 → SessionHandle::activation_token(id, token)
+└── Bus::cmd(|bus| signal::emit_activation_token(&amp;bus, id, token))
+     └── signal::emit_activation_token(&amp;bus, id, token).await</code></pre>
+
+<h3 id="sec-5-7">5.7. 停机</h3>
+<pre><code>宿主 → SessionHandle::shutdown()   // 同步，幂等
+├── Bus::cmd(stop)
+├── Bus::shutdown()
+└── JoinHandle::join()</code></pre>
+
+<h3 id="sec-5-8">5.8. 总线终止</h3>
+<pre><code>Bus 连接错误 / 心跳失败 → bus.events.send(NoticeEvent::Fatal { message })
+├── bus.events.close()
+└── RuntimeShared::shutdown()</code></pre>
+<ul class="note">
+  <li><code>Fatal</code> 是终止事件；事件通道随后关闭，<code>NoticeReceiver::recv</code> 返回 <code>None</code>，handle 后续调用返回 <code>Error::Stopped</code>。</li>
+</ul>
+
+</main>
+</body>
+</html>

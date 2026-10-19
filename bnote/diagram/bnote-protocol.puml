@@ -1,0 +1,30 @@
+@startuml bnote-protocol
+participant "客户端" as client
+queue "DBus 会话总线" as bus
+participant "bnote" as lib
+
+== 方法应答 ==
+client -> bus : Notify（通知参数 + hints）
+bus -> lib : Notify
+lib --> bus : id（u32）
+bus --> client : id（u32）
+client -> bus : CloseNotification（id）
+bus -> lib : CloseNotification
+lib --> bus : 应答
+bus --> client : 应答
+client -> bus : GetCapabilities
+bus -> lib : GetCapabilities
+lib --> bus : 能力清单
+bus --> client : 能力清单
+client -> bus : GetServerInformation
+bus -> lib : GetServerInformation
+lib --> bus : 名字 / 厂商 / 版本 / 规范版本
+bus --> client : 名字 / 厂商 / 版本 / 规范版本
+== 信号回发 ==
+lib -> bus : NotificationClosed（id，原因）
+bus -> client : NotificationClosed
+lib -> bus : ActionInvoked（id，action_key）
+bus -> client : ActionInvoked
+lib -> bus : ActivationToken（id，token）
+bus -> client : ActivationToken
+@enduml

@@ -14,7 +14,7 @@
 <h2 id="sec-1">1. 文件树</h2>
 <pre><code>breadknife/               # 项目群根（单一二进制 bread：daemon / 窗口 / 客户端 三角色）
 ├── <a href="breadpan/CODE.html">breadpan/</a>             # 成员项目（内部结构见其 CODE.html）
-├── <a href="bnote/CODE.html">bnote/</a>               # 成员项目：DBUS 通知协议封装库（内部结构见其 CODE.html）
+├── <a href="bnote/CORE.html">bnote/</a>               # 成员项目：DBUS 通知协议封装库（内部结构见其 CORE.html）
 └── src/
     ├── main.rs           # 入口：子命令分发（daemon / open / close / …）
     ├── daemon/           # bread daemon（Model，无 GTK）
@@ -22,7 +22,7 @@
     │   ├── <a href="#sec-3-hyprland">hyprland.rs</a>   # Hyprland IPC 只读监听：显示器 / 工作区 / 活动窗口
     │   ├── <a href="#sec-3-daemon-tray">tray.rs</a>       # breadpan 组装（Tray::start）+ 事件泵 + 交互执行 + 菜单读取
     │   ├── <a href="#sec-3-system">system.rs</a>     # UPower / NetworkManager / MPRIS；pamixer / brightnessctl / ddcutil
-    │   ├── <a href="#sec-3-notify">notify.rs</a>     # 通知守护角色装配（org.freedesktop.Notifications 协议细节由 bnote 封装）
+    │   ├── <a href="#sec-3-notify">notify.rs</a>     # bnote 装配与事件桥（bnote 自持连接；协议细节由 bnote 封装）
     │   ├── <a href="#sec-3-windows">windows.rs</a>    # 窗口进程生命周期（spawn / kill / 崩溃重启）；显示器 → 窗口映射
     │   └── <a href="#sec-3-daemon-ipc">ipc.rs</a>        # Unix socket 服务端：请求应答 + 状态推送
     ├── bar/              # bar 窗口进程（View，GTK4）
@@ -57,7 +57,7 @@
 <h3 id="sec-3-daemon-mod">3.1. daemon/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub fn run(control_path: &amp;str) -&gt; Result&lt;(), String&gt;;
 
-pub struct Daemon { /* 事件通道、breadpan 句柄、系统状态、窗口表、显示器 / 工作区映射 */ }
+pub struct Daemon { /* 事件通道、breadpan/bnote 句柄、系统状态、窗口表、显示器 / 工作区映射 */ }
 
 pub enum DaemonEvent {
     Hyprland(hyprland::HyprlandEvent),
@@ -146,7 +146,7 @@ pub fn set_volume(value: u32);            // pamixer
 pub fn set_brightness(value: u32);        // brightnessctl / ddcutil</code></pre>
 
 <h3 id="sec-3-notify">3.5. daemon/notify.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub async fn serve(conn: &amp;zbus::Connection, tx: Sender&lt;DaemonEvent&gt;) -&gt; Result&lt;(), zbus::Error&gt;;</code></pre>
+<pre><code>pub fn start(tx: Sender&lt;DaemonEvent&gt;) -&gt; Result&lt;bnote::SessionHandle, bnote::Error&gt;;</code></pre>
 
 <h3 id="sec-3-windows">3.6. daemon/windows.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct WindowProc {
@@ -430,6 +430,7 @@ pub struct StateDelta {         //见 ARCHITECTURE §4.4
 ├── protocol::pid_file() 校验（存活则拒绝）并写入自身 PID
 ├── hyprland::watch(tx)（socket2 只读监听线程）
 ├── tray::start(tx)（breadpan 组装；失败降级 None）
+├── notify::start(tx)（bnote 自持连接/运行时；事件桥）
 ├── ipc::serve_control(control_path, tx)
 ├── ipc::serve_windows(window_path, tx)
 ├── system::start(tx)（UPower / NetworkManager / BlueZ / MPRIS）
@@ -510,8 +511,8 @@ pub struct StateDelta {         //见 ARCHITECTURE §4.4
 └── 悬停切换：popup::hover_switch → Request::TrayMenuRead → on_hover_menu_done（世代校验）</code></pre>
 
 <h3 id="sec-4-5">4.5. 通知到达</h3>
-<pre><code>DBus Notify 调用（daemon 通知守护）
-├── notify::serve(conn, tx) → DaemonEvent::Notification(NotificationRecord)
+<pre><code>DBus Notify 调用（bnote 内部连接）
+├── NoticeReceiver::recv().await → DaemonEvent::Notification(NotificationRecord)
 ├── 同 id 替换 / 新 id 入队（上限见代码）
 └── broadcast(Push::Notification(record))
      └── WindowApp::handle_push → InfoCenterWidget::notify（列表上限见代码）</code></pre>

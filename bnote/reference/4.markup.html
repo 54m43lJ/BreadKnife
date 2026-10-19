@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>4. Markup — Desktop Notifications Specification</title>
+</head>
+<body>
+<p>Cleaned offline copy, styling removed. Authoritative text: <a href="https://specifications.freedesktop.org/notification-spec/latest/markup.html">https://specifications.freedesktop.org/notification-spec/latest/markup.html</a></p>
+<hr>
+<div id="markup"><h2>4 Markup </h2><p>
+   Body text may contain markup. The markup is XML-based, and consists
+   of a small subset of HTML along with a few additional tags.
+  </p><p>
+   The following tags should be supported by the notification server.
+   Though it is optional, it is recommended. Notification servers that do
+   not support these tags should filter them out.
+  </p><table><colgroup><col><col></colgroup><tbody><tr><td>
+       <code>&lt;b&gt;</code> ...
+       <code>&lt;/b&gt;</code>
+      </td><td>Bold</td></tr><tr><td>
+       <code>&lt;i&gt;</code> ...
+       <code>&lt;/i&gt;</code>
+      </td><td>Italic</td></tr><tr><td>
+       <code>&lt;u&gt;</code> ...
+       <code>&lt;/u&gt;</code>
+      </td><td>Underline</td></tr><tr><td>
+       <code>&lt;a href="..."&gt;</code> ...
+       <code>&lt;/a&gt;</code>
+      </td><td>Hyperlink</td></tr><tr><td>
+       <code>&lt;img src="..." alt="..."/&gt;</code>
+      </td><td>Image</td></tr></tbody></table><p>
+   A full-blown HTML implementation is not required of this spec, and
+   notifications should never take advantage of tags that are not listed
+   above. As notifications are not a substitute for web browsers or complex
+   dialogs, advanced layout is not necessary, and may in fact limit the
+   number of systems that notification services can run on, due to memory
+   usage and screen space. Such examples are PDAs, certain cell phones, and
+   slow PCs or laptops with little memory.
+  </p><p>
+   For the same reason, a full XML or XHTML implementation using XSLT or
+   CSS stylesheets is not part of this specification. Information that
+   must be presented in a more complex form should use an application-specific
+   dialog, a web browser, or some other display mechanism.
+  </p><p>
+   The tags specified above mark up the content in a way that allows them
+   to be stripped out on some implementations without impacting the actual
+   content.
+  </p><div id="hyperlinks"><h3>4.1 Hyperlinks </h3><p>
+    Hyperlinks allow for linking one or more words to a URI. There is no
+    requirement to allow for images to be linked, and it is highly suggested
+    that implementations do not allow this, as there is no clean-looking,
+    standard visual indicator for a hyperlinked image.
+   </p><p>
+    Hyperlinked text should appear in the standard blue underline format.
+   </p><p>
+    Hyperlinks cannot function as a replacement for actions. They are
+    used to link to local directories or remote sites using standard URI
+    schemes.
+   </p><p>
+    Implementations are not required to support hyperlinks.
+   </p></div><div id="images"><h3>4.2 Images </h3><p>
+    Images may be placed in the notification, but this should be done with
+    caution. The image should never exceed 200x100, but this should be thought
+    of as a maximum size. Images should always have alternative text
+    provided through the <code>alt="..."</code> attribute.
+   </p><p>
+    Image data cannot be embedded in the message itself. Images referenced
+    must always be local files.
+   </p><p>
+    Implementations are not required to support images.
+   </p></div></div>
+</body>
+</html>

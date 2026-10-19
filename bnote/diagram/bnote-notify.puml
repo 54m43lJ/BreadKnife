@@ -1,0 +1,26 @@
+@startuml bnote-notify
+participant "宿主" as host
+participant "bnote" as lib
+participant "客户端" as client
+
+== 装配 ==
+host -> lib : Session::start(config)
+lib -> lib : 建连、注册服务
+lib --> host : (SessionHandle, NoticeReceiver)
+== 事件（异步） ==
+client -> lib : Notify
+lib -> host : NoticeReceiver::recv() → NoticeEvent::Notify
+note right of host : 宿主展示通知
+client -> lib : CloseNotification
+lib -> client : NotificationClosed
+lib -> host : NoticeReceiver::recv() → NoticeEvent::Close
+== 命令（同步） ==
+host -> lib : SessionHandle::close（id，原因）
+lib -> client : NotificationClosed
+host -> lib : SessionHandle::invoke_action（id，key）
+lib -> client : ActionInvoked
+host -> lib : SessionHandle::activation_token（id，token）
+lib -> client : ActivationToken
+== 终止 ==
+lib -> host : NoticeReceiver::recv() → NoticeEvent::Fatal
+@enduml

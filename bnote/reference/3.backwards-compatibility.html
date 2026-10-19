@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3. Backwards Compatibility — Desktop Notifications Specification</title>
+</head>
+<body>
+<p>Cleaned offline copy, styling removed. Authoritative text: <a href="https://specifications.freedesktop.org/notification-spec/latest/backwards-compat.html">https://specifications.freedesktop.org/notification-spec/latest/backwards-compat.html</a></p>
+<hr>
+<div id="backwards-compat"><h2>3 Backwards Compatibility </h2><p>
+   Clients should try and avoid making assumptions about the presentation and
+   abilities of the notification server. The message content is the most
+   important thing.
+  </p><p>
+   Clients can check with the server what capabilities are supported
+   using the <code>GetCapabilities</code> message. See
+   <a href="9.dbus-protocol.html" title="9. D-Bus Protocol">Protocol</a>.
+  </p><p>
+   If a client requires a response from a passive popup, it should be
+   coded such that a non-focus-stealing message box can be used in the
+   case that the notification server does not support this feature.
+  </p></div>
+</body>
+</html>

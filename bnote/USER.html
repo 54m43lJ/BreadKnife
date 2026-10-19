@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>bnote — 用户契约</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>bnote 用户契约</h1>
+<p>本文档面向宿主——装配本库、承担通知守护角色的依赖软件。宿主只面向异步通知事件流与同步回发命令，不见任何 DBus 协议细节；DBus 协议边界见 <a href="PROVIDER.html">PROVIDER.html</a>，内部结构见 <a href="CORE.html">CORE.html</a>。</p>
+
+<h2 id="sec-1">1. 术语</h2>
+<table>
+  <tr><th>术语</th><th>定义</th></tr>
+  <tr><td>宿主</td><td>装配本库、承担通知守护角色的进程，即 bread daemon 的消息中心模块</td></tr>
+  <tr><td>会话</td><td>本库的通知服务实例；<code>Session::start</code> 建立，宿主经 <code>SessionHandle</code> 操作、经 <code>NoticeReceiver</code> 消费事件</td></tr>
+  <tr><td>通知（Notification）</td><td>客户端提交、经本库归一后交付宿主的一条消息，即 <code>Notice</code>（见 §4.3）</td></tr>
+  <tr><td>事件流</td><td>本库经 <code>NoticeReceiver</code> 异步交付的事件序列：通知到达、客户端请求关闭、总线终止</td></tr>
+  <tr><td>紧急度（Urgency）</td><td>通知的归一紧急级别：Low / Normal / Critical；决定宿主的超时策略</td></tr>
+  <tr><td>动作（Action）</td><td>通知携带的可点击项：键（key）＋标签（label）；用户点击后宿主经 <code>SessionHandle::invoke_action</code> 回发</td></tr>
+  <tr><td>能力（Capability）</td><td>宿主装配时声明支持的特性串（如 <code>actions</code>、<code>body-markup</code>），经应答交付客户端</td></tr>
+  <tr><td>关闭原因（Reason）</td><td>通知被关闭的归一原因：过期 / 被用户关闭 / 被 <code>CloseNotification</code> 请求关闭</td></tr>
+</table>
+
+<h2 id="sec-2">2. 通用约定</h2>
+
+<h2 id="sec-3">3. 架构图</h2>
+
+<h3 id="sec-3-1">3.1. 总体架构</h3>
+<div class="diagram"><img src="diagram/bnote-architecture.svg" alt="总体架构：客户端 — DBus 会话总线 — bnote — 宿主"></div>
+<ul class="note">
+  <li>bnote 自持 DBus 连接与运行时；宿主不装配总线运行时，也不接触协议细节。</li>
+  <li>客户端与总线之间的方法与信号属于协议边界，见 <a href="PROVIDER.html">PROVIDER.html</a>。</li>
+</ul>
+
+<h3 id="sec-3-2">3.2. 时序：装配、事件与回发</h3>
+<div class="diagram"><img src="diagram/bnote-notify.svg" alt="时序：装配、异步事件与同步回发"></div>
+<ul class="note">
+  <li><code>Session::start</code> 同步阻塞至就绪，返回 <code>SessionHandle</code> 与 <code>NoticeReceiver</code>。</li>
+  <li>事件流经 <code>NoticeReceiver::recv().await</code> 异步交付；<code>close</code> / <code>invoke_action</code> / <code>activation_token</code> 为同步命令，GTK 宿主自行把阻塞调用放到工作线程。</li>
+  <li>客户端 <code>CloseNotification</code> 由本库直接回发 <code>NotificationClosed</code>；宿主收到 <code>NoticeEvent::Close</code> 后只负责 UI 移除。</li>
+</ul>
+
+<h2 id="sec-4">4. 接口</h2>
+
+<h3 id="sec-4-1">4.1. 宿主 API（Rust）</h3>
+<pre><code>pub struct Session;             // 待实现，可以根据实际情况调整
+
+impl Session {
+    pub fn start(config: SessionConfig)
+        -&gt; Result&lt;(SessionHandle, NoticeReceiver), Error&gt;;     // 待实现，可以根据实际情况调整
+}
+
+pub struct SessionHandle;      // Clone + Send + Sync；待实现，可以根据实际情况调整
+pub struct NoticeReceiver;     // 单消费者；事件流；待实现，可以根据实际情况调整
+
+impl SessionHandle {
+    pub fn close(&amp;self, id: u32, reason: CloseReason)
+        -&gt; Result&lt;(), Error&gt;;                                 // 待实现，可以根据实际情况调整
+    pub fn invoke_action(&amp;self, id: u32, action_key: &amp;str)
+        -&gt; Result&lt;(), Error&gt;;                                 // 待实现，可以根据实际情况调整
+    pub fn activation_token(&amp;self, id: u32, token: &amp;str)
+        -&gt; Result&lt;(), Error&gt;;                                 // 待实现，可以根据实际情况调整
+    pub fn shutdown(&amp;self);                                 // 待实现，可以根据实际情况调整
+}
+
+impl NoticeReceiver {
+    pub async fn recv(&amp;mut self) -&gt; Option&lt;NoticeEvent&gt;;   // 待实现，可以根据实际情况调整
+}</code></pre>
+<ul class="note">
+  <li><code>Session::start</code> 与 <code>SessionHandle</code> 的全部方法均阻塞；阻塞是契约的一部分，调用方自行管理工作线程。</li>
+  <li><code>NoticeReceiver::recv</code> 是异步的：无事件时挂起，不轮询、不靠超时循环；会话终止或 <code>Fatal</code> 之后返回 <code>None</code>。</li>
+  <li><code>SessionHandle</code> 可克隆；最后一个实例 drop 时自动停机。宿主也可显式调用 <code>shutdown</code>。</li>
+</ul>
+
+<h3 id="sec-4-2">4.2. 消息与错误</h3>
+<pre><code>pub enum NoticeEvent {          // 待实现，可以根据实际情况调整
+    Notify { notice: Notice },
+    Close { id: u32 },
+    Fatal { message: String },
+}
+
+pub enum CloseReason {          // 待实现，可以根据实际情况调整
+    Expired,
+    Dismissed,
+    CloseRequest,
+}
+
+pub enum Error {                // 待实现，可以根据实际情况调整
+    Bus(String),
+    NameTaken(String),
+    Timeout { ms: u64 },
+    InvalidArgs(String),
+    Protocol(String),
+    Stopped,
+}</code></pre>
+<table>
+  <tr><th>事件</th><th>含义 / 宿主动作</th></tr>
+  <tr><td><code>NoticeEvent::Notify</code></td><td>新通知或同 id 替换；宿主决定展示与生命周期</td></tr>
+  <tr><td><code>NoticeEvent::Close</code></td><td>客户端请求关闭，本库已回发 <code>NotificationClosed(CloseRequest)</code>；宿主只移除 UI</td></tr>
+  <tr><td><code>NoticeEvent::Fatal</code></td><td>总线断连或服务终止；本库随后关闭事件通道，宿主决定是否重建会话</td></tr>
+</table>
+<table>
+  <tr><th>关闭原因</th><th>含义</th></tr>
+  <tr><td><code>CloseReason::Expired</code></td><td>通知过期或宿主判定超时；宿主主动关闭</td></tr>
+  <tr><td><code>CloseReason::Dismissed</code></td><td>用户关闭通知；宿主主动关闭</td></tr>
+  <tr><td><code>CloseReason::CloseRequest</code></td><td>客户端 <code>CloseNotification</code> 请求关闭；由本库自动回发，宿主无需传入</td></tr>
+</table>
+<table>
+  <tr><th>错误</th><th>含义 / 宿主动作</th></tr>
+  <tr><td><code>Error::Bus</code></td><td>会话总线连接、名称注册或信号发送失败；宿主记录错误并终止或降级</td></tr>
+  <tr><td><code>Error::NameTaken</code></td><td><code>org.freedesktop.Notifications</code> 已被其它进程持有；宿主提示并降级/退出</td></tr>
+  <tr><td><code>Error::Timeout</code></td><td>同步命令在 <code>command_timeout_ms</code> 内未完成；宿主重试或重建会话</td></tr>
+  <tr><td><code>Error::InvalidArgs</code></td><td>参数不合法（如 actions 非成对、id 非法等）；宿主修正调用</td></tr>
+  <tr><td><code>Error::Protocol</code></td><td>协议字段缺失/类型不符；宿主记录并跳过该通知</td></tr>
+  <tr><td><code>Error::Stopped</code></td><td>会话已停机；宿主重建会话后再调用</td></tr>
+</table>
+
+<h3 id="sec-4-3">4.3. 数据模型与转换</h3>
+<pre><code>pub struct SessionConfig {      // 待实现，可以根据实际情况调整
+    pub capabilities: Capabilities,
+    pub server_info: ServerInfo,
+    pub command_timeout_ms: u64,
+}
+
+pub struct Capabilities {       // 待实现，可以根据实际情况调整
+    pub entries: Vec&lt;String&gt;,
+}
+
+pub struct ServerInfo {         // 待实现，可以根据实际情况调整
+    pub name: String,
+    pub vendor: String,
+    pub version: String,
+    pub spec_version: String,
+}
+
+pub struct Notice {             // 待实现，可以根据实际情况调整
+    pub id: u32,
+    pub app_name: String,
+    pub icon: NoticeIcon,
+    pub summary: String,
+    pub body: String,
+    pub actions: Vec&lt;Action&gt;,
+    pub urgency: Urgency,
+    pub expire_timeout_ms: Option&lt;u32&gt;,
+}
+
+pub enum Urgency { Low, Normal, Critical }                 // 待实现，可以根据实际情况调整
+pub struct Action { pub key: String, pub label: String }   // 待实现，可以根据实际情况调整
+pub enum NoticeIcon { None, Name(String), Pixels { width: i32, height: i32, rgba: Vec&lt;u8&gt; } }   // 待实现，可以根据实际情况调整</code></pre>
+<table>
+  <tr><th>对象 / 字段</th><th>定义</th></tr>
+  <tr><td><code>SessionConfig.capabilities</code></td><td>能力清单：宿主装配时声明支持的特性串</td></tr>
+  <tr><td><code>SessionConfig.server_info</code></td><td>服务器信息：名字 / 厂商 / 版本 / 规范版本</td></tr>
+  <tr><td><code>SessionConfig.command_timeout_ms</code></td><td>同步命令等待上限；超时返回 <code>Error::Timeout</code></td></tr>
+  <tr><td><code>Notice.id</code></td><td>本库分配的非 0 标识；同 id 替换由本库处理</td></tr>
+  <tr><td><code>Notice.app_name</code> / <code>summary</code> / <code>body</code></td><td>应用名 / 标题 / 正文</td></tr>
+  <tr><td><code>Notice.icon</code></td><td>图标三态：无 / 主题名或 <code>file://</code> URI / 位图</td></tr>
+  <tr><td><code>Notice.actions</code></td><td>键值对列表，键用于动作回发</td></tr>
+  <tr><td><code>Notice.urgency</code></td><td>紧急度（Low / Normal / Critical），缺省 Normal</td></tr>
+  <tr><td><code>Notice.expire_timeout_ms</code></td><td>请求的超时；<code>None</code>＝按宿主默认，<code>Some(0)</code>＝常驻</td></tr>
+</table>
+<ul class="note">
+  <li>协议原文细节以 <a href="reference/index.html">reference/</a> 为唯一权威；协议参数到字段的归一映射见 <a href="PROVIDER.html#sec-4-3">PROVIDER §4.3</a>。</li>
+</ul>
+
+</main>
+</body>
+</html>
