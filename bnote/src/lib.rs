@@ -40,6 +40,9 @@ pub enum Error {
     NameTaken(String),
     /// A `SessionHandle` synchronous command did not complete within
     /// `command_timeout_ms`.
+    ///
+    /// The command is aborted best-effort; a D-Bus signal already submitted to
+    /// the bus cannot be recalled.
     Timeout { ms: u64 },
     /// A host parameter is invalid, such as an invalid capability list or an
     /// unknown/expired notification id.

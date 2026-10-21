@@ -202,7 +202,7 @@ pub use types::{Action, NoticeIcon, Urgency};
 - hints 字段类型不符按规范静默回退（`urgency` → `Normal`，非法图像 → 下一个图标来源）；
 - `NoticeReceiver::recv` 只返回 `NoticeEvent`，没有错误事件。
 
-最终处理：保留 `Error::Protocol` 作为兜底变体，Rustdoc 明确“当前正常路径不会产生，仅保留给未来例外情况”。`Server` 不再产生该错误（服务端错误已拆到 `ServerError`）；命令桥内部的 downcast 防御分支仍映射到它，属于不可达兜底。`USER §4.2` 已同步为兜底语义。
+最终处理：保留 `Error::Protocol` 作为兜底变体，Rustdoc 明确“当前正常路径不会产生，仅保留给未来例外情况”。`Server` 不再产生该错误（服务端错误已拆到 `ServerError`）；命令桥内部的 downcast / 命令 id 校验防御分支仍映射到它，属于不可达兜底。`USER §4.2` 已同步为兜底语义。
 
 ### 1.12 未知 id 的 `CloseNotification` 错误名
 
@@ -243,7 +243,7 @@ org.freedesktop.DBus.Error.InvalidArgs
 - `Session::start` 等待内部线程的 ready 结果，直到连接成功、NameTaken 或连接失败；
 - `shutdown` 直接 join 内部线程，不受超时约束。
 
-已按“超时由宿主管理”处理：`command_timeout_ms` 只约束 `SessionHandle` 命令；`Session::start` 与 `shutdown` 的等待超时由宿主放到工作线程并自行设置。`USER §4.3` 已在 `SessionConfig.command_timeout_ms` 定义中写明这一点，`Error::Timeout` 的描述也已限定为 `SessionHandle` 同步命令。
+已按“超时由宿主管理”处理：`command_timeout_ms` 只约束 `SessionHandle` 命令；`Session::start` 与 `shutdown` 的等待超时由宿主放到工作线程并自行设置。`USER §4.3` 已在 `SessionConfig.command_timeout_ms` 定义中写明这一点，`Error::Timeout` 的描述也已限定为 `SessionHandle` 同步命令。命令超时的 abort 与迟到响应隔离见 §2.3。
 
 ### 1.15 关闭、替换与事件投递的并发时序
 
@@ -289,14 +289,11 @@ org.freedesktop.DBus.Error.InvalidArgs
 - 宿主丢弃 `NoticeReceiver` 后 `Notify` 是否还应成功；
 - `CloseNotification` 是否仍应给客户端回信号。
 
-最终决定：保留当前非对称行为，并忠实记录在 `CORE §5.2` / `§5.3`。
+最终行为（第二部分 2.2 覆盖此前的非对称讨论）：
 
-- `Notify` 的 id 返回是“通知已接收、可供宿主处理”的承诺；宿主事件投递失败则撤销 id 并返回 D-Bus `Failed`。
-- `CloseNotification` 的关闭契约以 id 失效 + `NotificationClosed` 为准；宿主 `Close` 是辅助通知，投递失败不回滚关闭，也不改变 D-Bus 结果。
-- 因此不存在“返回 Failed 后又发 Closed”的组合。
-- 没有可援引的业界共识：主流 daemon 没有 bnote 这样的 host channel；这是 bnote 自己的边界。
-
-`PROVIDER §4.4` 同步说明：未知 hints/urgency/image-data 不回错误；`CloseNotification` 的宿主事件失败不改变 D-Bus 结果。
+- `NoticeReceiver` 是单消费者；丢弃它立即触发 `events.closed()` 监视任务，进而终止整个会话。
+- 接收端已不存在，Fatal 无法交付；宿主通过 `SessionHandle` 的 `Error::Stopped` 观察终止，并重新调用 `Session::start`。
+- 旧的 `Notify` / `CloseNotification` 事件投递非对称逻辑只保留给“接收端在方法执行中途被丢弃”的窄竞态；CORE §5.2 / §5.3 仍忠实记录该边界。
 
 ### 1.19 Fatal 之后连接与总线名的释放
 
@@ -343,20 +340,25 @@ org.freedesktop.DBus.Error.InvalidArgs
 - `PrimaryOwner` / `AlreadyOwner` 视为成功；`InQueue` / `Exists` 以及 zbus 的 `NameTaken` 都归一为 `Error::NameTaken`。
 - 能力清单在启动前校验：非空、仅 ASCII 字母数字与 `-`；`icon-static` 与 `icon-multi` 互斥；失败返回 `Error::InvalidArgs`。
 - 启动失败会 join 内部线程；连接随 `Bus` 一起释放。
+- `NameTaken` 不提供额外重试 API：宿主在需要时再次调用 `Session::start` 即可；breadknife 的刷新按钮即此路径。
 
 ### 2.2 生命周期
 
 - `Session::start` 创建独立线程和 current-thread Tokio runtime。
 - `SessionHandle` 内部维护原子 handle 计数；最后一个实例 drop 时触发停机。
 - `shutdown` 幂等，阻塞到内部 runtime 退出，并释放连接与总线名。
-- `NoticeReceiver` 不持有会话生命周期；丢弃接收端不会停机，但会令后续 `Notify` 事件投递失败。
+- `NoticeReceiver` 是单消费者；只支持一个接收端。丢弃 Receiver 会通过 `EventQueue::closed()` 立即终止整个会话，`SessionHandle` 后续命令返回 `Error::Stopped`。
+- 接收端已不存在，因此不会收到 Fatal；宿主应丢弃旧 handle 并重新 `Session::start`。
 - `SessionHandle` 的 drop 也可能阻塞（join 内部线程），宿主应像对待 `shutdown` 一样避免在实时线程中丢弃最后一个 handle。
 - 停机后重新调用 `Session::start` 已验证可以立即重新取得总线名。
 
 ### 2.3 命令桥
 
-- `Bus::cmd` 把闭包封装成类型擦除的 future，投递到内部 runtime，宿主线程用 `std::sync::mpsc::recv_timeout` 等待结果。
-- 超时返回 `Error::Timeout`；内部命令没有被取消，信号可能在超时之后仍然发出。
+- `Bus::cmd` 把闭包封装成类型擦除的 future，投递到内部 runtime；每个命令有唯一 id、独立响应通道和 abort handle。
+- 宿主线程用 `std::sync::mpsc::recv_timeout` 等待 abort handle 和结果；总超时预算为 `command_timeout_ms`。
+- 超时后 abort 该命令任务并丢弃其响应通道；迟到结果只能进入已丢弃的私有通道，不会污染其它命令。
+- 每个响应都带命令 id，接收侧校验 id；不一致返回 `Error::Protocol`。
+- 已提交到总线的 D-Bus 信号不可撤回；超时清理只能保证命令不再继续执行，不能收回已经发出的信号。
 - runtime 已停机、命令通道关闭或 `Bus` 已被 `shutdown` 取走时返回 `Error::Stopped`。
 - 命令在 runtime 上以独立 task 执行，彼此可以并发；协议状态由 `State` 锁串行化。
 - 命令返回值通过 `Box<dyn Any + Send>` 回传；类型不匹配返回 `Error::Protocol`。
@@ -397,12 +399,13 @@ org.freedesktop.DBus.Error.InvalidArgs
 - 宿主侧 `bnote::Error` 只在 `Session` / `SessionHandle` 层使用；服务端不再复用 `bnote::Error`。
 - 未知 id 的 `CloseNotification` 用 `InvalidArgs` + 空消息体。
 - 三个信号都在 `#[zbus::interface]` 中声明，以便 introspection 可见；实际发射由 `signal.rs` 通过 `Connection::emit_signal` 完成。
-- `NotificationClosed` 的 reason 由 `CloseReason::code()` 固定为 1/2/3；不使用 4。
+- `NotificationClosed` 的 reason 由 `CloseReason::code()` 固定为 1/2/3；`CloseReason` 枚举不提供 4，文档保留规范定义的 4 = undefined/reserved 并注解实际不可达。
 - 信号广播到总线上所有客户端（`destination = None`）。
 
 ### 2.7 Fatal 与停机
 
-- 内部监视任务同时等待连接 `closed()` 和 30 秒心跳。
+- 内部监视任务同时等待连接 `closed()`、30 秒心跳和 `NoticeReceiver` 被丢弃。
+- Receiver 丢弃走同一条终止路径：`events.closed()` 触发 `Bus::report_fatal`；Fatal 无法交付，但会话停止，handle 返回 `Stopped`。
 - 失败时先原子置停机标记并唤醒 runtime（current-thread runtime 不会在 Fatal 入队前抢占执行），随后入队 `NoticeEvent::Fatal`、关闭事件队列。
 - 显式 `shutdown` 不发送 Fatal：置停机标记、关闭事件通道并退出 runtime。
 - Fatal 后 `SessionHandle` 命令返回 `Stopped`，但连接要等 `shutdown` 或最后一个 handle 被丢弃才释放。
@@ -435,7 +438,10 @@ dbus-run-session -- env BNOTE_TEST_DBUS=1 cargo test --all-targets
 - 宿主 invoke_action / activation_token 对未知/已失效 id 的 InvalidArgs；
 - actions 奇数个的 D-Bus InvalidArgs；
 - 第二个 Session 的 NameTaken；
-- 最后一个 handle drop 自动停机、停机后重建会话。
+- 最后一个 handle drop 自动停机、停机后重建会话；
+- 丢弃 `NoticeReceiver` 后整个会话终止。
+
+命令超时的 abort 与迟到响应隔离由“每命令独立通道 + 命令 id”保证；当前没有依赖真实总线时序的自动化超时测试，避免测试偶发。
 
 开发过程中还使用 `dbus-run-session` 配合 `notify-send`、`gdbus` 做了外部客户端验证：
 
@@ -467,41 +473,37 @@ dbus-run-session -- cargo run --example server -- \
 
 `cargo test --all-targets` 会一并编译 `examples/server.rs`，防止示例停留在旧 API。
 
-## 4. POC 文档合并冲突
+## 4. POC 文档迁移
 
-> 合并来源：`poc/notification`。规则：HTML 文档冲突直接取 poc 版本；与源码 / `IMPLEMENTATION` 的冲突只记录，不修改源码，等待具体修改意见。
-> 合并后旧 `ARCHITECTURE/CODE/BUILD` 与新 `USER/CORE/PROVIDER` 并存，旧单文件 reference 与新分章 reference 并存。
+> `poc/notification` 的旧 bnote 文档已按 `GUIDELINES.md` 迁移到 `README / USER / CORE / PROVIDER / BUILD`；旧 `ARCHITECTURE / CODE / BUILD` 与单文件 reference 不保留。
+> 原合并冲突章节中的 HTML 冲突已通过迁移解决；未能迁移的旧断言列在 §4.2，均已由当前源码与新文档取代。
 
-### 4.1 HTML 文档冲突（已直接取 poc）
+### 4.1 内容映射
 
-| 文件 | 冲突类型 | 处理 |
+| 旧文档 | 迁移目标 | 处理 |
 |---|---|---|
-| `CODE.html`（根） | content conflict | 取 poc 版本 |
-| `bnote/README.html` | content conflict | 取 poc 版本 |
-| `bnote/ARCHITECTURE.html` | modify/delete | 恢复 poc 版本 |
-| `bnote/CODE.html` | modify/delete | 恢复 poc 版本 |
-| `bnote/BUILD.html` | poc 新增 | 采用 poc 版本 |
-| `ARCHITECTURE.html`、`BUILD.html`、`README.html`、`style.css`（根） | poc 修改 | 已应用 poc 修改 |
-| `bnote/reference/notification-spec.clean.html` | dev 已删除，poc 旧文档仍引用 | 从合并基点恢复；分章 reference 同时保留 |
+| `bnote/ARCHITECTURE.html` | `USER.html`、`PROVIDER.html`、`CORE.html` | 术语 / 宿主 API / 数据模型 → USER；协议边界 → PROVIDER；内部结构 → CORE |
+| `bnote/CODE.html` | `CORE.html` | 文件树、内部签名、调用栈按当前实现重写；示例签名归入 BUILD |
+| `bnote/BUILD.html` | `BUILD.html` | 构建依赖、测试命令、示例运行、外部客户端、作为依赖使用，全部按当前实现更新 |
+| `bnote/README.html` | `README.html` | 保留 WHAT/WHY、用户交互、参考资料与 Credits；补新文档导航 |
+| `bnote/reference/notification-spec.clean.html` | `reference/index.html` 分章文件 | 单文件删除，分章 reference 为唯一权威 |
+| `bnote/IMPLEMENTATION.md`（poc 版本） | 当前 `IMPLEMENTATION.md` | 旧异步 API / 排队说明未合并；保留当前实现备注 |
 
-结果：旧文档与新文档同时存在；`bnote/README.html` 现在指向旧 `ARCHITECTURE/CODE/BUILD`，新 `USER/CORE/PROVIDER` 仍保留但暂时没有 README 入口。这是 HTML 层面的结构重复，已按“冲突优先 poc”直接合并，未擅自删除新文档。
+### 4.2 未迁移的旧内容
 
-### 4.2 与源码 / IMPLEMENTATION 的冲突（待意见）
+以下旧文档断言与当前源码或新文档冲突，已随旧文档删除，不再作为待拍板项：
 
-| ID | poc 文档描述 | 当前源码 / IMPLEMENTATION | 涉及文件 |
-|---|---|---|---|
-| C1 | 异步 `Session::start(&Connection, Sender<NoticeEvent>, Capabilities, ServerInfo) -> Rc<Session>` | 同步 `Session::start(SessionConfig) -> (SessionHandle, NoticeReceiver)` | `bnote/ARCHITECTURE.html`、`bnote/CODE.html`、`bnote/BUILD.html`、`bnote/README.html` |
-| C2 | 名字被占用时进入 `SessionState::Queued`，`state()` / `subscribe()` 观察，之后自动接管 | 被占用时立即返回 `Error::NameTaken`，不排队、不替换；宿主重新调用 `Session::start` | 旧 bnote 文档、根 `README/ARCHITECTURE/CODE/BUILD` |
-| C3 | `Rc<Session>` + 自由函数 `bnote::close/invoke_action/activation_token`；有界事件通道 | `SessionHandle` 命令 + `NoticeReceiver`；无界事件队列 | `bnote/CODE.html`、`bnote/ARCHITECTURE.html`、`bnote/BUILD.html` |
-| C4 | 未规定 `NoticeReceiver` 丢弃后的行为 | 当前实现准备按第二部分 2.2 改为“丢弃即终止整个会话”；旧文档没有这一条 | 旧 bnote 文档、根通知中心文档 |
-| C5 | 旧文档没有命令超时 / 取消语义 | 当前 `command_timeout_ms` + 每命令独立响应通道；第二部分 2.3 将补充取消与迟到响应清理 | `bnote/ARCHITECTURE.html`、`bnote/CODE.html`、`bnote/BUILD.html` |
-| C6 | 旧 `CloseReason` 文档只列 1/2/3 | 规范还定义 4（undefined/reserved）；实际不可达，需在文档中保留并注解 | 旧 bnote 文档、`bnote/PROVIDER.html`、`bnote/USER.html` |
-| C7 | poc `bnote/IMPLEMENTATION.md` 描述旧异步 API、排队接管、旧错误类型 | 保留当前 `IMPLEMENTATION.md`（sync API、NameTaken、ServerError 等）；poc 文件内容未合并 | `bnote/IMPLEMENTATION.md` |
-| C8 | poc `bnote/BUILD.html` 使用 `enumflags2`、`futures-util`、`tokio sync` 与异步示例 | 当前 Cargo 仅运行期依赖 tokio（macros/rt/sync/time）与 zbus；示例是同步宿主 + 事件线程 | `bnote/BUILD.html`、`bnote/Cargo.toml`、`bnote/examples/server.rs` |
-| C9 | 根文档描述通知中心排队不可用态、等待接管提示 | 当前 bnote 返回 `NameTaken`，不存在排队态；第二部分 2.1 将改为 `NameTaken` 报错 + 手动刷新重试 | 根 `README.html`、`ARCHITECTURE.html`、`CODE.html`、`BUILD.html` |
-| C10 | 旧文档与新 `USER/CORE/PROVIDER` 对同一 API / 行为给出不同描述 | 新文档是当前实现的第一来源；旧文档保留待统一 | `bnote/` 下两套文档 |
+| 旧断言 | 当前事实 |
+|---|---|
+| 异步 `Session::start(&Connection, Sender<NoticeEvent>, Capabilities, ServerInfo) -> Rc<Session>` | 同步 `Session::start(SessionConfig) -> (SessionHandle, NoticeReceiver)` |
+| `SessionState::{Available, Queued}`、`state()` / `subscribe()`、自动排队接管 | 被占用时返回 `Error::NameTaken`；无排队、无状态广播；宿主重新调用 `Session::start` |
+| 自由函数 `bnote::close` / `invoke_action` / `activation_token` | `SessionHandle` 的同步方法 |
+| 有界事件通道 / 接收端可丢弃后继续运行 | 无界队列；`NoticeReceiver` 单消费者，丢弃即终止整个会话 |
+| 旧 `Error` 只含 `Bus` / `InvalidArgs` | 当前含 `NameTaken` / `Timeout` / `Protocol` / `Stopped`；服务端另有 `ServerError` |
+| 旧命令无超时取消与响应关联 | 每命令唯一 id、独立响应通道、超时 abort；迟到结果隔离 |
+| 旧 `CloseReason` 只列 1/2/3 | 文档保留规范 4 = undefined/reserved 并注解实际不可达 |
 
-源码侧合并冲突（`bnote/Cargo.toml`、`bnote/src/*`、`bnote/examples/server.rs`）均保留当前 dev 版本；poc 代码没有并入。
+根 breadknife 文档不属于 bnote 的文档结构迁移；第二部分 2.1 已单独把通知中心从排队态改为 `NameTaken` 错误 + 刷新重试。
 
 ## 5. 回填结果
 
@@ -528,3 +530,12 @@ dbus-run-session -- cargo run --example server -- \
 | 补充心跳机制与推荐取值 | CORE §5.8 | 已回填 |
 | 文件树补 `examples/server.rs` | CORE §1 | 已回填 |
 | 区分宿主错误与 D-Bus 错误 | USER §4.2、PROVIDER §4.4、CORE §4.5 | 已回填 |
+
+### 5.1 第二部分处理结果
+
+| 细节 | 落点 | 状态 |
+|---|---|---|
+| `NameTaken` 无额外重试 API；宿主重新 `Session::start`；breadknife 报错正文下增加刷新按钮 | USER §4.2、根 `ARCHITECTURE/CODE/README/BUILD` | 已完成 |
+| `NoticeReceiver` 单消费者；丢弃即终止整个会话，handle 返回 `Stopped` | USER §4.1、CORE §4.4 / §5.8 | 已完成 |
+| 命令超时 abort 与 per-command id / 独立响应通道；迟到结果隔离；已发信号不可撤回 | USER §4.1、CORE §4.3、源码 `bus.rs` | 已完成 |
+| `CloseReason` 文档保留规范 4 = undefined/reserved，注解实际不可达 | USER §4.2、PROVIDER §4.3 | 已完成 |

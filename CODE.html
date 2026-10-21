@@ -14,7 +14,7 @@
 <h2 id="sec-1">1. 文件树</h2>
 <pre><code>breadknife/               # 项目群根（单一二进制 bread：daemon / 窗口 / 客户端 三角色）
 ├── <a href="breadpan/CODE.html">breadpan/</a>             # 成员项目（内部结构见其 CODE.html）
-├── <a href="bnote/CODE.html">bnote/</a>               # 成员项目：DBUS 通知协议封装库（内部结构见其 CODE.html）
+├── <a href="bnote/CORE.html">bnote/</a>               # 成员项目：DBUS 通知协议封装库（内部结构见其 CORE.html）
 └── src/
     ├── main.rs           # 入口：子命令分发（daemon / open / close / …）
     ├── daemon/           # bread daemon（Model，无 GTK）
@@ -22,7 +22,7 @@
     │   ├── <a href="#sec-3-hyprland">hyprland.rs</a>   # Hyprland IPC 只读监听：显示器 / 工作区 / 活动窗口
     │   ├── <a href="#sec-3-daemon-tray">tray.rs</a>       # breadpan 组装（Tray::start）+ 事件泵 + 交互执行 + 菜单读取
     │   ├── <a href="#sec-3-system">system.rs</a>     # UPower / NetworkManager / MPRIS；pamixer / brightnessctl / ddcutil
-    │   ├── <a href="#sec-3-notify">notify.rs</a>     # bnote 装配 + 排队状态；通知守护角色
+    │   ├── <a href="#sec-3-notify">notify.rs</a>     # bnote 装配 + NameTaken 重试；通知守护角色
     │   ├── <a href="#sec-3-windows">windows.rs</a>    # 窗口进程生命周期（spawn / kill / 崩溃重启）；显示器 → 窗口映射
     │   └── <a href="#sec-3-daemon-ipc">ipc.rs</a>        # Unix socket 服务端：请求应答 + 状态推送
     ├── bar/              # bar 窗口进程（View，GTK4）
@@ -31,7 +31,7 @@
     │   ├── <a href="#sec-3-style">style.rs</a>      # 按 daemon 跟踪的路径加载 CSS；reload 重读
     │   └── modules/
     │       ├── <a href="#sec-3-workspace">workspace.rs</a>    # 工作区条（渲染 + 手势捕获）
-    │       ├── <a href="#sec-3-info">info.rs</a>        # 活动窗口图标 / 标题 + 通知中心（含排队不可用态）
+    │       ├── <a href="#sec-3-info">info.rs</a>        # 活动窗口图标 / 标题 + 通知中心（含不可用 / 重试态）
     │       ├── <a href="#sec-3-popup">popup.rs</a>        # 弹窗会话：grab 弹窗统一托管（根窗口 / 上级弹窗定位 · 任务栏内捕获关闭 · Escape / toggle）
     │       ├── <a href="#sec-3-tray">tray.rs</a>         # 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）
     │       └── <a href="#sec-3-center">center.rs</a>       # 控制中心入口与弹出面板
@@ -90,6 +90,7 @@ impl Daemon {
                  f: impl FnOnce(&amp;TrayHandle) -&gt; Response + Send + 'static);
     fn on_control(&amp;mut self, cmd: ControlCommand);
     fn on_notification_status(&amp;mut self, available: bool);
+    fn retry_notification(&amp;mut self);
     fn open_windows(&amp;mut self, name: String, monitor: Option&lt;String&gt;);
     fn snapshot_for(&amp;self, monitor: &amp;str) -&gt; WindowSnapshot;
     fn push_to(&amp;self, monitor: &amp;str, push: Push);
@@ -149,14 +150,14 @@ pub fn set_brightness(value: u32);        // brightnessctl / ddcutil</code></pre
 
 <h3 id="sec-3-notify">3.5. daemon/notify.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct NotificationService {
-    pub session: Rc&lt;bnote::Session&gt;,
-    pub state: watch::Receiver&lt;bnote::SessionState&gt;,
+    pub session: bnote::SessionHandle,
+    pub events: bnote::NoticeReceiver,
 }
 
-pub async fn serve(conn: &amp;zbus::Connection, tx: Sender&lt;DaemonEvent&gt;)
-    -&gt; Result&lt;NotificationService, bnote::Error&gt;;</code></pre>
+pub fn start(tx: Sender&lt;DaemonEvent&gt;) -&gt; Result&lt;NotificationService, bnote::Error&gt;;</code></pre>
 <ul class="note">
-  <li>初始状态经 <code>DaemonEvent::NotificationStatus</code> 送入 daemon；排队取得名字后同样转发。</li>
+  <li>初始结果经 <code>DaemonEvent::NotificationStatus</code> 送入 daemon：成功为 true，<code>NameTaken</code> 为 false。</li>
+  <li>手动重试由通知中心的刷新按钮触发 <code>Request::RetryNotification</code>；daemon 重新调用 <code>NotificationService::start</code>，不排队、不替换已有服务。</li>
 </ul>
 
 <h3 id="sec-3-windows">3.6. daemon/windows.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -226,7 +227,7 @@ impl InfoCenterWidget {
     pub fn set_active(&amp;self, active: &amp;ActiveWindow);
     pub fn set_notification_available(&amp;self, available: bool);
     pub fn notify(&amp;self, record: NotificationRecord);
-    pub fn system_notice(&amp;self, notice: &amp;SystemNotice);
+    pub fn set_notification_retry(&amp;self, retry: Rc&lt;dyn Fn()&gt;);
 }</code></pre>
 
 <h3 id="sec-3-popup">3.13. bar/modules/popup.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -301,6 +302,7 @@ pub enum Request {              //见 ARCHITECTURE §4.4
     MediaControl { op: MediaOp },
     VolumeSet { value: u32 },
     BrightnessSet { value: u32 },
+    RetryNotification,
 }
 
 pub enum Response {             //见 ARCHITECTURE §4.4
@@ -316,7 +318,6 @@ pub enum Push {                 //见 ARCHITECTURE §4.4
     Tray(TrayUpdate),
     MenuChanged { item: String },
     Notification(NotificationRecord),
-    NotificationPrompt(SystemNotice),
     Reload,
 }
 
@@ -417,11 +418,6 @@ pub struct NotificationRecord {
     pub app_name: String,
     pub icon: String,
     pub summary: String,
-    pub body: String,
-}
-
-pub struct SystemNotice {
-    pub title: String,
     pub body: String,
 }
 
@@ -532,27 +528,29 @@ pub struct StateDelta {         //见 ARCHITECTURE §4.4
 
 <h3 id="sec-4-5">4.5. 通知到达</h3>
 <pre><code>DBus Notify 调用（daemon 通知守护）
-├── notify::serve(conn, tx) → DaemonEvent::Notification(NotificationRecord)
+├── NotificationService::start(tx) → SessionHandle + NoticeReceiver
+├── 事件线程循环 NoticeReceiver::recv()
+│    └── NoticeEvent::Notify → DaemonEvent::Notification(NotificationRecord)
 ├── 同 id 替换 / 新 id 入队（上限见代码）
 └── broadcast(Push::Notification(record))
      └── WindowApp::handle_push → InfoCenterWidget::notify（列表上限见代码）</code></pre>
 
-<h3 id="sec-4-6">4.6. 通知服务排队与恢复</h3>
-<pre><code>bnote::Session::start()
-├── state Available → tx.send(DaemonEvent::NotificationStatus(true))
-└── state Queued → tx.send(DaemonEvent::NotificationStatus(false))
+<h3 id="sec-4-6">4.6. 通知服务 NameTaken 与手动重试</h3>
+<pre><code>bnote::Session::start(config)
+├── Ok(session) → tx.send(DaemonEvent::NotificationStatus(true))
+└── Err(NameTaken) → tx.send(DaemonEvent::NotificationStatus(false))
     ├── Daemon::on_notification_status(false)
     │   ├── broadcast(Push::State { notification_available: false })
     │   │   └── WindowApp::handle_push → InfoCenterWidget::set_notification_available(false)
-    │   └── broadcast(Push::NotificationPrompt(SystemNotice { ... }))
-    │       └── WindowApp::handle_push → InfoCenterWidget::system_notice()（普通优先级、仅当前显示器）
-    └── state_rx.changed() → Available
-        └── Daemon::on_notification_status(true)
-            └── broadcast(Push::State { notification_available: true })
-                └── WindowApp::handle_push → InfoCenterWidget::set_notification_available(true)</code></pre>
+    │   └── InfoCenterWidget 显示不可用错误 + 刷新按钮
+    └── 用户点击刷新 → Request::RetryNotification
+        └── Daemon::retry_notification()
+            └── 重新调用 bnote::Session::start(config)
+                ├── Ok → NotificationStatus(true) → 恢复通知列表 / 空态
+                └── Err(NameTaken) → 保留错误态</code></pre>
 <ul class="note">
-  <li>提示文案：标题「通知中心暂时不可用」，正文「另一个通知服务正在运行，bread 将在其退出后接管。」；不进入通知中心缓存。</li>
-  <li>排队提示只在进入 <code>Queued</code> 时推送一次；取得总线名后关闭。</li>
+  <li>错误文案：标题「通知中心暂时不可用」，正文「另一个通知服务正在运行，bread 无法接管 org.freedesktop.Notifications。」；刷新按钮位于正文下方。</li>
+  <li>不自动重试、不排队、不替换已有通知服务；重试完全由用户点击刷新按钮触发。</li>
 </ul>
 
 </main>

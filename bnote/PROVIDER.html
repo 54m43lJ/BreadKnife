@@ -100,12 +100,13 @@ ActivationToken(id: u32, token: String)</code></pre>
   <tr><td><code>CloseReason::Expired</code></td><td><code>NotificationClosed.reason</code></td><td>1</td></tr>
   <tr><td><code>CloseReason::Dismissed</code></td><td><code>NotificationClosed.reason</code></td><td>2</td></tr>
   <tr><td><code>CloseReason::CloseRequest</code></td><td><code>NotificationClosed.reason</code></td><td>3；客户端 <code>CloseNotification</code> 时由本库自动发出</td></tr>
+  <tr><td>（规范保留）</td><td><code>NotificationClosed.reason</code></td><td>4 = undefined/reserved；本库不产生</td></tr>
   <tr><td><code>Notice.id</code></td><td><code>NotificationClosed.id</code> / <code>ActionInvoked.id</code> / <code>ActivationToken.id</code></td><td>原样</td></tr>
   <tr><td><code>Action.key</code></td><td><code>ActionInvoked.action_key</code></td><td>原样</td></tr>
   <tr><td><code>activation_token</code> 的 token 参数</td><td><code>ActivationToken.token</code></td><td>原样</td></tr>
 </table>
 <ul class="note">
-  <li>原因码 4（undefined/reserved）不由本库发出；规范定义见 <a href="reference/9.dbus-protocol.html#signal-notification-closed">§9.2.1</a>。</li>
+  <li>原因码 4（undefined/reserved）由规范保留、本库不产生；规范定义见 <a href="reference/9.dbus-protocol.html#signal-notification-closed">§9.2.1</a>。</li>
   <li>归一目标的数据对象定义见 <a href="USER.html#sec-4-3">USER §4.3</a>。</li>
 </ul>
 

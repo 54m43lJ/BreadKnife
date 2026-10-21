@@ -7,13 +7,14 @@
 use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc as std_mpsc};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::runtime::{Builder, Handle};
 use tokio::sync::{Mutex, mpsc, watch};
+use tokio::task::AbortHandle;
 use tokio::time::{MissedTickBehavior, timeout};
 use zbus::fdo::{DBusProxy, RequestNameFlags, RequestNameReply};
 
@@ -27,11 +28,14 @@ const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(5);
 
 type BoxResult = Result<Box<dyn Any + Send>, Error>;
 type BoxFuture = Pin<Box<dyn Future<Output = BoxResult> + Send>>;
+type CommandReply = (u64, BoxResult);
 type StartupReceiver = std_mpsc::Receiver<Result<Bus, Error>>;
 
 struct Command {
+    id: u64,
     run: Box<dyn FnOnce(Bus) -> BoxFuture + Send>,
-    reply: std_mpsc::SyncSender<BoxResult>,
+    reply: std_mpsc::SyncSender<CommandReply>,
+    abort: std_mpsc::SyncSender<AbortHandle>,
 }
 
 /// Cheap, cloneable handle to the runtime and its resources.
@@ -46,6 +50,7 @@ pub(crate) struct Bus {
     stopped: Arc<AtomicBool>,
     fatal: Arc<AtomicBool>,
     command_timeout_ms: u64,
+    next_command_id: Arc<AtomicU64>,
 }
 
 impl Bus {
@@ -88,6 +93,7 @@ impl Bus {
                     };
 
                     bus.spawn(monitor(bus.clone()));
+                    bus.spawn(watch_receiver(bus.clone()));
                     let _ = ready_tx.send(Ok(bus.clone()));
                     run_loop(bus, cmd_rx, stop_rx).await;
                 });
@@ -99,6 +105,12 @@ impl Bus {
 
     /// Dispatch a future to the internal runtime and block until it finishes
     /// or the configured command timeout expires.
+    ///
+    /// Each command owns a private reply channel and a command id, so a late
+    /// reply can never be mistaken for another command's result.  On timeout
+    /// the task is aborted best-effort; a D-Bus signal already handed to the
+    /// bus cannot be recalled, but no further work from that command is
+    /// allowed.
     pub(crate) fn cmd<T, F, Fut>(&self, f: F) -> Result<T, Error>
     where
         T: Send + 'static,
@@ -109,7 +121,11 @@ impl Bus {
             return Err(Error::Stopped);
         }
 
+        let started = Instant::now();
+        let timeout = Duration::from_millis(self.command_timeout_ms);
+        let id = self.next_command_id.fetch_add(1, Ordering::Relaxed);
         let (reply_tx, reply_rx) = std_mpsc::sync_channel(1);
+        let (abort_tx, abort_rx) = std_mpsc::sync_channel(1);
         let run = Box::new(move |bus: Bus| -> BoxFuture {
             Box::pin(async move {
                 let value = f(bus).await?;
@@ -120,22 +136,49 @@ impl Bus {
         if self
             .cmds
             .send(Command {
+                id,
                 run,
                 reply: reply_tx,
+                abort: abort_tx,
             })
             .is_err()
         {
             return Err(Error::Stopped);
         }
 
-        match reply_rx.recv_timeout(Duration::from_millis(self.command_timeout_ms)) {
-            Ok(Ok(value)) => value.downcast::<T>().map(|value| *value).map_err(|_| {
-                Error::Protocol("internal command returned an unexpected type".to_owned())
-            }),
-            Ok(Err(error)) => Err(error),
-            Err(std_mpsc::RecvTimeoutError::Timeout) => Err(Error::Timeout {
-                ms: self.command_timeout_ms,
-            }),
+        // The runtime sends the abort handle immediately after spawning the
+        // task.  If this wait times out, the runtime aborts the task when its
+        // abort-handle send fails.
+        let abort = match abort_rx.recv_timeout(remaining(started, timeout)) {
+            Ok(abort) => abort,
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                return Err(Error::Timeout {
+                    ms: self.command_timeout_ms,
+                });
+            }
+            Err(std_mpsc::RecvTimeoutError::Disconnected) => return Err(Error::Stopped),
+        };
+
+        match reply_rx.recv_timeout(remaining(started, timeout)) {
+            Ok((reply_id, result)) => {
+                if reply_id != id {
+                    return Err(Error::Protocol(
+                        "internal command reply id does not match the request".to_owned(),
+                    ));
+                }
+                match result {
+                    Ok(value) => value.downcast::<T>().map(|value| *value).map_err(|_| {
+                        Error::Protocol("internal command returned an unexpected type".to_owned())
+                    }),
+                    Err(error) => Err(error),
+                }
+            }
+            Err(std_mpsc::RecvTimeoutError::Timeout) => {
+                abort.abort();
+                Err(Error::Timeout {
+                    ms: self.command_timeout_ms,
+                })
+            }
             Err(std_mpsc::RecvTimeoutError::Disconnected) => Err(Error::Stopped),
         }
     }
@@ -181,6 +224,10 @@ impl Bus {
     }
 }
 
+fn remaining(start: Instant, timeout: Duration) -> Duration {
+    timeout.saturating_sub(start.elapsed())
+}
+
 async fn connect(
     config: SessionConfig,
     events: Arc<EventQueue>,
@@ -208,6 +255,7 @@ async fn connect(
         stopped: Arc::clone(&stopped),
         fatal,
         command_timeout_ms,
+        next_command_id: Arc::new(AtomicU64::new(0)),
     };
 
     let server = Server::new(capabilities, server_info, events, state, stopped);
@@ -254,21 +302,37 @@ async fn run_loop(
                 match command {
                     Some(command) => {
                         if bus.is_stopped() {
-                            let _ = command.reply.send(Err(Error::Stopped));
+                            let _ = command.reply.send((command.id, Err(Error::Stopped)));
                             break;
                         }
 
+                        let Command {
+                            id,
+                            run,
+                            reply,
+                            abort,
+                        } = command;
                         let bus = bus.clone();
-                        tokio::spawn(async move {
-                            let result = (command.run)(bus).await;
-                            let _ = command.reply.send(result);
+                        let task = tokio::spawn(async move {
+                            let result = run(bus).await;
+                            let _ = reply.send((id, result));
                         });
+
+                        if abort.send(task.abort_handle()).is_err() {
+                            // The caller timed out waiting for the abort handle.
+                            task.abort();
+                        }
                     }
                     None => break,
                 }
             }
         }
     }
+}
+
+async fn watch_receiver(bus: Bus) {
+    bus.events.closed().await;
+    bus.report_fatal("notice receiver dropped".to_owned());
 }
 
 async fn monitor(bus: Bus) {

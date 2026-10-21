@@ -12,6 +12,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use bnote::{
     Action, Capabilities, CloseReason, Error, NoticeEvent, NoticeIcon, ServerInfo, Session,
@@ -340,6 +341,29 @@ async fn session_can_be_rebuilt_after_shutdown() {
         drop(handle);
         assert_eq!(events.recv().await, None);
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dropping_receiver_terminates_the_session() {
+    if !enabled() {
+        return;
+    }
+    let _guard = BUS_LOCK.lock().await;
+
+    let (handle, receiver) = Session::start(config()).unwrap();
+    drop(receiver);
+
+    let mut stopped = false;
+    for _ in 0..100 {
+        if matches!(handle.close(999, CloseReason::Expired), Err(Error::Stopped)) {
+            stopped = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert!(stopped, "session did not stop after receiver drop");
+    handle.shutdown();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

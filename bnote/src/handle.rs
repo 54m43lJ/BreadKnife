@@ -140,6 +140,10 @@ impl SessionHandle {
 }
 
 /// Single-consumer event stream.
+///
+/// The session supports exactly one receiver. Dropping it terminates the
+/// session; the host must drop the old handle and call [`Session::start`]
+/// again to rebuild.
 pub struct NoticeReceiver {
     rx: mpsc::UnboundedReceiver<NoticeEvent>,
 }

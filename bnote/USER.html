@@ -73,6 +73,8 @@ impl NoticeReceiver {
   <li><code>Session::start</code> 与 <code>SessionHandle</code> 的全部方法均阻塞；阻塞是契约的一部分，调用方自行管理工作线程。</li>
   <li><code>NoticeReceiver::recv</code> 是异步的：无事件时挂起，不轮询、不靠超时循环；会话终止或 <code>Fatal</code> 之后返回 <code>None</code>。</li>
   <li><code>SessionHandle</code> 可克隆；最后一个实例 drop 时自动停机，并可能阻塞到内部线程退出。宿主也可显式调用 <code>shutdown</code>。</li>
+  <li><code>NoticeReceiver</code> 是单消费者；本库只支持一个 Receiver。丢弃 Receiver 会立即终止整个会话（不会再收到 <code>Fatal</code>，因为接收端已不存在）；<code>SessionHandle</code> 后续命令返回 <code>Error::Stopped</code>，宿主应丢弃旧 handle 并重新调用 <code>Session::start</code>。</li>
+  <li>同步命令超时后，本库会尽力中止尚未完成的异步任务；已经提交到总线的 D-Bus 信号无法撤回。每个命令使用独立响应通道和命令 id，迟到结果不会混入其它命令的返回。</li>
   <li><code>close</code> / <code>invoke_action</code> / <code>activation_token</code> 校验 id 是否在册；<code>invoke_action</code> 暂不校验 action key 是否属于原通知的 actions——key 归属校验需要缓存通知内容，暂不实现，未来考虑。</li>
 </ul>
 
@@ -87,6 +89,7 @@ pub enum CloseReason {
     Expired,
     Dismissed,
     CloseRequest,
+    // 规范另定义 4 = undefined/reserved；实际不可达，本库不提供变体
 }
 
 pub enum Error {
@@ -108,12 +111,13 @@ pub enum Error {
   <tr><td><code>CloseReason::Expired</code></td><td>通知过期或宿主判定超时；宿主主动关闭</td></tr>
   <tr><td><code>CloseReason::Dismissed</code></td><td>用户关闭通知；宿主主动关闭</td></tr>
   <tr><td><code>CloseReason::CloseRequest</code></td><td>客户端 <code>CloseNotification</code> 请求关闭；由本库自动回发，宿主无需传入</td></tr>
+  <tr><td>（规范保留）</td><td>4 = undefined/reserved；外部标准定义，本库实际不可达、不产生</td></tr>
 </table>
 <table>
   <tr><th>错误</th><th>含义 / 宿主动作</th></tr>
   <tr><td><code>Error::Bus</code></td><td>会话总线连接、名称注册或信号发送失败；宿主记录错误并终止或降级</td></tr>
-  <tr><td><code>Error::NameTaken</code></td><td><code>org.freedesktop.Notifications</code> 已被其它进程持有；宿主提示并降级/退出</td></tr>
-  <tr><td><code>Error::Timeout</code></td><td><code>SessionHandle</code> 同步命令在 <code>command_timeout_ms</code> 内未完成；宿主重试或重建会话</td></tr>
+  <tr><td><code>Error::NameTaken</code></td><td><code>org.freedesktop.Notifications</code> 已被其它进程持有；宿主提示并降级/退出。需要重试时由宿主再次调用 <code>Session::start</code>；本库不排队、不替换，也不提供额外重试 API</td></tr>
+  <tr><td><code>Error::Timeout</code></td><td><code>SessionHandle</code> 同步命令在 <code>command_timeout_ms</code> 内未完成；宿主重试或重建会话。超时会尽力中止命令，但已提交到总线的信号不可撤回</td></tr>
   <tr><td><code>Error::InvalidArgs</code></td><td>宿主参数不合法（如 <code>SessionConfig</code> 的能力清单、未知或已失效的 id 等）；宿主修正调用</td></tr>
   <tr><td><code>Error::Protocol</code></td><td>保留的兜底错误；当前正常路径不会产生，仅供未来例外情况使用</td></tr>
   <tr><td><code>Error::Stopped</code></td><td>会话已停机；宿主重建会话后再调用</td></tr>

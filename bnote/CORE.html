@@ -79,7 +79,7 @@ pub(crate) struct Bus {
     pub(crate) rt: Handle,
     pub(crate) events: Arc&lt;EventQueue&gt;,
     pub(crate) state: Arc&lt;Mutex&lt;State&gt;&gt;,
-    // 其余字段：命令通道、停机标记、心跳状态、命令超时
+    // 其余字段：命令通道、命令序号、停机标记、心跳状态、命令超时
 }
 
 impl Bus {
@@ -99,7 +99,8 @@ impl Bus {
     pub(crate) fn shutdown(&amp;self);
 }</code></pre>
 <ul class="note">
-  <li><code>cmd</code> 用 <code>std::sync::mpsc::recv_timeout</code> 等待结果；超时返回 <code>Error::Timeout</code>，内部命令不会被取消，信号可能在超时之后仍然发出。</li>
+  <li><code>cmd</code> 为每个命令分配唯一 id 和独立响应通道；超时后尽力 abort 任务并丢弃响应通道，迟到结果无法进入其它命令。</li>
+  <li>已提交到总线的 D-Bus 信号不可撤回；超时清理只能保证命令不再继续执行，不能收回已经发出的信号。</li>
 </ul>
 
 <h3 id="sec-4-events">4.4. src/events.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -110,10 +111,12 @@ impl Bus {
 impl EventQueue {
     pub(crate) fn new() -&gt; (Arc&lt;Self&gt;, NoticeReceiver);
     pub(crate) fn send(&amp;self, ev: NoticeEvent) -&gt; bool;
+    pub(crate) async fn closed(&amp;self);
     pub(crate) fn close(&amp;self);
 }</code></pre>
 <ul class="note">
   <li><code>send</code> 在接收端已丢弃或队列已关闭时返回 <code>false</code>；<code>close</code> 先取出并 drop sender，已入队事件仍会先交付，随后 <code>recv</code> 返回 <code>None</code>。</li>
+  <li>内部监视任务等待 <code>closed()</code>；单消费者 <code>NoticeReceiver</code> 一旦被丢弃，立即触发会话终止。</li>
 </ul>
 
 <h3 id="sec-4-server">4.5. src/server.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -225,6 +228,7 @@ pub enum NoticeIcon;        //见 USER §4.3</code></pre>
 <ul class="note">
   <li>先注册对象、再申请总线名，避免名字可见后到达的方法调用因接口尚未就位而丢失。</li>
   <li>申请结果 <code>Exists</code> / <code>InQueue</code> 归一为 <code>Error::NameTaken</code>；本库不排队、不替换已有守护。</li>
+  <li><code>NameTaken</code> 不提供额外重试 API；宿主需要时再次调用 <code>Session::start</code>，breadknife 的刷新按钮走此路径。</li>
 </ul>
 
 <h3 id="sec-5-2">5.2. 通知到达</h3>
@@ -293,7 +297,8 @@ pub enum NoticeIcon;        //见 USER §4.3</code></pre>
 </ul>
 
 <h3 id="sec-5-8">5.8. 总线终止</h3>
-<pre><code>连接 closed() / 心跳失败 → Bus::report_fatal(message)
+<pre><code>连接 closed() / 心跳失败 / NoticeReceiver 被丢弃
+→ Bus::report_fatal(message)
 ├── claim stop（原子标记 + 唤醒 runtime）
 ├── bus.events.send(NoticeEvent::Fatal { message })
 ├── bus.events.close()
@@ -305,6 +310,7 @@ pub enum NoticeIcon;        //见 USER §4.3</code></pre>
 └── 失败 → Fatal</code></pre>
 <ul class="note">
   <li><code>Fatal</code> 是终止事件；事件通道随后关闭，<code>NoticeReceiver::recv</code> 返回 <code>None</code>，handle 后续调用返回 <code>Error::Stopped</code>。</li>
+  <li>Receiver 被丢弃时 Fatal 无法交付（接收端已不存在），但会话同样立即终止；宿主通过 handle 的 <code>Stopped</code> 观察并重建新实例。</li>
   <li>Fatal 后连接与总线名仍由旧 <code>SessionHandle</code> 持有；宿主重建会话前必须先 <code>shutdown</code> 或丢弃最后一个 handle，否则可能得到 <code>NameTaken</code>。</li>
 </ul>
 

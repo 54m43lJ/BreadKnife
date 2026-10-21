@@ -1,8 +1,8 @@
 # bnote 文档合规结果
 
-- 日期：2026-10-19
+- 日期：2026-10-21
 - 基准：`GUIDELINES.md`
-- 范围：`bnote/README.html`、`USER.html`、`CORE.html`、`PROVIDER.html`、`diagram/`、`reference/`
+- 范围：`bnote/README.html`、`USER.html`、`CORE.html`、`PROVIDER.html`、`BUILD.html`、`diagram/`、`reference/`
 - 结论：**无未关闭项。**
 
 ## 已完成
@@ -13,6 +13,6 @@
 
 ## 说明
 
-- `examples/` 是代码/原型，不属于文档合规审查范围，已从分支删除。
+- `examples/` 是代码/原型，不属于文档合规审查范围；其存在与否不影响本文结论。
 - C-15（注释预算）原位置基于重构前章节编号，当前 `CORE §4.6` 为 `src/signal.rs`，不成立；已撤销。
 - 当前参考文档为 `reference/2.basic-design.html` 至 `reference/9.dbus-protocol.html`，入口 `reference/index.html`。

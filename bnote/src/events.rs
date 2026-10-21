@@ -37,6 +37,18 @@ impl EventQueue {
         }
     }
 
+    /// Resolve when the receiver side is gone or the queue was closed.
+    pub(crate) async fn closed(&self) {
+        let tx = self
+            .tx
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let Some(tx) = tx {
+            tx.closed().await;
+        }
+    }
+
     /// Close the receiver side once all queued events have been delivered.
     pub(crate) fn close(&self) {
         let mut guard = self
