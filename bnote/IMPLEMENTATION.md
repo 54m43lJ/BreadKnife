@@ -467,7 +467,43 @@ dbus-run-session -- cargo run --example server -- \
 
 `cargo test --all-targets` 会一并编译 `examples/server.rs`，防止示例停留在旧 API。
 
-## 4. 回填结果
+## 4. POC 文档合并冲突
+
+> 合并来源：`poc/notification`。规则：HTML 文档冲突直接取 poc 版本；与源码 / `IMPLEMENTATION` 的冲突只记录，不修改源码，等待具体修改意见。
+> 合并后旧 `ARCHITECTURE/CODE/BUILD` 与新 `USER/CORE/PROVIDER` 并存，旧单文件 reference 与新分章 reference 并存。
+
+### 4.1 HTML 文档冲突（已直接取 poc）
+
+| 文件 | 冲突类型 | 处理 |
+|---|---|---|
+| `CODE.html`（根） | content conflict | 取 poc 版本 |
+| `bnote/README.html` | content conflict | 取 poc 版本 |
+| `bnote/ARCHITECTURE.html` | modify/delete | 恢复 poc 版本 |
+| `bnote/CODE.html` | modify/delete | 恢复 poc 版本 |
+| `bnote/BUILD.html` | poc 新增 | 采用 poc 版本 |
+| `ARCHITECTURE.html`、`BUILD.html`、`README.html`、`style.css`（根） | poc 修改 | 已应用 poc 修改 |
+| `bnote/reference/notification-spec.clean.html` | dev 已删除，poc 旧文档仍引用 | 从合并基点恢复；分章 reference 同时保留 |
+
+结果：旧文档与新文档同时存在；`bnote/README.html` 现在指向旧 `ARCHITECTURE/CODE/BUILD`，新 `USER/CORE/PROVIDER` 仍保留但暂时没有 README 入口。这是 HTML 层面的结构重复，已按“冲突优先 poc”直接合并，未擅自删除新文档。
+
+### 4.2 与源码 / IMPLEMENTATION 的冲突（待意见）
+
+| ID | poc 文档描述 | 当前源码 / IMPLEMENTATION | 涉及文件 |
+|---|---|---|---|
+| C1 | 异步 `Session::start(&Connection, Sender<NoticeEvent>, Capabilities, ServerInfo) -> Rc<Session>` | 同步 `Session::start(SessionConfig) -> (SessionHandle, NoticeReceiver)` | `bnote/ARCHITECTURE.html`、`bnote/CODE.html`、`bnote/BUILD.html`、`bnote/README.html` |
+| C2 | 名字被占用时进入 `SessionState::Queued`，`state()` / `subscribe()` 观察，之后自动接管 | 被占用时立即返回 `Error::NameTaken`，不排队、不替换；宿主重新调用 `Session::start` | 旧 bnote 文档、根 `README/ARCHITECTURE/CODE/BUILD` |
+| C3 | `Rc<Session>` + 自由函数 `bnote::close/invoke_action/activation_token`；有界事件通道 | `SessionHandle` 命令 + `NoticeReceiver`；无界事件队列 | `bnote/CODE.html`、`bnote/ARCHITECTURE.html`、`bnote/BUILD.html` |
+| C4 | 未规定 `NoticeReceiver` 丢弃后的行为 | 当前实现准备按第二部分 2.2 改为“丢弃即终止整个会话”；旧文档没有这一条 | 旧 bnote 文档、根通知中心文档 |
+| C5 | 旧文档没有命令超时 / 取消语义 | 当前 `command_timeout_ms` + 每命令独立响应通道；第二部分 2.3 将补充取消与迟到响应清理 | `bnote/ARCHITECTURE.html`、`bnote/CODE.html`、`bnote/BUILD.html` |
+| C6 | 旧 `CloseReason` 文档只列 1/2/3 | 规范还定义 4（undefined/reserved）；实际不可达，需在文档中保留并注解 | 旧 bnote 文档、`bnote/PROVIDER.html`、`bnote/USER.html` |
+| C7 | poc `bnote/IMPLEMENTATION.md` 描述旧异步 API、排队接管、旧错误类型 | 保留当前 `IMPLEMENTATION.md`（sync API、NameTaken、ServerError 等）；poc 文件内容未合并 | `bnote/IMPLEMENTATION.md` |
+| C8 | poc `bnote/BUILD.html` 使用 `enumflags2`、`futures-util`、`tokio sync` 与异步示例 | 当前 Cargo 仅运行期依赖 tokio（macros/rt/sync/time）与 zbus；示例是同步宿主 + 事件线程 | `bnote/BUILD.html`、`bnote/Cargo.toml`、`bnote/examples/server.rs` |
+| C9 | 根文档描述通知中心排队不可用态、等待接管提示 | 当前 bnote 返回 `NameTaken`，不存在排队态；第二部分 2.1 将改为 `NameTaken` 报错 + 手动刷新重试 | 根 `README.html`、`ARCHITECTURE.html`、`CODE.html`、`BUILD.html` |
+| C10 | 旧文档与新 `USER/CORE/PROVIDER` 对同一 API / 行为给出不同描述 | 新文档是当前实现的第一来源；旧文档保留待统一 | `bnote/` 下两套文档 |
+
+源码侧合并冲突（`bnote/Cargo.toml`、`bnote/src/*`、`bnote/examples/server.rs`）均保留当前 dev 版本；poc 代码没有并入。
+
+## 5. 回填结果
 
 | 细节 | 落点 | 状态 |
 |---|---|---|

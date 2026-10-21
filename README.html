@@ -12,7 +12,7 @@
 <h1>BreadKnife</h1>
 <blockquote>
   专为 Hyprland 设计的 Wayland 任务栏：屏幕顶部一条常驻栏，集工作区、窗口信息、系统托盘与控制中心于一体，开箱即用。<br>
-  二进制名 <code>bread</code>；本仓库同时是项目群根，内嵌 breadpan 成员项目。
+  二进制名 <code>bread</code>；本仓库同时是项目群根，内嵌 breadpan、bnote 成员项目。
 </blockquote>
 
 <h2>WHAT &amp; WHY</h2>
@@ -45,6 +45,9 @@
   <tr><td>系统托盘</td><td>自动发现应用的托盘图标并显示；支持左键/中键/滚轮（含水平）/右键交互；悬停显示提示；失联图标置灰、应用退出后移除</td></tr>
   <tr><td>控制中心</td><td>常驻入口：电池（无电池设备自动隐藏）、网络状态、实时时钟；弹出面板：媒体控制、音量/亮度滑块、网络/蓝牙状态、日历</td></tr>
 </table>
+<ul class="note">
+  <li>通知中心可用性：bread 启动时若通知总线名已被其他服务占用，会排队等待接管；排队期间打开通知中心显示「暂时不可用」，并弹出一次普通优先级提示「通知中心暂时不可用：另一个通知服务正在运行，bread 将在其退出后接管」。取得总线名后通知中心恢复，提示立即关闭。</li>
+</ul>
 <p>工作区按钮按「要素 × 条件」矩阵决定（条件优先级从高到低＝紧急 → 活跃 → 有/无窗口，高者覆盖低者）：</p>
 <table>
   <tr><th></th><th>有窗口</th><th>无窗口</th><th>活跃</th><th>紧急</th></tr>
@@ -112,9 +115,10 @@ bread exit                        # 退出 daemon</code></pre>
   <tr><th>成员</th><th>定位</th><th>形态</th></tr>
   <tr><td><code>breadknife</code>（本目录）</td><td>Hyprland Wayland 任务栏（二进制 <code>bread</code>）；项目群根</td><td>应用，消费者是人</td></tr>
   <tr><td><code>breadpan</code></td><td>SNI 托盘协议栈单库：内置 Watcher 登记中心 + 逻辑 Host API + GTK 深度整合</td><td>库，消费者是开发者</td></tr>
+  <tr><td><code>bnote</code></td><td><code>org.freedesktop.Notifications</code> 协议库：方法应答、信号回发、hints 归一</td><td>库，消费者是开发者</td></tr>
 </table>
 <ul class="note">
-  <li>命名逻辑：breadknife = 面包刀（切面包的最终应用）；breadpan = 烤盘（承放、供取用）。</li>
+  <li>命名逻辑：breadknife = 面包刀（切面包的最终应用）；breadpan = 烤盘（承放、供取用）；bnote = 便条（通知）。</li>
   <li>托盘组装契约见 <a href="ARCHITECTURE.html#sec-4-3">ARCHITECTURE.html §4.3</a>。</li>
 </ul>
 
@@ -126,6 +130,7 @@ bread exit                        # 退出 daemon</code></pre>
   <tr><td><a href="CODE.html">CODE.html</a></td><td>实现骨架：文件树、类型与签名、伪码调用栈</td></tr>
   <tr><td><a href="BUILD.html">BUILD.html</a></td><td>构建依赖、运行前提、控制命令与调试要点</td></tr>
   <tr><td><a href="breadpan/README.html">breadpan/</a></td><td>成员项目文档（库 README 起）</td></tr>
+  <tr><td><a href="bnote/README.html">bnote/</a></td><td>成员项目文档（通知协议库 README 起）</td></tr>
 </table>
 
 <h2>Credits</h2>
