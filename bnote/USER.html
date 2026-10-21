@@ -46,49 +46,50 @@
 <h2 id="sec-4">4. 接口</h2>
 
 <h3 id="sec-4-1">4.1. 宿主 API（Rust）</h3>
-<pre><code>pub struct Session;             // 待实现，可以根据实际情况调整
+<pre><code>pub struct Session;
 
 impl Session {
     pub fn start(config: SessionConfig)
-        -&gt; Result&lt;(SessionHandle, NoticeReceiver), Error&gt;;     // 待实现，可以根据实际情况调整
+        -&gt; Result&lt;(SessionHandle, NoticeReceiver), Error&gt;;
 }
 
-pub struct SessionHandle;      // Clone + Send + Sync；待实现，可以根据实际情况调整
-pub struct NoticeReceiver;     // 单消费者；事件流；待实现，可以根据实际情况调整
+pub struct SessionHandle;      // Clone + Send + Sync
+pub struct NoticeReceiver;     // 单消费者；事件流
 
 impl SessionHandle {
     pub fn close(&amp;self, id: u32, reason: CloseReason)
-        -&gt; Result&lt;(), Error&gt;;                                 // 待实现，可以根据实际情况调整
+        -&gt; Result&lt;(), Error&gt;;
     pub fn invoke_action(&amp;self, id: u32, action_key: &amp;str)
-        -&gt; Result&lt;(), Error&gt;;                                 // 待实现，可以根据实际情况调整
+        -&gt; Result&lt;(), Error&gt;;
     pub fn activation_token(&amp;self, id: u32, token: &amp;str)
-        -&gt; Result&lt;(), Error&gt;;                                 // 待实现，可以根据实际情况调整
-    pub fn shutdown(&amp;self);                                 // 待实现，可以根据实际情况调整
+        -&gt; Result&lt;(), Error&gt;;
+    pub fn shutdown(&amp;self);
 }
 
 impl NoticeReceiver {
-    pub async fn recv(&amp;mut self) -&gt; Option&lt;NoticeEvent&gt;;   // 待实现，可以根据实际情况调整
+    pub async fn recv(&amp;mut self) -&gt; Option&lt;NoticeEvent&gt;;
 }</code></pre>
 <ul class="note">
   <li><code>Session::start</code> 与 <code>SessionHandle</code> 的全部方法均阻塞；阻塞是契约的一部分，调用方自行管理工作线程。</li>
   <li><code>NoticeReceiver::recv</code> 是异步的：无事件时挂起，不轮询、不靠超时循环；会话终止或 <code>Fatal</code> 之后返回 <code>None</code>。</li>
-  <li><code>SessionHandle</code> 可克隆；最后一个实例 drop 时自动停机。宿主也可显式调用 <code>shutdown</code>。</li>
+  <li><code>SessionHandle</code> 可克隆；最后一个实例 drop 时自动停机，并可能阻塞到内部线程退出。宿主也可显式调用 <code>shutdown</code>。</li>
+  <li><code>close</code> / <code>invoke_action</code> / <code>activation_token</code> 校验 id 是否在册；<code>invoke_action</code> 暂不校验 action key 是否属于原通知的 actions——key 归属校验需要缓存通知内容，暂不实现，未来考虑。</li>
 </ul>
 
 <h3 id="sec-4-2">4.2. 消息与错误</h3>
-<pre><code>pub enum NoticeEvent {          // 待实现，可以根据实际情况调整
+<pre><code>pub enum NoticeEvent {
     Notify { notice: Notice },
     Close { id: u32 },
     Fatal { message: String },
 }
 
-pub enum CloseReason {          // 待实现，可以根据实际情况调整
+pub enum CloseReason {
     Expired,
     Dismissed,
     CloseRequest,
 }
 
-pub enum Error {                // 待实现，可以根据实际情况调整
+pub enum Error {
     Bus(String),
     NameTaken(String),
     Timeout { ms: u64 },
@@ -100,7 +101,7 @@ pub enum Error {                // 待实现，可以根据实际情况调整
   <tr><th>事件</th><th>含义 / 宿主动作</th></tr>
   <tr><td><code>NoticeEvent::Notify</code></td><td>新通知或同 id 替换；宿主决定展示与生命周期</td></tr>
   <tr><td><code>NoticeEvent::Close</code></td><td>客户端请求关闭，本库已回发 <code>NotificationClosed(CloseRequest)</code>；宿主只移除 UI</td></tr>
-  <tr><td><code>NoticeEvent::Fatal</code></td><td>总线断连或服务终止；本库随后关闭事件通道，宿主决定是否重建会话</td></tr>
+  <tr><td><code>NoticeEvent::Fatal</code></td><td>总线断连或服务终止；本库随后关闭事件通道。宿主重建会话前必须先 <code>shutdown</code> 或丢弃旧 handle，以释放连接与总线名</td></tr>
 </table>
 <table>
   <tr><th>关闭原因</th><th>含义</th></tr>
@@ -112,31 +113,34 @@ pub enum Error {                // 待实现，可以根据实际情况调整
   <tr><th>错误</th><th>含义 / 宿主动作</th></tr>
   <tr><td><code>Error::Bus</code></td><td>会话总线连接、名称注册或信号发送失败；宿主记录错误并终止或降级</td></tr>
   <tr><td><code>Error::NameTaken</code></td><td><code>org.freedesktop.Notifications</code> 已被其它进程持有；宿主提示并降级/退出</td></tr>
-  <tr><td><code>Error::Timeout</code></td><td>同步命令在 <code>command_timeout_ms</code> 内未完成；宿主重试或重建会话</td></tr>
-  <tr><td><code>Error::InvalidArgs</code></td><td>参数不合法（如 actions 非成对、id 非法等）；宿主修正调用</td></tr>
-  <tr><td><code>Error::Protocol</code></td><td>协议字段缺失/类型不符；宿主记录并跳过该通知</td></tr>
+  <tr><td><code>Error::Timeout</code></td><td><code>SessionHandle</code> 同步命令在 <code>command_timeout_ms</code> 内未完成；宿主重试或重建会话</td></tr>
+  <tr><td><code>Error::InvalidArgs</code></td><td>宿主参数不合法（如 <code>SessionConfig</code> 的能力清单、未知或已失效的 id 等）；宿主修正调用</td></tr>
+  <tr><td><code>Error::Protocol</code></td><td>保留的兜底错误；当前正常路径不会产生，仅供未来例外情况使用</td></tr>
   <tr><td><code>Error::Stopped</code></td><td>会话已停机；宿主重建会话后再调用</td></tr>
 </table>
+<ul class="note">
+  <li>D-Bus 侧的 <code>InvalidArgs</code> / <code>Failed</code> 是线上错误名，与宿主侧 <code>Error</code> 枚举不是同一层；映射见 <a href="PROVIDER.html#sec-4-4">PROVIDER §4.4</a>。</li>
+</ul>
 
 <h3 id="sec-4-3">4.3. 数据模型与转换</h3>
-<pre><code>pub struct SessionConfig {      // 待实现，可以根据实际情况调整
+<pre><code>pub struct SessionConfig {
     pub capabilities: Capabilities,
     pub server_info: ServerInfo,
     pub command_timeout_ms: u64,
 }
 
-pub struct Capabilities {       // 待实现，可以根据实际情况调整
+pub struct Capabilities {
     pub entries: Vec&lt;String&gt;,
 }
 
-pub struct ServerInfo {         // 待实现，可以根据实际情况调整
+pub struct ServerInfo {
     pub name: String,
     pub vendor: String,
     pub version: String,
     pub spec_version: String,
 }
 
-pub struct Notice {             // 待实现，可以根据实际情况调整
+pub struct Notice {
     pub id: u32,
     pub app_name: String,
     pub icon: NoticeIcon,
@@ -147,14 +151,14 @@ pub struct Notice {             // 待实现，可以根据实际情况调整
     pub expire_timeout_ms: Option&lt;u32&gt;,
 }
 
-pub enum Urgency { Low, Normal, Critical }                 // 待实现，可以根据实际情况调整
-pub struct Action { pub key: String, pub label: String }   // 待实现，可以根据实际情况调整
-pub enum NoticeIcon { None, Name(String), Pixels { width: i32, height: i32, rgba: Vec&lt;u8&gt; } }   // 待实现，可以根据实际情况调整</code></pre>
+pub enum Urgency { Low, Normal, Critical }
+pub struct Action { pub key: String, pub label: String }
+pub enum NoticeIcon { None, Name(String), Pixels { width: i32, height: i32, rgba: Vec&lt;u8&gt; } }</code></pre>
 <table>
   <tr><th>对象 / 字段</th><th>定义</th></tr>
   <tr><td><code>SessionConfig.capabilities</code></td><td>能力清单：宿主装配时声明支持的特性串</td></tr>
   <tr><td><code>SessionConfig.server_info</code></td><td>服务器信息：名字 / 厂商 / 版本 / 规范版本</td></tr>
-  <tr><td><code>SessionConfig.command_timeout_ms</code></td><td>同步命令等待上限；超时返回 <code>Error::Timeout</code></td></tr>
+  <tr><td><code>SessionConfig.command_timeout_ms</code></td><td><code>SessionHandle</code> 同步命令等待上限；超时返回 <code>Error::Timeout</code>；<code>Session::start</code> 与 <code>SessionHandle::shutdown</code> 的等待超时由宿主自行管理</td></tr>
   <tr><td><code>Notice.id</code></td><td>本库分配的非 0 标识；同 id 替换由本库处理</td></tr>
   <tr><td><code>Notice.app_name</code> / <code>summary</code> / <code>body</code></td><td>应用名 / 标题 / 正文</td></tr>
   <tr><td><code>Notice.icon</code></td><td>图标三态：无 / 主题名或 <code>file://</code> URI / 位图</td></tr>

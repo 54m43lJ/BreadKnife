@@ -40,7 +40,7 @@
 
 Notify(app_name: String, replaces_id: u32, app_icon: String,
        summary: String, body: String, actions: Vec&lt;String&gt;,
-       hints: HashMap&lt;String, zbus::Value&gt;, expire_timeout: i32) -&gt; u32
+       hints: HashMap&lt;String, zbus::zvariant::OwnedValue&gt;, expire_timeout: i32) -&gt; u32
 
 CloseNotification(id: u32)
 GetCapabilities()               -&gt; Vec&lt;String&gt;
@@ -59,7 +59,7 @@ GetServerInformation()          -&gt; (name: String, vendor: String,
   <tr><td><code>u</code></td><td>UINT32</td><td><code>u32</code></td></tr>
   <tr><td><code>i</code></td><td>INT32</td><td><code>i32</code></td></tr>
   <tr><td><code>as</code></td><td>字符串数组</td><td><code>Vec&lt;String&gt;</code></td></tr>
-  <tr><td><code>a{sv}</code></td><td>字符串 → 变体字典</td><td><code>HashMap&lt;String, zbus::Value&gt;</code></td></tr>
+  <tr><td><code>a{sv}</code></td><td>字符串 → 变体字典</td><td><code>HashMap&lt;String, zbus::zvariant::OwnedValue&gt;</code></td></tr>
   <tr><td><code>(ssss)</code></td><td>四元组</td><td><code>(String, String, String, String)</code></td></tr>
   <tr><td><code>uu</code> / <code>us</code></td><td>信号参数对</td><td><code>(u32, u32)</code> / <code>(u32, String)</code></td></tr>
   <tr><td><code>susssasa{sv}i</code></td><td><code>Notify</code> 参数组合</td><td>见 §4.1 签名</td></tr>
@@ -85,13 +85,13 @@ ActivationToken(id: u32, token: String)</code></pre>
   <tr><td><code>app_name</code></td><td><code>Notice.app_name</code></td><td>原样</td></tr>
   <tr><td><code>summary</code></td><td><code>Notice.summary</code></td><td>原样</td></tr>
   <tr><td><code>body</code></td><td><code>Notice.body</code></td><td>原样</td></tr>
-  <tr><td><code>actions</code> 参数</td><td><code>Notice.actions</code></td><td>按（key, label）成对解析；奇数个 → <code>Error::InvalidArgs</code></td></tr>
+  <tr><td><code>actions</code> 参数</td><td><code>Notice.actions</code></td><td>按（key, label）成对解析；奇数个 → D-Bus <code>InvalidArgs</code></td></tr>
   <tr><td>hint <code>urgency</code></td><td><code>Notice.urgency</code></td><td>byte 0/1/2 → Low / Normal / Critical；缺失、未知值或类型不符 → Normal</td></tr>
-  <tr><td><code>app_icon</code> 与 hints <code>image-data</code> / <code>image-path</code> / <code>icon_data</code></td><td><code>Notice.icon</code></td><td>按规范优先级取一个：<code>image-data</code> &gt; <code>image-path</code> &gt; <code>app_icon</code> &gt; <code>icon_data</code>；<code>app_icon</code> / <code>image-path</code> 非空 → <code>NoticeIcon::Name</code>（主题名或 <code>file://</code> URI）；<code>image-data</code> / <code>icon_data</code> 为 8-bit、3/4 通道 → <code>NoticeIcon::Pixels</code>（RGB/RGBA，按 rowstride 压紧）；全空 → <code>NoticeIcon::None</code></td></tr>
+  <tr><td><code>app_icon</code> 与 hints <code>image-data</code> / <code>image-path</code> / <code>icon_data</code></td><td><code>Notice.icon</code></td><td>按规范优先级取一个：<code>image-data</code> &gt; <code>image-path</code> &gt; <code>app_icon</code> &gt; <code>icon_data</code>；<code>app_icon</code> / <code>image-path</code> 非空 → <code>NoticeIcon::Name</code>（主题名或 <code>file://</code> URI）；<code>image-data</code> / <code>icon_data</code> 为 8-bit、通道数由 <code>has_alpha</code> 决定 → <code>NoticeIcon::Pixels</code>（RGB/RGBA，按 rowstride 压紧）；全空 → <code>NoticeIcon::None</code></td></tr>
   <tr><td><code>expire_timeout</code> 参数</td><td><code>Notice.expire_timeout_ms</code></td><td>-1（及其它负值）→ <code>None</code>（按宿主默认）；0 → <code>Some(0)</code>（常驻）；正数 → <code>Some(ms)</code>（<a href="reference/9.dbus-protocol.html#command-notify">规范 §Notify</a>）</td></tr>
 </table>
 <ul class="note">
-  <li>未知 hint 键忽略；不支持的 <code>image-data</code> / <code>icon_data</code> 不报错，按上述优先级回退；<code>image-data</code> 的 <code>bits_per_sample</code> 必须为 8，<code>has_alpha</code> 为真时 <code>channels</code> 必须为 4，否则忽略该 hint。格式与优先级见 <a href="reference/5.icons-and-images.html#icons-and-images-formats">规范 §5</a>，hints 表见 <a href="reference/8.hints.html#id-1.9.7">规范 §8</a>。</li>
+  <li>未知 hint 键忽略；不支持的 <code>image-data</code> / <code>icon_data</code> 不报错，按上述优先级回退；<code>image-data</code> 的 <code>bits_per_sample</code> 必须为 8，<code>channels</code> 必须为 <code>has_alpha ? 4 : 3</code>，否则忽略该 hint。格式与优先级见 <a href="reference/5.icons-and-images.html#icons-and-images-formats">规范 §5</a>，hints 表见 <a href="reference/8.hints.html#id-1.9.7">规范 §8</a>。</li>
 </ul>
 
 <h4>出站</h4>
@@ -113,12 +113,14 @@ ActivationToken(id: u32, token: String)</code></pre>
 <pre><code>org.freedesktop.DBus.Error.InvalidArgs(message)
 org.freedesktop.DBus.Error.Failed(message)</code></pre>
 <table>
-  <tr><th>错误</th><th>含义 / 客户端动作</th></tr>
-  <tr><td><code>InvalidArgs</code></td><td><code>Notify</code> / <code>CloseNotification</code> 参数不合法（actions 非成对、id 非法等）；修正后重试</td></tr>
-  <tr><td><code>Failed</code></td><td>服务端内部失败（归一、序列化、事件投递）；记录并重试或降级</td></tr>
+  <tr><th>错误名</th><th>含义 / 客户端动作</th></tr>
+  <tr><td><code>org.freedesktop.DBus.Error.InvalidArgs</code></td><td><code>Notify</code> / <code>CloseNotification</code> 参数不合法（actions 非成对、<code>CloseNotification</code> 的 id 不存在或为 0 等）；修正后重试。未知 id 的 <code>CloseNotification</code> 使用空消息体</td></tr>
+  <tr><td><code>org.freedesktop.DBus.Error.Failed</code></td><td>服务端内部失败（归一、序列化、<code>Notify</code> 事件投递）；记录并重试或降级</td></tr>
 </table>
 <ul class="note">
+  <li>线上只有 D-Bus 错误名，没有 Rust 的 <code>Error::InvalidArgs</code> 概念；宿主侧 <code>Error</code> 是另一套 API，见 <a href="USER.html#sec-4-2">USER §4.2</a>。</li>
   <li>未知 hints、未知 urgency 值或不支持的 <code>image-data</code> 不返回错误：前者忽略，urgency 回退 Normal，图像 hint 按 §4.3 回退。</li>
+  <li><code>CloseNotification</code> 的宿主 <code>NoticeEvent::Close</code> 是辅助通知：事件投递失败不回滚已经完成的关闭，也不改变 D-Bus 结果；关闭结果以 id 失效和 <code>NotificationClosed</code> 为准。</li>
   <li>错误名沿用 D-Bus 标准错误；规范未定义通知专用错误，权威定义见 <a href="https://dbus.freedesktop.org/doc/dbus-specification.html#message-protocol-messages-error">D-Bus 规范 · Errors</a>。</li>
 </ul>
 
