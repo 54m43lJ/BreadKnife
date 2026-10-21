@@ -112,16 +112,18 @@ pub(crate) fn spawn_runtime(
 
 ### 1.6 `EventQueue::send` 需要报告投递失败
 
-`CORE §4.4` 的 `send` 返回 `()`。实现返回 `bool`：
+`CORE §4.4` 的 `send` 返回 `()`。实现改为有界、异步、返回 `bool`：
 
 ```rust
-pub(crate) fn send(&self, event: NoticeEvent) -> bool;
+pub(crate) async fn send(&self, event: NoticeEvent) -> bool;
 ```
 
 用途：
 
+- 队列有硬上限 `EVENT_QUEUE_CAPACITY`（推荐 64）；满时 `.await` 等待空位，对 D-Bus 方法施加背压；
 - `Notify` 的事件投递失败时，从在册集合移除刚分配的 id，并返回 D-Bus `Failed`；
 - `CloseNotification` 的事件投递失败不改变客户端结果：信号发射成功则客户端成功，发射失败则返回 D-Bus `Failed`；
+- `Fatal` 也等待空位后投递，不因队列满而丢失；
 - 会话停机后所有发送都返回 `false`。
 
 建议在 `CORE §4.4` 中说明事件通道关闭后的行为。
@@ -284,7 +286,7 @@ org.freedesktop.DBus.Error.InvalidArgs
 
 ### 1.18 事件接收端丢弃后的行为
 
-`CORE §4.4` 使用 `mpsc::UnboundedSender`，但没有说明：
+`CORE §4.4` 使用有界 `mpsc::Sender`，但没有说明：
 
 - 宿主丢弃 `NoticeReceiver` 后 `Notify` 是否还应成功；
 - `CloseNotification` 是否仍应给客户端回信号。
@@ -348,6 +350,7 @@ org.freedesktop.DBus.Error.InvalidArgs
 - `SessionHandle` 内部维护原子 handle 计数；最后一个实例 drop 时触发停机。
 - `shutdown` 幂等，阻塞到内部 runtime 退出，并释放连接与总线名。
 - `NoticeReceiver` 是单消费者；只支持一个接收端。丢弃 Receiver 会通过 `EventQueue::closed()` 立即终止整个会话，`SessionHandle` 后续命令返回 `Error::Stopped`。
+- `EventQueue` 使用有界通道（容量 `EVENT_QUEUE_CAPACITY`，推荐 64）；满时 `send().await` 施加背压，Fatal 也等待空位。
 - 接收端已不存在，因此不会收到 Fatal；宿主应丢弃旧 handle 并重新 `Session::start`。
 - `SessionHandle` 的 drop 也可能阻塞（join 内部线程），宿主应像对待 `shutdown` 一样避免在实时线程中丢弃最后一个 handle。
 - 停机后重新调用 `Session::start` 已验证可以立即重新取得总线名。
@@ -406,7 +409,7 @@ org.freedesktop.DBus.Error.InvalidArgs
 
 - 内部监视任务同时等待连接 `closed()`、30 秒心跳和 `NoticeReceiver` 被丢弃。
 - Receiver 丢弃走同一条终止路径：`events.closed()` 触发 `Bus::report_fatal`；Fatal 无法交付，但会话停止，handle 返回 `Stopped`。
-- 失败时先原子置停机标记并唤醒 runtime（current-thread runtime 不会在 Fatal 入队前抢占执行），随后入队 `NoticeEvent::Fatal`、关闭事件队列。
+- 失败时先等待 Fatal 入队（队列满时同样背压等待，不丢终止事件），再原子置停机标记并唤醒 runtime，随后关闭事件队列。
 - 显式 `shutdown` 不发送 Fatal：置停机标记、关闭事件通道并退出 runtime。
 - Fatal 后 `SessionHandle` 命令返回 `Stopped`，但连接要等 `shutdown` 或最后一个 handle 被丢弃才释放。
 
@@ -498,7 +501,7 @@ dbus-run-session -- cargo run --example server -- \
 | 异步 `Session::start(&Connection, Sender<NoticeEvent>, Capabilities, ServerInfo) -> Rc<Session>` | 同步 `Session::start(SessionConfig) -> (SessionHandle, NoticeReceiver)` |
 | `SessionState::{Available, Queued}`、`state()` / `subscribe()`、自动排队接管 | 被占用时返回 `Error::NameTaken`；无排队、无状态广播；宿主重新调用 `Session::start` |
 | 自由函数 `bnote::close` / `invoke_action` / `activation_token` | `SessionHandle` 的同步方法 |
-| 有界事件通道 / 接收端可丢弃后继续运行 | 无界队列；`NoticeReceiver` 单消费者，丢弃即终止整个会话 |
+| 有界事件通道 / 接收端可丢弃后继续运行 | 有界队列（64，背压）；`NoticeReceiver` 单消费者，丢弃即终止整个会话 |
 | 旧 `Error` 只含 `Bus` / `InvalidArgs` | 当前含 `NameTaken` / `Timeout` / `Protocol` / `Stopped`；服务端另有 `ServerError` |
 | 旧命令无超时取消与响应关联 | 每命令唯一 id、独立响应通道、超时 abort；迟到结果隔离 |
 | 旧 `CloseReason` 只列 1/2/3 | 文档保留规范 4 = undefined/reserved 并注解实际不可达 |
@@ -538,4 +541,5 @@ dbus-run-session -- cargo run --example server -- \
 | `NameTaken` 无额外重试 API；宿主重新 `Session::start`；breadknife 报错正文下增加刷新按钮 | USER §4.2、根 `ARCHITECTURE/CODE/README/BUILD` | 已完成 |
 | `NoticeReceiver` 单消费者；丢弃即终止整个会话，handle 返回 `Stopped` | USER §4.1、CORE §4.4 / §5.8 | 已完成 |
 | 命令超时 abort 与 per-command id / 独立响应通道；迟到结果隔离；已发信号不可撤回 | USER §4.1、CORE §4.3、源码 `bus.rs` | 已完成 |
+| 事件队列硬上限（64，背压；Fatal 等待空位不丢失） | USER §4.1、CORE §4.4 / §5.8、源码 `events.rs` | 已完成 |
 | `CloseReason` 文档保留规范 4 = undefined/reserved，注解实际不可达 | USER §4.2、PROVIDER §4.3 | 已完成 |

@@ -20,7 +20,7 @@ use zbus::fdo::{DBusProxy, RequestNameFlags, RequestNameReply};
 
 use crate::events::EventQueue;
 use crate::server::{self, Server};
-use crate::types::{NoticeEvent, SessionConfig};
+use crate::types::SessionConfig;
 use crate::{BUS_NAME, Error, PATH};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
@@ -214,13 +214,17 @@ impl Bus {
         first
     }
 
-    fn report_fatal(&self, message: String) {
-        if self.fatal.swap(true, Ordering::SeqCst) || !self.claim_stop() {
+    async fn report_fatal(&self, message: String) {
+        if self.fatal.swap(true, Ordering::SeqCst) || self.is_stopped() {
             return;
         }
 
-        self.events.send(NoticeEvent::Fatal { message });
-        self.events.close();
+        // Deliver the terminal event before stopping the runtime, so a full
+        // queue never swallows it.
+        self.events.send_fatal(message).await;
+        if self.claim_stop() {
+            self.events.close();
+        }
     }
 }
 
@@ -332,14 +336,15 @@ async fn run_loop(
 
 async fn watch_receiver(bus: Bus) {
     bus.events.closed().await;
-    bus.report_fatal("notice receiver dropped".to_owned());
+    bus.report_fatal("notice receiver dropped".to_owned()).await;
 }
 
 async fn monitor(bus: Bus) {
     let proxy = match DBusProxy::new(&bus.conn).await {
         Ok(proxy) => proxy,
         Err(error) => {
-            bus.report_fatal(format!("cannot create a bus proxy: {error}"));
+            bus.report_fatal(format!("cannot create a bus proxy: {error}"))
+                .await;
             return;
         }
     };
@@ -351,7 +356,7 @@ async fn monitor(bus: Bus) {
     loop {
         tokio::select! {
             _ = bus.conn.closed() => {
-                bus.report_fatal("session bus connection closed".to_owned());
+                bus.report_fatal("session bus connection closed".to_owned()).await;
                 break;
             }
             _ = heartbeat.tick() => {
@@ -362,11 +367,11 @@ async fn monitor(bus: Bus) {
                 match timeout(HEARTBEAT_TIMEOUT, proxy.get_id()).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(error)) => {
-                        bus.report_fatal(format!("session bus heartbeat failed: {error}"));
+                        bus.report_fatal(format!("session bus heartbeat failed: {error}")).await;
                         break;
                     }
                     Err(_) => {
-                        bus.report_fatal("session bus heartbeat timed out".to_owned());
+                        bus.report_fatal("session bus heartbeat timed out".to_owned()).await;
                         break;
                     }
                 }

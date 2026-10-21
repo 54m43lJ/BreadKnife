@@ -125,7 +125,7 @@ impl Server {
         };
 
         let notice = build_notice(params, hint_set, id);
-        if !self.events.send(NoticeEvent::Notify { notice }) {
+        if !self.events.send(NoticeEvent::Notify { notice }).await {
             state.remove(id);
             return Err(ServerError::Failed("event channel is closed".to_owned()));
         }
@@ -148,7 +148,7 @@ impl Server {
         let emitted = signal::emit_closed_on(conn, id, CloseReason::CloseRequest)
             .await
             .map_err(|error| ServerError::Failed(error.to_string()));
-        let _ = self.events.send(NoticeEvent::Close { id });
+        let _ = self.events.send(NoticeEvent::Close { id }).await;
         emitted
     }
 }

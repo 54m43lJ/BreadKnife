@@ -104,17 +104,21 @@ impl Bus {
 </ul>
 
 <h3 id="sec-4-events">4.4. src/events.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub(crate) struct EventQueue {
-    tx: Mutex&lt;Option&lt;mpsc::UnboundedSender&lt;NoticeEvent&gt;&gt;&gt;,
+<pre><code>pub(crate) const EVENT_QUEUE_CAPACITY: usize = 64;   // 推荐值；实际值以代码为准
+
+pub(crate) struct EventQueue {
+    tx: Mutex&lt;Option&lt;mpsc::Sender&lt;NoticeEvent&gt;&gt;&gt;,
 }
 
 impl EventQueue {
     pub(crate) fn new() -&gt; (Arc&lt;Self&gt;, NoticeReceiver);
-    pub(crate) fn send(&amp;self, ev: NoticeEvent) -&gt; bool;
+    pub(crate) async fn send(&amp;self, ev: NoticeEvent) -&gt; bool;
+    pub(crate) async fn send_fatal(&amp;self, message: String) -&gt; bool;
     pub(crate) async fn closed(&amp;self);
     pub(crate) fn close(&amp;self);
 }</code></pre>
 <ul class="note">
+  <li>队列有硬上限：普通事件在容量满时等待空位，向 D-Bus 方法施加背压；<code>Fatal</code> 同样等待空位，不丢终止事件。</li>
   <li><code>send</code> 在接收端已丢弃或队列已关闭时返回 <code>false</code>；<code>close</code> 先取出并 drop sender，已入队事件仍会先交付，随后 <code>recv</code> 返回 <code>None</code>。</li>
   <li>内部监视任务等待 <code>closed()</code>；单消费者 <code>NoticeReceiver</code> 一旦被丢弃，立即触发会话终止。</li>
 </ul>
@@ -299,8 +303,8 @@ pub enum NoticeIcon;        //见 USER §4.3</code></pre>
 <h3 id="sec-5-8">5.8. 总线终止</h3>
 <pre><code>连接 closed() / 心跳失败 / NoticeReceiver 被丢弃
 → Bus::report_fatal(message)
+├── bus.events.send_fatal(Fatal { message }).await   // 队列满时背压等待，不丢事件
 ├── claim stop（原子标记 + 唤醒 runtime）
-├── bus.events.send(NoticeEvent::Fatal { message })
 ├── bus.events.close()
 └── runtime loop 退出
 
@@ -309,7 +313,7 @@ pub enum NoticeIcon;        //见 USER §4.3</code></pre>
 ├── DBusProxy::get_id()   // 超时 5s，推荐取值；实际值以代码为准
 └── 失败 → Fatal</code></pre>
 <ul class="note">
-  <li><code>Fatal</code> 是终止事件；事件通道随后关闭，<code>NoticeReceiver::recv</code> 返回 <code>None</code>，handle 后续调用返回 <code>Error::Stopped</code>。</li>
+  <li><code>Fatal</code> 是终止事件；事件通道随后关闭，<code>NoticeReceiver::recv</code> 返回 <code>None</code>，handle 后续调用返回 <code>Error::Stopped</code>。Fatal 在队列满时等待空位，不丢失。</li>
   <li>Receiver 被丢弃时 Fatal 无法交付（接收端已不存在），但会话同样立即终止；宿主通过 handle 的 <code>Stopped</code> 观察并重建新实例。</li>
   <li>Fatal 后连接与总线名仍由旧 <code>SessionHandle</code> 持有；宿主重建会话前必须先 <code>shutdown</code> 或丢弃最后一个 handle，否则可能得到 <code>NameTaken</code>。</li>
 </ul>

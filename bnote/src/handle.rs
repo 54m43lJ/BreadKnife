@@ -145,11 +145,11 @@ impl SessionHandle {
 /// session; the host must drop the old handle and call [`Session::start`]
 /// again to rebuild.
 pub struct NoticeReceiver {
-    rx: mpsc::UnboundedReceiver<NoticeEvent>,
+    rx: mpsc::Receiver<NoticeEvent>,
 }
 
 impl NoticeReceiver {
-    pub(crate) fn new(rx: mpsc::UnboundedReceiver<NoticeEvent>) -> Self {
+    pub(crate) fn new(rx: mpsc::Receiver<NoticeEvent>) -> Self {
         Self { rx }
     }
 
