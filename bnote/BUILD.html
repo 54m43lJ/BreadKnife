@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>bnote — 构建与开发</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>bnote 构建与开发</h1>
+<p>面向开发者的构建、测试、示例运行与依赖接入说明。项目描述见 <a href="README.html">README.html</a>，宿主契约见 <a href="USER.html">USER.html</a>，内部结构见 <a href="CORE.html">CORE.html</a>，协议边界见 <a href="PROVIDER.html">PROVIDER.html</a>。</p>
+
+<h2 id="sec-1">1. 构建依赖</h2>
+<table>
+  <tr><th>项</th><th>说明</th></tr>
+  <tr><td>Rust 工具链</td><td>rustup / cargo（edition 2024）</td></tr>
+  <tr><td>crate 依赖</td><td><code>zbus</code>（tokio 特性）、<code>tokio</code>（macros / rt / sync / time）</td></tr>
+  <tr><td>测试依赖</td><td><code>futures-util</code>（集成测试消费信号流）</td></tr>
+  <tr><td>运行环境</td><td>D-Bus session bus；无需 GTK、Wayland/X11 或额外系统库</td></tr>
+  <tr><td>测试客户端</td><td>可选：<code>notify-send</code> / <code>dunstify</code> / <code>gdbus</code></td></tr>
+</table>
+<ul class="note">
+  <li>本库是独立 crate（仓库路径 <code>bnote/</code>），可脱离仓库内其它工程单独编译与测试；以下命令均在 <code>bnote/</code> 目录执行。</li>
+</ul>
+
+<h2 id="sec-2">2. 编译与测试</h2>
+<pre><code>cargo fmt --all -- --check
+cargo build
+cargo test --all-targets
+cargo clippy --all-targets -- -D warnings
+
+# 协议集成测试（需要隔离的会话总线）
+dbus-run-session -- env BNOTE_TEST_DBUS=1 cargo test --all-targets</code></pre>
+<ul class="note">
+  <li>单元测试不接触 session bus，任意环境可跑。</li>
+  <li>集成测试仅在 <code>BNOTE_TEST_DBUS=1</code> 且存在 <code>DBUS_SESSION_BUS_ADDRESS</code> 时运行；普通 <code>cargo test</code> 不连接桌面总线。</li>
+  <li><code>cargo test --all-targets</code> 也会编译 <code>examples/server.rs</code>。</li>
+</ul>
+
+<h2 id="sec-3">3. 运行示例</h2>
+<pre><code>dbus-run-session -- cargo run --example server -- \
+  --name bnote-server --vendor breadknife \
+  --caps actions,body,body-markup,icon-static</code></pre>
+<ul class="note">
+  <li>示例常驻占用 <code>org.freedesktop.Notifications</code>，stdout 打印全部事件，stdin 接受 <code>list</code> / <code>close</code> / <code>action</code> / <code>token</code> / <code>info</code> / <code>quit</code>。</li>
+  <li>真实桌面上已有通知守护（dunst / mako / 桌面环境内置）时，示例因 <code>NameTaken</code> 退出；bnote 不排队、不替换已有守护。可在 <code>dbus-run-session</code> 的空总线上演示。</li>
+  <li>隔离会话中的客户端须在同一 <code>dbus-run-session</code> 命令内启动，例如另开 shell 后设置 <code>DBUS_SESSION_BUS_ADDRESS</code>。</li>
+</ul>
+
+<h2 id="sec-4">4. 外部客户端驱动</h2>
+<pre><code>notify-send [-u critical] [-r &lt;replaces_id&gt;] "标题" "正文"
+dunstify -A "default,Open" "标题" "正文"
+gdbus call --session -d org.freedesktop.Notifications \
+  -o /org/freedesktop/Notifications \
+  -m org.freedesktop.Notifications.CloseNotification &lt;id&gt;</code></pre>
+<ul class="note">
+  <li><code>dunstify -A</code> 的格式为「动作键,标签」；客户端会阻塞等待 <code>ActionInvoked</code>，在示例 stdin 中执行 <code>action &lt;id&gt; &lt;key&gt;</code> 回发。</li>
+  <li><code>notify-send -t 0</code> 为常驻，<code>-t -1</code> 交由宿主决定超时。</li>
+</ul>
+
+<h2 id="sec-5">5. 作为依赖使用</h2>
+<pre><code>[dependencies]
+bnote = { path = "bnote" }</code></pre>
+<ul class="note">
+  <li>宿主只需依赖 bnote；连接与运行时由库内部持有，宿主不需要添加 zbus 或 tokio。</li>
+  <li>宿主仍需自己的异步 executor 来 <code>await NoticeReceiver::recv()</code>；同步命令 <code>Session::start</code> / <code>SessionHandle</code> 可放到工作线程。</li>
+  <li>装配、事件与命令契约见 <a href="USER.html">USER</a>。</li>
+</ul>
+
+<footer>
+  文档：<a href="README.html">README</a> ·
+  <a href="USER.html">USER</a> ·
+  <a href="CORE.html">CORE</a> ·
+  <a href="PROVIDER.html">PROVIDER</a> ·
+  BUILD
+</footer>
+
+</main>
+</body>
+</html>
