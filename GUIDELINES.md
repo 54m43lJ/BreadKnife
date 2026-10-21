@@ -70,7 +70,7 @@ Documents per project, in HTML — the development docs split by boundary:
 **Rules**
 - not exhaustive — key execution paths only: startup, key events, shutdown
 - symbols already defined in USER/PROVIDER → one-line declaration with trailing `//见 USER §xx.xx` / `//见 PROVIDER §xx.xx` — project language, no body, no redefinition; everything else syntactically valid in the project language
-- engineering constants (bus names, periods, capacities, …) — document the variable name and its purpose; recommended values may appear in the explanation; tuned against the real system, code stays the operational source of truth; a literal may appear inline in a call stack where that flow depends on it; exception: UI visual literals (dimensions, radii, font sizes, …) pin the visual contract and may be stated in USER's UI chapters — CSS/code stays the operational source of truth
+- engineering constants (bus names, periods, capacities, …) — declare the constant name and purpose; a concrete value may appear only as a recommended value in a comment (e.g. `// 推荐值 15_000`), never as an assignment in the declaration; tuned against the real system, code stays the operational source of truth; a literal may appear inline in a call stack where that flow depends on it; exception: UI visual literals (dimensions, radii, font sizes, …) pin the visual contract and may be stated in USER's UI chapters — CSS/code stays the operational source of truth
 - no implementation reference → draft meaningful names/signatures marked `待实现，可以根据实际情况调整` (call-stack lines use the drafted names, no marker at the call site); a reference exists (main branch, breadpan, std / GTK APIs) → use its real names
 
 **Chapters**
@@ -80,6 +80,10 @@ Documents per project, in HTML — the development docs split by boundary:
 4. **Internal types & method signatures** — one subsection per source file, in file-tree order, titled by file name, linking back to the file tree · methods: signature + at most a one-line purpose note — internals (call chains, branching, fallbacks, ordering) belong to the call-stack section · data structures & messages: type definitions, the comments are the explanation — no field tables
 5. **Call stack tree** — actual execution of key program logic
    - lines carry calls or judgments only — every line points at a concrete call (`module::fn(args)`, DBus method, event send, …); a judgment/branch condition is the sole exception
+   - one line carries at most one call or one judgment; a judgment may point to its single resulting call; independent calls are separate sibling/child lines; equivalent entrypoints may share one line separated by `/`
+   - event listeners are represented by the binding call statement; calls inside the listener are child calls, like any other call
+   - a node's children are calls actually made by that node; a path shared by several callers is a separate root/subsection, never nested under one caller
+   - call-tree structure follows the source: separately registered listeners stay separate; a semantic grouping such as `player.on(command)` is a note/table abstraction, not a substitute for actual registrations
    - at most one trailing comment per call — a comment is not a tree node (no `├──`/`└──` of its own), but the ancestor spine `│` continues through its line
    - motivations, policies, trade-offs beyond one comment line → prose after the block
 

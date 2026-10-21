@@ -232,6 +232,20 @@
       <div class="mk-nc-gh"><span class="arr">▸</span>应用 B</div>
     </div>
   </div>
+  <div class="mk-scene">
+    <div class="mk-bar" style="width:640px"><div style="margin:0 auto">活动窗口标题</div></div>
+    <div class="mk-nc">
+      <div class="mk-nc-unavail">
+        <div class="mk-nc-unavail-ic">!</div>
+        <div class="mk-nc-unavail-t">通知中心暂时不可用</div>
+        <div class="mk-nc-unavail-b">另一个通知服务正在运行，bread 无法接管 org.freedesktop.Notifications。</div>
+        <button class="mk-nc-retry" type="button" aria-label="重新尝试连接通知服务">
+          <span class="mk-nc-retry-ic" aria-hidden="true">↻</span>
+          <span>重试</span>
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 <ul class="note">
   <li>面板顶边紧贴任务栏底边，高度绑定于任务栏。</li>
@@ -240,6 +254,8 @@
   <li>聚合标题与清理按钮：<code>fg</code> 底 <code>bg</code> 字，圆角 6px，与托盘同语言。</li>
   <li>每条消息：<code>surface</code> 底 <code>fg</code> 字（配色对齐通知弹窗）、圆角 8px；标题至多 1 行、正文至多 2 行，超出裁剪显示省略号；关闭按钮与标题同行置右。</li>
   <li>顶部一键清理全部按钮，位于右上角。</li>
+  <li>不可用态：bnote 启动返回 <code>NameTaken</code> 时，面板保持相同外框与定位，内容区居中显示「通知中心暂时不可用」、失败说明与刷新按钮；不显示清理按钮、应用分组与消息卡。</li>
+  <li>手动重试：刷新按钮位于失败说明正文下方，点击后重新调用 <code>bnote::Session::start</code>；成功则恢复正常列表 / 空态，仍失败则保留错误态。宿主不自动重试、不排队、不替换已有通知服务。</li>
   <li>弹出触发、悬停查看全文与左键/中键行为见 <a href="README.html#界面交互">README.html「界面交互」</a>。</li>
 </ul>
 
@@ -292,13 +308,14 @@
   <tr><td><code>tray.menu_activate</code></td><td>item id、条目 id → 受理</td></tr>
   <tr><td><code>workspace.switch</code></td><td>工作区 id → 受理</td></tr>
   <tr><td><code>media.control</code></td><td>MPRIS 操作 → 受理</td></tr>
+  <tr><td><code>notification.retry</code></td><td>无载荷 → 重新装配通知服务的结果（成功 / <code>NameTaken</code>）</td></tr>
   <tr><td><code>volume.set</code> / <code>brightness.set</code></td><td>目标值 → 受理</td></tr>
 </table>
 <h4>daemon → 窗口（推送）</h4>
 <table>
   <tr><th>消息</th><th>载荷</th></tr>
-  <tr><td><code>snapshot</code></td><td>首连全量：显示器切片（工作区状态、活动窗口）、托盘项、系统状态、通知、CSS 路径</td></tr>
-  <tr><td><code>state</code></td><td>增量：工作区 / 活动窗口 / 系统状态</td></tr>
+  <tr><td><code>snapshot</code></td><td>首连全量：显示器切片（工作区状态、活动窗口）、托盘项、系统状态、通知、通知中心可用性、CSS 路径</td></tr>
+  <tr><td><code>state</code></td><td>增量：工作区 / 活动窗口 / 系统状态 / 通知中心可用性</td></tr>
   <tr><td><code>tray</code></td><td>托盘项增 / 删 / 改（携带 Item 数据，含 IconSource）</td></tr>
   <tr><td><code>menu_changed</code></td><td>定向：弹窗打开期间的菜单刷新触发</td></tr>
   <tr><td><code>notification</code></td><td>通知记录（推送全部窗口）</td></tr>
@@ -316,8 +333,9 @@
   <tr><td>工作区映射表</td><td>工作区 ID → 所属显示器；本屏工作区清单＝现存工作区 ∪ 绑定到本屏的静态 workspace 规则（有规则无窗口＝非活跃工作区，见 <a href="README.html#界面交互">README.html「界面交互」</a>；daemon 持有）</td><td>启动/插拔/配置重载时全量重建（按名去重 + id 排序）；<code>workspace&gt;&gt;X</code> → 切片推送</td></tr>
   <tr><td>控制指令</td><td>行文本 → { open, close, open-all, close-all, exit, reload }</td><td>Socket 读入 → daemon 指令分发</td></tr>
   <tr><td>通知记录</td><td>应用名、图标、摘要、正文、通知 ID（daemon 持有）</td><td>DBus Notify 调用参数 → 缓存 → 推送全部窗口</td></tr>
+  <tr><td>通知中心可用性</td><td>布尔值（daemon 持有）</td><td><code>bnote::Session::start</code> 成功为 true、<code>NameTaken</code> 为 false；手动重试结果变化时推送全部窗口</td></tr>
   <tr><td>托盘 Item 视图</td><td>图标（IconSource）、状态、标题、提示（ToolTip）、有无菜单、存活标记（daemon → 窗口）</td><td>breadpan 现场读取 → 状态推送；窗口渲染直出为可绘制对象；alive=false → 置灰样式</td></tr>
-  <tr><td>窗口切片</td><td>单窗口所需状态：本屏工作区、活动窗口、托盘、通知、CSS 路径</td><td>daemon 状态变更 → 切片增量推送；首连全量</td></tr>
+  <tr><td>窗口切片</td><td>单窗口所需状态：本屏工作区、活动窗口、托盘、通知、通知中心可用性、CSS 路径</td><td>daemon 状态变更 → 切片增量推送；首连全量</td></tr>
   <tr><td>样式变量集</td><td>底板/文字/强调/语义/边框五组 CSS 变量（清单见 <a href="#sec-3-9">§3.9</a>）；文件路径由 daemon 跟踪</td><td>窗口按路径加载 → GTK 样式表 → 组件呈现（reload 广播重读）</td></tr>
 </table>
 

@@ -1,6 +1,6 @@
 @startuml bnote-protocol
 participant "客户端" as client
-queue "DBus 会话总线" as bus
+queue "D-Bus 会话总线" as bus
 participant "bnote" as lib
 
 == 方法应答 ==
