@@ -14,7 +14,7 @@
 <h3>IDEAL</h3>
 <p>bread 的通知守护要正确实现 <code>org.freedesktop.Notifications</code> 的全部协议行为——方法应答、信号回发、hints 归一、能力协商。这些细节繁杂且与业务无关，不应散落在 daemon 业务代码里。</p>
 <h3>GOAL</h3>
-<p>一个独立封装该协议的库：内部自持连接与运行时，宿主只面向异步通知事件流与同步回发命令，不见任何 DBus 协议细节；协议行为与官方规范逐条对应，可独立测试。</p>
+<p>一个独立封装该协议的库：内部自持连接与运行时，宿主只面向异步通知事件流与同步回发命令，不见任何 D-Bus 协议细节；协议行为与官方规范逐条对应，可独立测试。</p>
 <h3>非目标</h3>
 <ul>
   <li>无图形界面：不做通知的展示与交互。</li>
@@ -32,16 +32,10 @@
   <li>总线名被占用时 <code>Session::start</code> 返回 <code>Error::NameTaken</code>；宿主可稍后再次调用 <code>Session::start</code> 重试，本库不排队、不替换。</li>
 </ul>
 
-<h2 id="sec-3">3. 参考资料</h2>
-<ul>
-  <li>协议权威文本：<a href="reference/index.html">reference/</a>（官方规范清理版）。</li>
-  <li>构建、测试与示例运行：<a href="BUILD.html">BUILD.html</a>。</li>
-</ul>
-
-<h2 id="sec-4">4. Credits</h2>
+<h2 id="sec-3">3. Credits</h2>
 <ul>
   <li>协议：<a href="https://specifications.freedesktop.org/notification-spec/latest/">freedesktop.org Notification Specification</a>（清理版见 <a href="reference/index.html">reference/</a>）。</li>
-  <li>DBus 实现：<a href="https://github.com/dbus2/zbus">zbus</a>（Rust）。</li>
+  <li>D-Bus 实现：<a href="https://github.com/dbus2/zbus">zbus</a>（Rust）。</li>
 </ul>
 
 <footer>

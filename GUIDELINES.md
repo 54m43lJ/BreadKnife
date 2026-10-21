@@ -6,8 +6,8 @@ Documents per project, in HTML — the development docs split by boundary:
 
 | # | Document | Boundary | Content | Elsewhere |
 |--:|----------|----------|---------|-----------|
-| 1 | [README](#readme) | — | WHAT & WHY · user interactions · prototype | — |
-| 2 | [USER](#user) | upper — end users / dependent software | protocols · conventions · APIs · workflows · UI (graphical programs) | internal mechanics → [CORE](#core) · underlying sources → [PROVIDER](#provider) |
+| 1 | [README](#readme) | — | WHAT & WHY · user interactions | — |
+| 2 | [USER](#user) | upper — end users / dependent software | protocols · conventions · APIs · workflows · UI & prototypes (graphical programs) | internal mechanics → [CORE](#core) · underlying sources → [PROVIDER](#provider) |
 | 3 | [CORE](#core) | none — internal only; anything with no counterpart outside the project | internal data structures & APIs · call stacks · SBOM | usage-facing → [USER](#user) · provider boundary → [PROVIDER](#provider) |
 | 4 | [PROVIDER](#provider) | lower — underlying data sources / dependencies (system services, IPC, hardware, daemons, network endpoints, …); omit when absent | protocols · conventions · APIs · workflows | whole-system view → [USER](#user) · internal handling → [CORE](#core) |
 | 5 | [BUILD](#build) | written after development | how to use & build on the project | — |
@@ -38,9 +38,8 @@ Documents per project, in HTML — the development docs split by boundary:
 
 1. **WHAT & WHY** — IDEAL: the problem to solve · GOAL: what success looks like · non-goals (optional)
 2. **User interactions**
-3. **Prototype/mock** (if applicable) — code, pictures or videos
-4. **Project map** — optional; root project of a multi-project repo only · ASCII tree of the project family
-5. **Credits** — always present, always last
+3. **Project map** — optional; root project of a multi-project repo only · ASCII tree of the project family
+4. **Credits** — always present, always last
 
 ## User
 
@@ -59,7 +58,8 @@ Documents per project, in HTML — the development docs split by boundary:
    - exposed API specifications — code, or pseudocode for multi-language support
    - message types incl. errors — pseudocode definition block + table of meaning & suggested action
    - data models — objects of exposed APIs (bare code/pseudocode, no comments) · field table (external specs referenced) · transformations (exact data object names)
-5. **UI** — optional; graphical programs only
+5. **UI** — optional; graphical programs only; all UI prototypes/mocks live here
+   - prototype/mock — code, pictures or videos
    - palette — color tokens and their semantic roles
    - visual presentation — the per-component visual contract (geometry, states, styling); drawn samples preferred over prose
 
@@ -70,7 +70,7 @@ Documents per project, in HTML — the development docs split by boundary:
 **Rules**
 - not exhaustive — key execution paths only: startup, key events, shutdown
 - symbols already defined in USER/PROVIDER → one-line declaration with trailing `//见 USER §xx.xx` / `//见 PROVIDER §xx.xx` — project language, no body, no redefinition; everything else syntactically valid in the project language
-- no engineering constants (bus names, periods, capacities, …) — tuned against the real system, they live in code alone, trade-off → implementation notes when it matters; a literal may appear only inline in a call stack, where that flow depends on it; exception: UI visual literals (dimensions, radii, font sizes, …) pin the visual contract and may be stated in USER's UI chapters — CSS/code stays the operational source of truth
+- engineering constants (bus names, periods, capacities, …) — declare the constant name and purpose; a concrete value may appear only as a recommended value in a comment (e.g. `// 推荐值 15_000`), never as an assignment in the declaration; tuned against the real system, code stays the operational source of truth; a literal may appear inline in a call stack where that flow depends on it; exception: UI visual literals (dimensions, radii, font sizes, …) pin the visual contract and may be stated in USER's UI chapters — CSS/code stays the operational source of truth
 - no implementation reference → draft meaningful names/signatures marked `待实现，可以根据实际情况调整` (call-stack lines use the drafted names, no marker at the call site); a reference exists (main branch, breadpan, std / GTK APIs) → use its real names
 
 **Chapters**
@@ -80,6 +80,10 @@ Documents per project, in HTML — the development docs split by boundary:
 4. **Internal types & method signatures** — one subsection per source file, in file-tree order, titled by file name, linking back to the file tree · methods: signature + at most a one-line purpose note — internals (call chains, branching, fallbacks, ordering) belong to the call-stack section · data structures & messages: type definitions, the comments are the explanation — no field tables
 5. **Call stack tree** — actual execution of key program logic
    - lines carry calls or judgments only — every line points at a concrete call (`module::fn(args)`, DBus method, event send, …); a judgment/branch condition is the sole exception
+   - one line carries at most one call or one judgment; a judgment may point to its single resulting call; independent calls are separate sibling/child lines; equivalent entrypoints may share one line separated by `/`
+   - event listeners are represented by the binding call statement; calls inside the listener are child calls, like any other call
+   - a node's children are calls actually made by that node; a path shared by several callers is a separate root/subsection, never nested under one caller
+   - call-tree structure follows the source: separately registered listeners stay separate; a semantic grouping such as `player.on(command)` is a note/table abstraction, not a substitute for actual registrations
    - at most one trailing comment per call — a comment is not a tree node (no `├──`/`└──` of its own), but the ancestor spine `│` continues through its line
    - motivations, policies, trade-offs beyond one comment line → prose after the block
 

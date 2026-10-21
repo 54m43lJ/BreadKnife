@@ -16,6 +16,7 @@
   <tr><th>项</th><th>说明</th></tr>
   <tr><td>Rust 工具链</td><td>rustup / cargo（edition 2024）</td></tr>
   <tr><td>crate 依赖</td><td><code>zbus</code>（tokio 特性）、<code>tokio</code>（macros / rt / sync / time）</td></tr>
+  <tr><td>测试依赖</td><td><code>futures-util</code>（集成测试消费信号流）</td></tr>
   <tr><td>运行环境</td><td>D-Bus session bus；无需 GTK、Wayland/X11 或额外系统库</td></tr>
   <tr><td>测试客户端</td><td>可选：<code>notify-send</code> / <code>dunstify</code> / <code>gdbus</code></td></tr>
 </table>
@@ -33,7 +34,7 @@ cargo clippy --all-targets -- -D warnings
 dbus-run-session -- env BNOTE_TEST_DBUS=1 cargo test --all-targets</code></pre>
 <ul class="note">
   <li>单元测试不接触 session bus，任意环境可跑。</li>
-  <li>集成测试仅在 <code>BNOTE_TEST_DBUS=1</code> 且存在 <code>DBUS_SESSION_BUS_ADDRESS</code> 时运行，避免误连开发桌面上的真实通知守护。</li>
+  <li>集成测试仅在 <code>BNOTE_TEST_DBUS=1</code> 且存在 <code>DBUS_SESSION_BUS_ADDRESS</code> 时运行；普通 <code>cargo test</code> 不连接桌面总线。</li>
   <li><code>cargo test --all-targets</code> 也会编译 <code>examples/server.rs</code>。</li>
 </ul>
 

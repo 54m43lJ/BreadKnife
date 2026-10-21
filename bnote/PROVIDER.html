@@ -9,12 +9,12 @@
 <main>
 
 <h1>bnote 依赖契约</h1>
-<p>bnote 绑定的底层是 DBus 会话总线上的 <code>org.freedesktop.Notifications</code> 服务：连接由本库内部建立并持有，装配时注册并实现该服务；客户端的方法调用经总线进入，三个信号经总线回发。协议完整定义以 <a href="reference/index.html">reference/</a> 为唯一权威，本文只登记本库实现的面；宿主侧契约见 <a href="USER.html">USER.html</a>。</p>
+<p>bnote 绑定的底层是 D-Bus 会话总线上的 <code>org.freedesktop.Notifications</code> 服务：连接由本库内部建立并持有，装配时注册并实现该服务；客户端的方法调用经总线进入，三个信号经总线回发。协议完整定义以 <a href="reference/index.html">reference/</a> 为唯一权威，本文只登记本库实现的面；宿主侧契约见 <a href="USER.html">USER.html</a>。</p>
 
 <h2 id="sec-1">1. 术语</h2>
 <table>
   <tr><th>术语</th><th>定义</th></tr>
-  <tr><td>DBus 会话总线</td><td>底层消息总线，本库与其客户端之间的方法调用与信号中介</td></tr>
+  <tr><td>D-Bus 会话总线</td><td>底层消息总线，本库与其客户端之间的方法调用与信号中介</td></tr>
   <tr><td>服务名</td><td><code>org.freedesktop.Notifications</code>；本库装配时在总线上注册占用</td></tr>
   <tr><td>客户端</td><td>经总线调用方法、接收信号的发送方（notify-send、应用等）</td></tr>
   <tr><td>hints</td><td><code>Notify</code> 携带的附加键值对（紧急度、图像数据等），本库负责解析归一</td></tr>
@@ -54,7 +54,7 @@ GetServerInformation()          -&gt; (name: String, vendor: String,
   <tr><td><code>GetServerInformation</code></td><td>服务器信息；四元组由宿主装配时声明</td></tr>
 </table>
 <table>
-  <tr><th>DBus 签名</th><th>语义</th><th>Rust 形态</th></tr>
+  <tr><th>D-Bus 签名</th><th>语义</th><th>Rust 形态</th></tr>
   <tr><td><code>s</code></td><td>字符串</td><td><code>String</code> / <code>&amp;str</code></td></tr>
   <tr><td><code>u</code></td><td>UINT32</td><td><code>u32</code></td></tr>
   <tr><td><code>i</code></td><td>INT32</td><td><code>i32</code></td></tr>
@@ -116,7 +116,7 @@ org.freedesktop.DBus.Error.Failed(message)</code></pre>
 <table>
   <tr><th>错误名</th><th>含义 / 客户端动作</th></tr>
   <tr><td><code>org.freedesktop.DBus.Error.InvalidArgs</code></td><td><code>Notify</code> / <code>CloseNotification</code> 参数不合法（actions 非成对、<code>CloseNotification</code> 的 id 不存在或为 0 等）；修正后重试。未知 id 的 <code>CloseNotification</code> 使用空消息体</td></tr>
-  <tr><td><code>org.freedesktop.DBus.Error.Failed</code></td><td>服务端内部失败（归一、序列化、<code>Notify</code> 事件投递）；记录并重试或降级</td></tr>
+  <tr><td><code>org.freedesktop.DBus.Error.Failed</code></td><td>服务端内部失败或会话已停机（<code>NotificationClosed</code> 发射失败、<code>Notify</code> 事件投递失败）；记录并重试或降级</td></tr>
 </table>
 <ul class="note">
   <li>线上只有 D-Bus 错误名，没有 Rust 的 <code>Error::InvalidArgs</code> 概念；宿主侧 <code>Error</code> 是另一套 API，见 <a href="USER.html#sec-4-2">USER §4.2</a>。</li>

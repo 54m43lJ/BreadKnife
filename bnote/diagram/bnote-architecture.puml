@@ -2,7 +2,7 @@
 skinparam componentStyle rectangle
 
 component "客户端\n（notify-send 等通知发送方）" as client
-queue "DBus 会话总线" as bus
+queue "D-Bus 会话总线" as bus
 component "bnote" as lib
 component "宿主\n（bread daemon 消息中心）" as host
 
