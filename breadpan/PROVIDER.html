@@ -62,6 +62,14 @@
   <tr><td><code>StatusNotifierItemRegistered</code></td><td>信号</td><td>广播：Item 报到（协议面保真，供总线观察方）</td></tr>
   <tr><td><code>StatusNotifierItemUnregistered</code></td><td>信号</td><td>广播：Item 离开（死亡清理）</td></tr>
 </table>
+<h4>错误应答</h4>
+<pre><code>org.freedesktop.DBus.Error.InvalidArgs(message)
+org.freedesktop.DBus.Error.Failed(message)</code></pre>
+<table>
+  <tr><th>错误名</th><th>含义 / 客户端动作</th></tr>
+  <tr><td><code>org.freedesktop.DBus.Error.InvalidArgs</code></td><td>报到参数不合法（服务名为空、对象路径非法等）；修正后重试</td></tr>
+  <tr><td><code>org.freedesktop.DBus.Error.Failed</code></td><td>服务端内部失败或已停机；记录并重试或降级</td></tr>
+</table>
 <ul class="note">
   <li>名持有不可被替换；自身停机 → 释放名字，等同角色下线；所有权丢失 → <code>Displaced</code>（终局语义见 <a href="USER.html#sec-3-7">USER §3.7</a>）。</li>
   <li>登记簿记只在内存，不落盘。</li>

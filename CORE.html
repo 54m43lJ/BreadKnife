@@ -313,7 +313,11 @@ impl IpcClient {
 pub fn reload(path: &amp;str) -&gt; Result&lt;(), String&gt;;</code></pre>
 
 <h3 id="sec-4-workspace">4.12. bar/modules/workspace.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct WorkspaceWidget { pub container: gtk::Box, /* IPC、按钮表 */ }
+<pre><code>pub struct WorkspaceWidget {
+    pub container: gtk::Box,
+    ipc: Arc&lt;IpcClient&gt;,
+    buttons: RefCell&lt;Vec&lt;gtk::Button&gt;&gt;,
+}
 
 impl WorkspaceWidget {
     pub fn new(ipc: Arc&lt;IpcClient&gt;) -&gt; Self;
@@ -321,7 +325,14 @@ impl WorkspaceWidget {
 }</code></pre>
 
 <h3 id="sec-4-info">4.13. bar/modules/info.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct InfoCenterWidget { pub container: gtk::Box, /* 图标、标题、通知中心、贴栏通知窗口 */ }
+<pre><code>pub struct InfoCenterWidget {
+    pub container: gtk::Box,
+    ipc: Arc&lt;IpcClient&gt;,
+    title_label: gtk::Label,
+    center: gtk::Popover,
+    notification_window: Rc&lt;NotificationWindow&gt;,
+    records: RefCell&lt;Vec&lt;NotificationRecord&gt;&gt;,
+}
 
 impl InfoCenterWidget {
     pub fn new(ipc: Arc&lt;IpcClient&gt;, monitor: &amp;str, window: &amp;gtk::Window,
@@ -433,7 +444,14 @@ impl TrayWidget {
 }</code></pre>
 
 <h3 id="sec-4-center">4.16. bar/modules/center.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct CenterWidget { pub container: gtk::Box, /* 状态标签、滑块、弹出面板 */ }
+<pre><code>pub struct CenterWidget {
+    pub container: gtk::Box,
+    ipc: Arc&lt;IpcClient&gt;,
+    status_label: gtk::Label,
+    panel: gtk::Popover,
+    volume: gtk::Scale,
+    brightness: gtk::Scale,
+}
 
 impl CenterWidget {
     pub fn new(ipc: Arc&lt;IpcClient&gt;, window: &amp;gtk::Window, popup: Rc&lt;PopupManager&gt;) -&gt; Self;
