@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadpan 协议契约</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>breadpan 协议契约</h1>
+<blockquote>
+  本文档定义 breadpan 在会话总线上实现的外部协议边界：StatusNotifierWatcher 协议面与 DBusMenu 读取。
+  术语见 <a href="USER.html#sec-1">USER §1</a>，完整权威定义见
+  <a href="reference/SNI.clean.html">reference/SNI.clean.html</a> 与
+  <a href="reference/com.canonical.dbusmenu.xml">reference/com.canonical.dbusmenu.xml</a>。
+</blockquote>
+
+<h2 id="sec-1">1. 术语</h2>
+<table>
+  <tr><th>术语</th><th>定义</th></tr>
+  <tr><td>协议面</td><td>breadpan 在会话总线导出的 <code>org.kde.StatusNotifierWatcher</code> 接口；外部 Item 应用经该面报到、查询与接收广播</td></tr>
+  <tr><td>Watcher 名</td><td><code>org.kde.StatusNotifierWatcher</code> 总线名；本库启动时申请持有，持有期不可被替换</td></tr>
+  <tr><td>服务名</td><td>Item 报到时登记的名字，即 <code>TrayItemId</code>；知名名或唯一名皆可，定义见 <a href="USER.html#sec-1">USER §1</a></td></tr>
+</table>
+
+<h2 id="sec-2">2. 通用约定</h2>
+<ul>
+  <li><strong>前缀策略</strong>：本库自身命名（Watcher 服务名 / 协议面接口名 / 信号广播）只采用 <code>org.kde.*</code>；寻址外部应用（属性读取 / 交互调用）采用 fallback——<code>org.kde.*</code> 优先、<code>org.freedesktop.*</code> 回退，且超时的调用不再重试另一前缀；解析入站消息两前缀宽容处理。</li>
+</ul>
+
+<h2 id="sec-3">3. 边界流程</h2>
+
+<h3 id="sec-3-1">3.1. 时序：Item 生命周期</h3>
+<div class="diagram"><img src="diagram/breadpan-item-lifecycle.svg" alt="时序：Item 生命周期（报到 → 变更 → 同名换主 → 死亡）"></div>
+<ul class="note">
+  <li>报到、变更、同名换主与死亡的总线触发条件及交付事件见 <a href="USER.html#sec-3-4">USER §3.4</a>。</li>
+  <li>同名换主时 id 与对象生死不变；死亡时按服务名或属主唯一名双条件清理。</li>
+</ul>
+
+<h3 id="sec-3-2">3.2. 时序：Menu 流程</h3>
+<div class="diagram"><img src="diagram/breadpan-menu.svg" alt="时序：Menu 流程（逐层按需加载）"></div>
+<ul class="note">
+  <li><code>AboutToShow</code> 是 dbusmenu 规定的展示前置方法；<code>GetLayout</code> 每次仅取一层，深层由消费方经 <code>menu_expand</code> 按需展开。</li>
+  <li>菜单对象路径取自 Item 登记信息；消费方行为见 <a href="USER.html#sec-3-5">USER §3.5</a>。</li>
+</ul>
+
+<h2 id="sec-4">4. 接口</h2>
+
+<h3 id="sec-4-1">4.1. 协议面（DBus，对 Item 应用）</h3>
+<p>
+  watcher 模块在会话总线导出 <code>org.kde.StatusNotifierWatcher</code>；该面是外部 Item 应用（图标提供方）与本库的唯一总线契约。
+  接受侧前缀处理见 <a href="#sec-2">§2</a>；本面广播只经 <code>org.kde.*</code> 发出，不做多前缀重复播报。
+</p>
+<table>
+  <tr><th>DBus 成员</th><th>类型</th><th>语义</th></tr>
+  <tr><td><code>RegisterStatusNotifierItem</code></td><td>方法</td><td>Item 报到：登记服务名 + 对象路径；同名重复报到幂等；同一对象以不同形态重复报到并入同一 id（升级机制见 <a href="USER.html#sec-4-2">USER §4.2</a> NameChanged）</td></tr>
+  <tr><td><code>RegisteredStatusNotifierItems</code></td><td>属性</td><td>读取：当前在册 Item 清单</td></tr>
+  <tr><td><code>RegisterStatusNotifierHost</code></td><td>方法</td><td>兼容桩：受理即忘——自包含设计不对进程外 Host 负责</td></tr>
+  <tr><td><code>IsStatusNotifierHostRegistered</code></td><td>属性</td><td>兼容桩：恒真——逻辑 Host 进程内在位；个别 Item 探测此接口后才报到</td></tr>
+  <tr><td><code>StatusNotifierItemRegistered</code></td><td>信号</td><td>广播：Item 报到（协议面保真，供总线观察方）</td></tr>
+  <tr><td><code>StatusNotifierItemUnregistered</code></td><td>信号</td><td>广播：Item 离开（死亡清理）</td></tr>
+</table>
+<ul class="note">
+  <li>名持有不可被替换；自身停机 → 释放名字，等同角色下线；所有权丢失 → <code>Displaced</code>（终局语义见 <a href="USER.html#sec-3-7">USER §3.7</a>）。</li>
+  <li>登记簿记只在内存，不落盘。</li>
+</ul>
+
+<footer>
+  文档：<a href="ABOUT.html">ABOUT</a> ·
+  <a href="USER.html">USER</a> ·
+  <a href="CORE.html">CORE</a> ·
+  PROVIDER ·
+  <a href="BUILD.html">BUILD</a>
+</footer>
+
+</main>
+</body>
+</html>

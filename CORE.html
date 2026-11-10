@@ -89,7 +89,17 @@ scripts/
 
 pub const NOTIFICATION_CACHE_CAPACITY: usize;   // 推荐值 512
 
-pub struct Daemon { /* 事件通道、breadpan 句柄、通知服务与缓存、系统状态、窗口表、显示器 / 工作区映射 */ }
+pub struct Daemon {
+    pub(crate) rx: Receiver&lt;DaemonEvent&gt;,
+    pub(crate) tray: Option&lt;TrayHandle&gt;,
+    pub(crate) notification: Option&lt;NotificationService&gt;,
+    pub(crate) notifications: VecDeque&lt;NotificationRecord&gt;,
+    pub(crate) system: SystemState,
+    pub(crate) windows: HashMap&lt;String, WindowProc&gt;,
+    pub(crate) monitors: Vec&lt;MonitorInfo&gt;,
+    pub(crate) workspaces: Vec&lt;WorkspaceInfo&gt;,
+    pub(crate) desired: HashSet&lt;String&gt;,
+}
 
 pub enum DaemonEvent {
     Hyprland(hyprland::HyprlandEvent),
@@ -198,7 +208,12 @@ pub fn set_brightness(value: u32);        // brightnessctl / ddcutil</code></pre
 
 <h3 id="sec-4-notify">4.6. daemon/notify.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub const NOTIFICATION_COMMAND_TIMEOUT_MS: u64;   // 推荐值 5_000
-pub struct NotificationService { /* bnote 会话、事件线程、命令线程 */ }
+pub struct NotificationService {
+    session: bnote::SessionHandle,
+    command_tx: Sender&lt;NotificationCommand&gt;,
+    event_thread: JoinHandle&lt;()&gt;,
+    command_thread: JoinHandle&lt;()&gt;,
+}
 
 pub enum NotificationCommand {
     Close { id: u32, reason: bnote::CloseReason },
@@ -249,7 +264,15 @@ pub fn hello_reply(out: &amp;Sender&lt;Frame&gt;, id: u64, snapshot: WindowSnaps
 <h3 id="sec-4-bar-mod">4.9. bar/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub fn run(monitor: &amp;str, socket: &amp;Path) -&gt; Result&lt;(), String&gt;;
 
-pub struct WindowApp { /* GTK 应用、IPC 客户端、workspace/info（含通知中心与贴栏通知窗口）/tray/center */ }
+pub struct WindowApp {
+    app: gtk::Application,
+    ipc: Arc&lt;IpcClient&gt;,
+    ui_tx: Sender&lt;UiTask&gt;,
+    workspace: WorkspaceWidget,
+    info: InfoCenterWidget,
+    tray: TrayWidget,
+    center: CenterWidget,
+}
 
 pub enum UiTask {
     Push(Push),
@@ -272,7 +295,13 @@ impl WindowApp {
 </ul>
 
 <h3 id="sec-4-bar-ipc">4.10. bar/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct IpcClient { /* 连接、请求 id、等待者表、UI 队列 */ }
+<pre><code>pub struct IpcClient {
+    stream: Mutex&lt;UnixStream&gt;,
+    next_id: AtomicU64,
+    pending: Mutex&lt;HashMap&lt;u64, Sender&lt;Response&gt;&gt;&gt;,
+    ui_tx: Sender&lt;UiTask&gt;,
+    monitor: String,
+}
 
 impl IpcClient {
     pub fn connect(path: &amp;Path, monitor: &amp;str, ui_tx: Sender&lt;UiTask&gt;) -&gt; Result&lt;Arc&lt;Self&gt;, String&gt;;
@@ -307,7 +336,13 @@ impl InfoCenterWidget {
     pub fn set_notification_retry(&amp;self, retry: Rc&lt;dyn Fn()&gt;);
 }
 
-struct NotificationWindow { /* 独立 layer-shell 窗口、记录、计时器、标题区锚点 */ }
+struct NotificationWindow {
+    window: gtk::Window,
+    container: gtk::Box,
+    records: RefCell&lt;Vec&lt;NotificationRecord&gt;&gt;,
+    timers: RefCell&lt;HashMap&lt;u32, glib::SourceId&gt;&gt;,
+    anchor: gtk::Widget,
+}
 
 impl NotificationWindow {
     fn new(ipc: Arc&lt;IpcClient&gt;, monitor: &amp;str, window: &amp;gtk::Window,
@@ -343,7 +378,12 @@ pub const POPUP_DEFAULT_TIMEOUT_MS: u64;   // 推荐值 30_000</code></pre>
 </ul>
 
 <h3 id="sec-4-popup">4.14. bar/modules/popup.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct PopupManager { /* 打开表、按下关闭记录、悬停锚点与轮询状态 */ }
+<pre><code>pub struct PopupManager {
+    open: RefCell&lt;HashMap&lt;String, gtk::Popover&gt;&gt;,
+    press_closed: RefCell&lt;HashSet&lt;String&gt;&gt;,
+    hover: Cell&lt;u64&gt;,
+    poll: Cell&lt;Option&lt;glib::SourceId&gt;&gt;,
+}
 
 impl PopupManager {
     pub fn install(window: &amp;gtk::Window) -&gt; Rc&lt;Self&gt;;
@@ -370,7 +410,13 @@ pub fn hover_switch&lt;F: Fn(u64) + 'static&gt;(manager: &amp;Rc&lt;PopupManager
 </ul>
 
 <h3 id="sec-4-tray">4.15. bar/modules/tray.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct TrayWidget { /* 图标容器、菜单会话、IPC、UI 队列、弹窗管理器 */ }
+<pre><code>pub struct TrayWidget {
+    container: gtk::Box,
+    menus: RefCell&lt;HashMap&lt;String, gtk::Popover&gt;&gt;,
+    ipc: Arc&lt;IpcClient&gt;,
+    ui_tx: Sender&lt;UiTask&gt;,
+    popup: Rc&lt;PopupManager&gt;,
+}
 
 impl TrayWidget {
     pub fn new(ipc: Arc&lt;IpcClient&gt;, ui: Sender&lt;UiTask&gt;,

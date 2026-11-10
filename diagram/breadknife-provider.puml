@@ -4,8 +4,8 @@ participant "breadknife（bread）" as bread
 participant "系统 DBus 服务" as svc
 participant "调节工具" as tools
 
-hypr -> bread: IPC 事件（显示器 / 工作区 / 活动窗口 / 紧急）
-bread -> hypr: hyprctl 查询 / dispatcher 切换
-bread -> svc: 状态读取 / 媒体操作
-bread -> tools: 音量 / 亮度设置
+hypr -> bread: monitoradded / monitorremoved / workspace>> / activewindow / urgent>>
+bread -> hypr: hyprctl -j 查询 / dispatch workspace
+bread -> svc: Get / PropertiesChanged / MPRIS 方法
+bread -> tools: pamixer / brightnessctl / ddcutil
 @enduml

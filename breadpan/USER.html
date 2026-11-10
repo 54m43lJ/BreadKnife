@@ -13,7 +13,7 @@
 <blockquote>
   本文档面向消费方（依赖本库的应用与其开发者）：术语、架构图、对外接口契约与数据模型。
   能力级边界以 <a href="ABOUT.html">ABOUT.html</a>「NON-GOAL」为权威；
-  内部结构与机制见 <a href="CORE.html">CORE.html</a>。
+  协议边界见 <a href="PROVIDER.html">PROVIDER.html</a>，内部结构与机制见 <a href="CORE.html">CORE.html</a>。
 </blockquote>
 
 <h2 id="sec-1">1. 术语</h2>
@@ -31,7 +31,7 @@
   <tr><td>GTK 主线程</td><td>GTK/GLib 主循环（MainContext）所在线程；一切 UI 操作与事件消费闭包都在此执行——消费方经 <code>glib::spawn_future_local</code> 把事件流消费 future 挂到本上下文</td></tr>
 </table>
 <ul class="note">
-  <li>本库的前缀处理见 <a href="CORE.html#sec-2">CORE §2</a>。</li>
+  <li>本库的前缀处理见 <a href="PROVIDER.html#sec-2">PROVIDER §2</a>。</li>
 </ul>
 <ul class="note">
   <li>官方规范中 bus name 是唯一名与知名名的合称（<code>:</code> 开头者为唯一名，其余为知名名）；本文档不以 bus name 单独指称任一类，一律用「唯一名」「知名名」；</li>
@@ -42,7 +42,7 @@
 <ul>
   <li><strong>列表输出按 id 排序</strong>：在册条目的一切列表形态输出——快照 <code>Snapshot.items</code>、<code>items()</code>、协议面属性 <code>RegisteredStatusNotifierItems</code>——一律按 id 升序排列；顺序由内容唯一确定，与发现序 / 内部迭代序 / 并发完成序无关。</li>
   <li><strong>数据即取即最新</strong>：查询返回总线当前值；事件只报事实、不携带数据，变化后由消费方查询。</li>
-  <li><strong>同步封装</strong>：公开面全同步；异步收敛于实现（同步桥 + 库内运行时）。阻塞是契约的一部分。</li>
+  <li><strong>同步封装</strong>：公开面全同步；阻塞是契约的一部分，异步实现细节见 <a href="CORE.html">CORE.html</a>。</li>
 </ul>
 
 <h2 id="sec-3">3. 架构与流程</h2>
@@ -69,8 +69,7 @@
   <li>启动期反向发现只覆盖规范默认路径 <code>/StatusNotifierItem</code>——对象路径非默认且未主动报到的存量 Item 无法发现（规范未提供路径查询手段）。</li>
 </ul>
 
-<h3 id="sec-3-4">3.4. 时序：Item 生命周期（报到 → 变更 → 同名换主 → 死亡）</h3>
-<div class="diagram"><img src="diagram/breadpan-item-lifecycle.svg" alt="时序：Item 生命周期（报到 → 变更 → 同名换主 → 死亡）"></div>
+<h3 id="sec-3-4">3.4. Item 生命周期（报到 → 变更 → 同名换主 → 死亡）</h3>
 <table>
   <tr><th>阶段</th><th>触发</th><th>交付</th></tr>
   <tr><td>报到</td><td><code>RegisterStatusNotifierItem</code></td><td><code>Added(id)</code></td></tr>
@@ -79,16 +78,19 @@
   <tr><td>死亡</td><td><code>NameOwnerChanged</code> 且 new_owner 为空（进程退出 / 崩溃）</td><td><code>Removed(id)</code></td></tr>
 </table>
 <ul class="note">
-  <li>协议面同步广播（<a href="#sec-4-4">§4.4</a>），进程内事件与本库簿记同源。</li>
+  <li>边界时序见 <a href="PROVIDER.html#sec-3-1">PROVIDER §3.1</a>。</li>
+</ul>
+<ul class="note">
+  <li>协议面同步广播（<a href="PROVIDER.html#sec-4-1">PROVIDER §4.1</a>），进程内事件与本库簿记同源。</li>
 </ul>
 
-<h3 id="sec-3-5">3.5. 时序：Menu 流程（逐层按需加载；click 路由与 menu()/menu_expand() 共用）</h3>
-<div class="diagram"><img src="diagram/breadpan-menu.svg" alt="时序：Menu 流程（逐层按需加载）"></div>
+<h3 id="sec-3-5">3.5. Menu 流程（逐层按需加载；click 路由与 menu()/menu_expand() 共用）</h3>
 <ul class="note">
   <li>AboutToShow 是 dbusmenu 规定的宿主常规步骤（接口原文中为 method，非信号）：展示前以目标层父条目 id 调用（根层为 0），应答为真表示布局已变——GetLayout 紧随其后取得当前布局，故应答不改变本流程；应答异常视为未变更继续拉取；</li>
   <li>dbusmenu 对象路径取自 Item 登记信息（注册时读取 Menu 属性一次，随变更信号就地更新；TrayItem.menu 同源）；</li>
   <li>不存在打开菜单即需全量多级布局的场景：每次仅取一层（GetLayout recursionDepth = 1），深层由消费方经 menu_expand 按需展开；</li>
   <li>click 路由与 menu()/menu_expand() 共用本流程。</li>
+  <li>边界时序见 <a href="PROVIDER.html#sec-3-2">PROVIDER §3.2</a>。</li>
 </ul>
 
 <h3 id="sec-3-6">3.6. 时序：输入路由与回执</h3>
@@ -260,7 +262,7 @@ pub enum InteractionOp { Activate, SecondaryActivate, ContextMenu, Scroll, MenuA
   <tr><td>快照</td><td>启动完成即投递快照；此后仅增量事件，快照与事件流原子配对、无重叠无缺口</td></tr>
   <tr><td>顺序</td><td>同一 Item 的事件严格有序；全局不保证跨 Item 顺序</td></tr>
   <tr><td>合并</td><td>变更与菜单变更信号按固定窗口（默认 50 ms）节流合并：信号按类型合并、节拍到期统一投递——每 Item 每类至多每窗口一次 <code>Changed(id)</code> / <code>MenuChanged(id)</code>，延迟上界 = 窗口、连发不推迟交付；不携带数据，取数 / 取布局走现场读取</td></tr>
-  <tr><td>背压</td><td>通道满：丢弃 + 计数，绝不阻塞内部线程（有损交付）</td></tr>
+  <tr><td>背压</td><td>通道满：丢弃 + 计数，绝不阻塞消费端（有损交付）</td></tr>
   <tr><td>终止</td><td>终止宣告（Fatal / Displaced）是最后一个事件</td></tr>
 </table>
 <h4>错误</h4>
@@ -287,7 +289,7 @@ pub enum TrayError {
   <tr><td>Bus</td><td>会话总线连接失败</td><td>检查 session bus 环境后重试 <code>start</code></td></tr>
   <tr><td>NameTaken</td><td>启动期 Watcher 总线名已被他人持有</td><td>提示消费者；整体退出或隐藏托盘相关功能</td></tr>
   <tr><td>Timeout</td><td>服务发现 / 调用 / 现场读取超时（<code>timeout_ms</code>）</td><td>重试，或放宽 <code>TrayConfig::timeout_ms</code></td></tr>
-  <tr><td>Hung</td><td>同步命令在守卫上限（<code>sync_guard_ms</code>）内未完成——运行时楔死或守卫配置过低，后续调用大概率同样超时</td><td>重建实例或调大守卫（与 Timeout 的「对端慢，可重试」语义不同类）</td></tr>
+  <tr><td>Hung</td><td>同步命令在守卫上限（<code>sync_guard_ms</code>）内未完成——内部同步桥未返回或守卫配置过低，后续调用大概率同样超时</td><td>重建实例或调大守卫（与 Timeout 的「对端慢，可重试」语义不同类）</td></tr>
   <tr><td>ItemNotFound</td><td>Item 不在册 / 无菜单或未就绪</td><td>以最新快照或 Changed 事件校准后再操作</td></tr>
   <tr><td>Protocol</td><td>协议类失败（属性缺失、类型不符等）</td><td>跟踪面已字段级降级（见 <a href="#sec-4-3">§4.3</a>）；<code>menu()</code> / <code>menu_expand()</code> 现场读取与交互受理阶段返回本错误，可重试或跳过该 Item</td></tr>
   <tr><td>Stopped</td><td>终止宣告之后的一切调用</td><td>库已停机，按需重建实例</td></tr>
@@ -420,26 +422,8 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
   <li>登记簿记仅存最小集（服务名 + 对象路径 + 属主唯一名 + 存活字段（alive）+ DBusMenu 支持/路径 + 整项即菜单标记）；TrayItem / MenuSnapshot 交付语义见 <a href="#sec-2">§2 通用约定</a>。</li>
 </ul>
 
-<h3 id="sec-4-4">4.4. 协议面（DBus，对 Item 应用）</h3>
-<p>
-  watcher 模块在会话总线导出 <code>org.kde.StatusNotifierWatcher</code>（<a href="#sec-1">§1 术语</a>）。
-  该面是外部 Item 应用（图标提供方）与本库的唯一总线契约；逻辑 Host 不经总线（<a href="#sec-4-1">§4.1</a>）。
-  接受侧前缀的处理见 <a href="CORE.html#sec-2">CORE §2</a>；本面广播只经 <code>org.kde.*</code> 发出，不做多前缀重复播报。
-</p>
-<table>
-  <tr><th>DBus 成员</th><th>类型</th><th>语义</th></tr>
-  <tr><td><code>RegisterStatusNotifierItem</code></td><td>方法</td><td>Item 报到：登记服务名 + 对象路径（报到参数现实取值多为知名名或唯一名，可能带对象路径）；报到即拉取跟踪（<a href="#sec-3-4">§3.4</a>）；同名重复报到幂等；同一对象以不同形态重复报到并入同一 id——升级机制见 <a href="#sec-4-2">§4.2</a> NameChanged</td></tr>
-  <tr><td><code>RegisteredStatusNotifierItems</code></td><td>属性</td><td>读取：当前在册 Item 清单</td></tr>
-  <tr><td><code>RegisterStatusNotifierHost</code></td><td>方法</td><td>兼容桩：受理即忘——自包含设计不对进程外 Host 负责（<a href="#sec-1">§1 术语 Host</a>）</td></tr>
-  <tr><td><code>IsStatusNotifierHostRegistered</code></td><td>属性</td><td>兼容桩：恒真——逻辑 Host 进程内在位；个别 Item 探测此接口后才报到</td></tr>
-  <tr><td><code>StatusNotifierItemRegistered</code></td><td>信号</td><td>广播：Item 报到（协议面保真，供总线观察方）</td></tr>
-  <tr><td><code>StatusNotifierItemUnregistered</code></td><td>信号</td><td>广播：Item 离开（死亡清理，<a href="#sec-3-4">§3.4</a>）</td></tr>
-</table>
 <ul class="note">
-  <li>名持有不可被替换（操作含义见 <a href="#sec-3-7">§3.7</a>）；</li>
-  <li>自身停机 → 释放名字，等同角色下线，无残留簿记；</li>
-  <li>所有权丢失 → <code>Displaced</code>（<a href="#sec-3-7">§3.7</a>）；</li>
-  <li>簿记只在内存，不落盘。</li>
+  <li>对外 DBus 协议面见 <a href="PROVIDER.html#sec-4-1">PROVIDER §4.1</a>。</li>
 </ul>
 
 </main>
