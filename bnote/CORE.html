@@ -14,9 +14,9 @@
 <pre><code>bnote/
 ├── Cargo.toml          # crate 清单：依赖与版本
 ├── examples/
-│   └── server.rs       # 交互式测试服务器：stdin 驱动宿主 API
+│   └── <a href="#sec-4-example">server.rs</a>       # 交互式测试服务器：stdin 驱动宿主 API
 ├── tests/
-│   └── protocol.rs     # 协议集成测试：隔离 session bus 上的方法 / 事件 / 信号
+│   └── <a href="#sec-4-tests">protocol.rs</a>     # 协议集成测试：隔离 session bus 上的方法 / 事件 / 信号
 └── src/
     ├── <a href="#sec-4-lib">lib.rs</a>        # 门面：公开类型再导出、Error
     ├── <a href="#sec-4-handle">handle.rs</a>     # Session / SessionHandle / NoticeReceiver
@@ -47,7 +47,15 @@
 
 <h2 id="sec-4">4. 内部类型与方法签名</h2>
 
-<h3 id="sec-4-lib">4.1. src/lib.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-example">4.1. examples/server.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>fn main();   // stdin 驱动宿主 API 的交互式测试服务器</code></pre>
+
+<h3 id="sec-4-tests">4.2. tests/protocol.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>#[tokio::test] async fn notify_roundtrip();
+#[tokio::test] async fn close_notification_emits_signal();
+#[tokio::test] async fn capabilities_and_server_info();</code></pre>
+
+<h3 id="sec-4-lib">4.3. src/lib.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub use handle::{NoticeReceiver, Session, SessionHandle};
 pub use types::{
     Action, Capabilities, CloseReason, Notice, NoticeEvent, NoticeIcon, ServerInfo,
@@ -56,7 +64,7 @@ pub use types::{
 
 pub enum Error {}            //见 USER §4.2；Protocol 为兜底，正常路径不产生</code></pre>
 
-<h3 id="sec-4-handle">4.2. src/handle.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-handle">4.4. src/handle.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct Session;          //见 USER §4.1
 pub struct SessionHandle;    //见 USER §4.1
 pub struct NoticeReceiver;   //见 USER §4.1
@@ -79,7 +87,7 @@ fn validate_config(config: &amp;SessionConfig) -&gt; Result&lt;(), Error&gt;;</c
   <li><code>thread_id</code> 标识内部 runtime 线程；handle 不在该线程上 join 自身。<code>handles</code> 是 <code>SessionHandle</code> 的原子计数，最后一个实例 drop 时触发 <code>shutdown</code>。</li>
 </ul>
 
-<h3 id="sec-4-bus">4.3. src/bus.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-bus">4.5. src/bus.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>#[derive(Clone)]
 pub(crate) struct Bus {
     pub(crate) conn: zbus::Connection,
@@ -112,7 +120,7 @@ impl Bus {
   <li>已提交到总线的 D-Bus 信号不可撤回；超时清理只能保证命令不再继续执行，不能收回已经发出的信号。</li>
 </ul>
 
-<h3 id="sec-4-events">4.4. src/events.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-events">4.6. src/events.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub(crate) const EVENT_QUEUE_CAPACITY: usize;   // 推荐值 64；实际值以代码为准
 
 pub(crate) struct EventQueue {
@@ -132,7 +140,7 @@ impl EventQueue {
   <li>内部监视任务等待 <code>closed()</code>；单消费者 <code>NoticeReceiver</code> 一旦被丢弃，立即触发会话终止。</li>
 </ul>
 
-<h3 id="sec-4-server">4.5. src/server.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-server">4.7. src/server.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub(crate) enum ServerError {
     InvalidArgs(String),   // → org.freedesktop.DBus.Error.InvalidArgs
     Failed(String),        // → org.freedesktop.DBus.Error.Failed
@@ -197,7 +205,7 @@ fn build_notice(params: NotifyParams, hints: HintSet, id: u32) -&gt; Notice;</co
   <li><code>Notify</code> 事件投递失败时撤销该 id 并返回 <code>Failed</code>；<code>close_notification</code> 先失效 id、再发 <code>NotificationClosed</code>、最后投递宿主 <code>Close</code>，宿主事件投递失败不回滚关闭，也不改变 D-Bus 结果。</li>
 </ul>
 
-<h3 id="sec-4-signal">4.6. src/signal.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-signal">4.8. src/signal.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub(crate) fn emit_closed(bus: &amp;Bus, id: u32, reason: CloseReason)
     -&gt; impl Future&lt;Output = Result&lt;(), Error&gt;&gt;;
 
@@ -213,7 +221,7 @@ pub(crate) fn emit_activation_token(bus: &amp;Bus, id: u32, token: &amp;str)
   <li><code>Server</code> 不持有 <code>Bus</code>；<code>close_notification</code> 使用注入连接调用 <code>emit_closed_on</code>；其余信号由宿主命令通过 <code>emit_*</code> 发射。</li>
 </ul>
 
-<h3 id="sec-4-hints">4.7. src/hints.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-hints">4.9. src/hints.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub(crate) fn parse(
     hints: &amp;HashMap&lt;String, zbus::zvariant::OwnedValue&gt;,
     app_icon: &amp;str,
@@ -235,7 +243,7 @@ pub(crate) struct HintSet {
   <li><code>hints</code> 只承载 hint 派生字段（urgency / icon / action_icons / transient / resident / sound-file / sound-name / suppress-sound）；<code>actions</code> 与 <code>expire_timeout</code> 由 <code>Server::notify</code> 从 <code>NotifyParams</code> 读取。</li>
 </ul>
 
-<h3 id="sec-4-types">4.8. src/types.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-types">4.10. src/types.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct Notice;          //见 USER §4.3
 pub enum NoticeEvent {}     //见 USER §4.2
 pub enum CloseReason {}     //见 USER §4.2
@@ -253,7 +261,7 @@ pub enum NoticeIcon {}      //见 USER §4.3</code></pre>
 ├── validate_config(&amp;config) — 能力清单非法 → Error::InvalidArgs
 ├── EventQueue::new() → (events, NoticeReceiver)
 ├── Bus::spawn_runtime(config, events) → 内部线程 + CurrentThread 运行时
-├── connect → zbus::Connection::session().await
+├── zbus::Connection::session().await
 ├── conn.object_server().at("/org/freedesktop/Notifications", Server { ... }).await
 └── conn.request_name_with_flags("org.freedesktop.Notifications", DoNotQueue).await</code></pre>
 <ul class="note">
@@ -263,27 +271,28 @@ pub enum NoticeIcon {}      //见 USER §4.3</code></pre>
 </ul>
 
 <h3 id="sec-5-2">5.2. 通知到达</h3>
-<pre><code>D-Bus Notify 调用 → Server::notify(逐个参数)
-├── stopped → D-Bus Failed
-├── validate_actions(params.actions) — 奇数个 → D-Bus InvalidArgs
-├── hints = hints::parse(&amp;params.hints, &amp;params.app_icon)
-├── replaces_id == 0 → id = State::allocate()   // 持 State 锁
-├── replaces_id != 0 → State::track(replaces_id)，id = replaces_id
-├── notice = build_notice(params, hints, id)
-└── bus.events.send(NoticeEvent::Notify { notice })
-     └── 失败 → 撤销 id，返回 D-Bus Failed</code></pre>
+<pre><code>D-Bus Notify 调用
+└── Server::notify(params)
+     ├── stopped → D-Bus Failed
+     ├── validate_actions(params.actions) — 奇数个 → D-Bus InvalidArgs
+     ├── hints::parse(&amp;params.hints, &amp;params.app_icon)
+     ├── replaces_id == 0 → State::allocate()   // 持 State 锁
+     ├── replaces_id != 0 → State::track(replaces_id)
+     ├── build_notice(params, hints, id)
+     └── bus.events.send(NoticeEvent::Notify { notice })
+          └── 失败 → 撤销 id，返回 D-Bus Failed</code></pre>
 <ul class="note">
   <li>State 锁覆盖 id 分配与事件投递；同 id 的 Notify / Close 串行。</li>
   <li>事件投递失败表示接收端已丢弃或队列已关闭；撤销该 id 并返回 <code>Failed</code>；客户端不会拿到未交付宿主的 id。</li>
 </ul>
 
 <h3 id="sec-5-3">5.3. 客户端请求关闭</h3>
-<pre><code>客户端 CloseNotification 调用 → Server::close_notification(conn, id)
-├── stopped → D-Bus Failed
-├── State::remove(id) — 不在册 → D-Bus InvalidArgs（空消息体）
-├── signal::emit_closed_on(conn, id, CloseReason::CloseRequest).await
-└── bus.events.send(NoticeEvent::Close { id })
-     └── 失败不影响客户端结果</code></pre>
+<pre><code>客户端 CloseNotification 调用
+└── Server::close_notification(conn, id)
+     ├── stopped → D-Bus Failed
+     ├── State::remove(id) — 不在册 → D-Bus InvalidArgs（空消息体）
+     ├── signal::emit_closed_on(conn, id, CloseReason::CloseRequest).await
+     └── bus.events.send(NoticeEvent::Close { id })</code></pre>
 <ul class="note">
   <li>id 在发信号前失效；宿主收到 <code>NoticeEvent::Close</code> 时信号已经发出，只需移除 UI。</li>
   <li>宿主事件是辅助通知：关闭操作本身以 id 失效和 <code>NotificationClosed</code> 为准。事件投递失败不回滚关闭，也不改变 D-Bus 结果。</li>
@@ -293,10 +302,9 @@ pub enum NoticeIcon {}      //见 USER §4.3</code></pre>
 
 <h3 id="sec-5-4">5.4. 宿主关闭</h3>
 <pre><code>宿主 → SessionHandle::close(id, reason)   // 同步，等待内部命令完成或超时
-└── Bus::cmd(|bus| {
-        State::remove(id) — 不在册 → Error::InvalidArgs
-        signal::emit_closed(&amp;bus, id, reason).await
-    })</code></pre>
+└── Bus::cmd(command)
+     ├── State::remove(id) — 不在册 → Error::InvalidArgs
+     └── signal::emit_closed(&amp;bus, id, reason).await</code></pre>
 <ul class="note">
   <li>id 在发信号前失效；重复关闭或未知 id 返回 <code>Error::InvalidArgs</code>。</li>
   <li>删除 id 与发信号在同一把 <code>State</code> 锁内完成；同一 id 最多关闭一次。</li>
@@ -305,10 +313,9 @@ pub enum NoticeIcon {}      //见 USER §4.3</code></pre>
 
 <h3 id="sec-5-5">5.5. 动作回发</h3>
 <pre><code>宿主 → SessionHandle::invoke_action(id, key)
-└── Bus::cmd(|bus| {
-        State::contains(id) — 不在册 → Error::InvalidArgs
-        signal::emit_action_invoked(&amp;bus, id, key).await
-    })</code></pre>
+└── Bus::cmd(command)
+     ├── State::contains(id) — 不在册 → Error::InvalidArgs
+     └── signal::emit_action_invoked(&amp;bus, id, key).await</code></pre>
 <ul class="note">
   <li>只校验 id 在册，不校验 action key 是否属于原通知的 actions。</li>
   <li>id 校验与信号发射在同一把 <code>State</code> 锁内完成。</li>
@@ -316,30 +323,28 @@ pub enum NoticeIcon {}      //见 USER §4.3</code></pre>
 
 <h3 id="sec-5-6">5.6. 激活令牌回发</h3>
 <pre><code>宿主 → SessionHandle::activation_token(id, token)
-└── Bus::cmd(|bus| {
-        State::contains(id) — 不在册 → Error::InvalidArgs
-        signal::emit_activation_token(&amp;bus, id, token).await
-    })</code></pre>
+└── Bus::cmd(command)
+     ├── State::contains(id) — 不在册 → Error::InvalidArgs
+     └── signal::emit_activation_token(&amp;bus, id, token).await</code></pre>
 
 <h3 id="sec-5-7">5.7. 停机</h3>
 <pre><code>宿主 → SessionHandle::shutdown()   // 同步，幂等
-├── Bus::shutdown() → 置停机标记、关闭事件队列
+├── Bus::shutdown()   // 置停机标记、关闭事件队列
 ├── JoinHandle::join()
-└── drop Bus → 释放连接与总线名</code></pre>
+└── drop(Bus)         // 释放连接与总线名</code></pre>
 <ul class="note">
   <li>最后一个 <code>SessionHandle</code> drop 时也走同一路径；停机不经过 <code>Bus::cmd</code>，不受 <code>command_timeout_ms</code> 约束，超时由宿主管理。</li>
 </ul>
 
 <h3 id="sec-5-8">5.8. 总线终止</h3>
-<pre><code>conn.closed() / events.closed()
-→ Bus::report_fatal(message)
-├── bus.events.send_fatal(Fatal { message }).await   // 队列满时背压等待，不丢事件
-├── Bus::claim_stop()（原子标记 + 唤醒 runtime）
-├── bus.events.close()
-└── run_loop 返回</code></pre>
+<pre><code>conn.closed() / events.closed()   // 等价入口
+└── Bus::report_fatal(message)
+     ├── bus.events.send_fatal(Fatal { message }).await   // 队列满时背压等待，不丢事件
+     ├── Bus::claim_stop()（原子标记 + 唤醒 runtime）
+     └── bus.events.close()</code></pre>
 <pre><code>tokio::time::interval(30s)   // 推荐取值；实际值以代码为准
-├── DBusProxy::get_id()      // 超时 5s，推荐取值；实际值以代码为准
-└── 失败 → Bus::report_fatal(message)</code></pre>
+└── DBusProxy::get_id()      // 超时 5s，推荐取值；实际值以代码为准
+     └── 失败 → Bus::report_fatal(message)</code></pre>
 <ul class="note">
   <li><code>Fatal</code> 是终止事件；事件通道随后关闭，<code>NoticeReceiver::recv</code> 返回 <code>None</code>，handle 后续调用返回 <code>Error::Stopped</code>。Fatal 在队列满时等待空位，不丢失。</li>
   <li>Receiver 被丢弃时 Fatal 无法交付（接收端已不存在），但会话同样立即终止；宿主通过 handle 的 <code>Stopped</code> 观察并重建新实例。</li>

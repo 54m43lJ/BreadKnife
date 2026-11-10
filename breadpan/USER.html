@@ -3,17 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>breadpan 架构规格</title>
+<title>breadpan 用户契约</title>
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
 <main>
 
-<h1>breadpan 架构规格</h1>
+<h1>breadpan 用户契约</h1>
 <blockquote>
   本文档面向消费方（依赖本库的应用与其开发者）：术语、架构图、对外接口契约与数据模型。
   能力级边界以 <a href="ABOUT.html">ABOUT.html</a>「NON-GOAL」为权威；
-  内部结构与机制见 <a href="CODE.html">CODE.html</a>。
+  内部结构与机制见 <a href="CORE.html">CORE.html</a>。
 </blockquote>
 
 <h2 id="sec-1">1. 术语</h2>
@@ -26,7 +26,7 @@
   <tr><td>知名名</td><td>well-known name：以 <code>.</code> 分隔的总线名（<code>com.abc.myname</code> 形态），由连接向总线申请持有</td></tr>
   <tr><td>唯一名</td><td>unique connection name：总线为每个连接分配的唯一标识符，以 <code>:</code> 开头（<code>:1.22</code> 形态），连接存续期内不变、不可申请</td></tr>
   <tr><td>对象路径</td><td>object path：以 <code>/</code> 分隔的寻址字符串（如 <code>/StatusNotifierItem</code>），方法调用与信号来源的定位地址</td></tr>
-  <tr><td>服务名</td><td>Item 报到时登记的名字，TrayItemId 的取值：知名名或唯一名皆可（注册参数三形态就地解析，<a href="CODE.html#sec-5-3-1">CODE §5.3.1</a>）</td></tr>
+  <tr><td>服务名</td><td>Item 报到时登记的名字，TrayItemId 的取值：知名名或唯一名皆可（注册参数三形态就地解析，<a href="CORE.html#sec-5-3-1">CORE §5.3.1</a>）</td></tr>
   <tr><td>会话总线</td><td>DBus session bus，本库全部通信发生在此（<a href="https://dbus.freedesktop.org/doc/dbus-specification.html">D-Bus 规范</a>）</td></tr>
   <tr><td>zbus</td><td>纯 Rust 的 DBus 实现；本库启用其 tokio 特性，DBus 收发宿主于库内 tokio 运行时</td></tr>
   <tr><td>tokio</td><td>异步运行时；本库内部自带（CurrentThread，独占内部线程），消费方无需装配——事件通道（tokio mpsc）的消费端与执行器无关</td></tr>
@@ -97,7 +97,7 @@
 </ul>
 
 <h3 id="sec-3-6">3.6. 时序：输入路由与回执</h3>
-<p>每个语义输入对应一个同步方法；返回菜单数据时由消费方渲染，VOID 调用的回执经 <code>InteractionResult</code> 事件交付。路由与回退的内部细节见 <a href="CODE.html#sec-5-5">CODE §5.5</a>。</p>
+<p>每个语义输入对应一个同步方法；返回菜单数据时由消费方渲染，VOID 调用的回执经 <code>InteractionResult</code> 事件交付。路由与回退的内部细节见 <a href="CORE.html#sec-5-5">CORE §5.5</a>。</p>
 <div class="diagram"><img src="diagram/breadpan-input-routing.svg" alt="时序：输入路由与回执"></div>
 <table>
   <tr><th>方法</th><th>返回</th></tr>
@@ -121,13 +121,13 @@
 </table>
 <ul class="note">
   <li>名持有不可被替换：持有期间任何外部顶替请求一律失败——切换托盘程序须先手动终止本程序，正常情况下不存在让位/夺回；</li>
-  <li>停机流程与终局判定见 <a href="CODE.html#sec-5-7">CODE §5.7</a>。</li>
+  <li>停机流程与终局判定见 <a href="CORE.html#sec-5-7">CORE §5.7</a>。</li>
 </ul>
 
 <h2 id="sec-4">4. 接口</h2>
 
 <h3 id="sec-4-1">4.1. API 规范（Rust）</h3>
-<p>公开面的唯一完整清单，签名即契约，注释只补充签名表达不了的语义。内部组装方式与 watcher 模块内部签名见 <a href="CODE.html">CODE.html</a>。</p>
+<p>公开面的唯一完整清单，签名即契约，注释只补充签名表达不了的语义。内部组装方式与 watcher 模块内部签名见 <a href="CORE.html">CORE.html</a>。</p>
 <pre><code>// ── 配置 ──
 pub struct TrayConfig {
     pub timeout_ms: u64,     // 服务发现/调用/现场读取超时，默认 2000 ms
@@ -145,7 +145,7 @@ impl Tray {
 }
 
 // ── Handle：逻辑 Host 的完整操作面 ──
-pub struct TrayHandle { shared: Arc&lt;RuntimeShared&gt; }  // Clone + Send + Sync + 'static；RuntimeShared 见 CODE §3.2
+pub struct TrayHandle { shared: Arc&lt;RuntimeShared&gt; }  // Clone + Send + Sync + 'static；RuntimeShared 见 CORE §3.2
 
 impl TrayHandle {
     // ── 查询：现场读取（DBus 即时读取 → 原生结构；items() 为全量刷新操作）──

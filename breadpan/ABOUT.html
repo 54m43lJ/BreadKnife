@@ -43,14 +43,14 @@
   <tr><td>不缓存 SNI 详情</td><td>登记簿记仅存最小集；属性/图标/菜单等详情一律 DBus 即时读取，变更以轻量事件通告、不推数据</td></tr>
   <tr><td>不拥有任何 UI</td><td>无窗口/布局/事件循环；菜单渲染与弹出定位归消费方</td></tr>
   <tr><td>不对进程外 Host 负责</td><td>自包含设计：逻辑 Host 是进程内下游；总线上 Host 相关成员仅保留兼容桩（受理即忘 / 恒真），零簿记</td></tr>
-  <tr><td>不做外部 Watcher 客户端模式</td><td>多个 Watcher 不能共存——拒绝与终局语义见 <a href="ARCHITECTURE.html#sec-3-7">ARCHITECTURE §3.7</a>、<a href="ARCHITECTURE.html#sec-4-2">§4.2</a></td></tr>
+  <tr><td>不做外部 Watcher 客户端模式</td><td>多个 Watcher 不能共存——拒绝与终局语义见 <a href="USER.html#sec-3-7">USER §3.7</a>、<a href="USER.html#sec-4-2">§4.2</a></td></tr>
   <tr><td>不做 XEmbed/X11 传统托盘</td><td>场景钉死 Wayland + SNI（传统规范原文：<a href="https://specifications.freedesktop.org/systemtray-spec/latest/">Freedesktop System Tray Specification</a>）</td></tr>
   <tr><td>不提供移除/强制退出 Item 的通路</td><td>移除权专属服务名消失；官方未定义任何强制退出方法，pid 仅能从服务名的 PID 段解析</td></tr>
   <tr><td>不泄漏 tokio 运行时</td><td>运行时为库内私有，消费方无需装配；公开面无 async fn——异步只出现在事件通道消费端，入口与交互方法均为同步签名</td></tr>
 </table>
 <ul class="note">
   <li>字段级透传取舍（AttentionMovieName、菜单 shortcut、vendor 属性等）见
-  <a href="ARCHITECTURE.html#sec-4-3">ARCHITECTURE §4.3 数据模型</a>。</li>
+  <a href="USER.html#sec-4-3">USER §4.3 数据模型</a>。</li>
 </ul>
 
 <h2>用户交互</h2>
@@ -63,7 +63,7 @@
   <li>呈现：<code>icon_paintable(icon)</code> 输出可绘制对象；渲染与交互呈现由消费方负责。</li>
 </ul>
 <ul class="note">
-  <li>完整签名与返回语义见 <a href="ARCHITECTURE.html#sec-4-1">ARCHITECTURE §4.1</a>；运行示例见 <a href="BUILD.html">BUILD.html</a>。</li>
+  <li>完整签名与返回语义见 <a href="USER.html#sec-4-1">USER §4.1</a>；运行示例见 <a href="BUILD.html">BUILD.html</a>。</li>
 </ul>
 
 <h2>Credits</h2>
@@ -75,8 +75,8 @@
 
 <footer>
   文档：ABOUT ·
-  <a href="ARCHITECTURE.html">ARCHITECTURE</a> ·
-  <a href="CODE.html">CODE</a> ·
+  <a href="USER.html">USER</a> ·
+  <a href="CORE.html">CORE</a> ·
   <a href="BUILD.html">BUILD</a>
 </footer>
 
