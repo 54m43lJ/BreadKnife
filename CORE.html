@@ -338,6 +338,7 @@ impl InfoCenterWidget {
     pub fn new(ipc: Arc&lt;IpcClient&gt;, monitor: &amp;str, window: &amp;gtk::Window,
                popup: Rc&lt;PopupManager&gt;) -&gt; Self;
     pub fn set_active(&amp;self, active: &amp;ActiveWindow);
+    pub fn toggle_center(&amp;self);
     pub fn set_notification_status(&amp;self, status: &amp;NotificationStatus);
     pub fn set_records(&amp;self, records: &amp;[NotificationRecord]);
     pub fn upsert_center(&amp;self, record: NotificationRecord);
@@ -373,9 +374,11 @@ pub const GROUP_PREVIEW_COUNT: usize;      // 推荐值 3
 pub const POPUP_LOW_TIMEOUT_MS: u64;       // 推荐值 30_000；仅 Low 未指定超时时使用</code></pre>
 <ul class="note">
   <li><code>InfoCenterWidget::new</code> 先建标题容器，再创建通知中心 popover（<code>PopupManager</code> 组 <code>info</code>）与独立的 <code>NotificationWindow</code>；贴栏通知不参与 <code>PopupManager</code>。</li>
+  <li><code>title_label</code> 的点击手势绑定 <code>toggle_center</code>：已打开则 <code>PopupManager::close_group("info")</code>，否则 <code>PopupManager::open(center, "info")</code> 并调用 <code>NotificationWindow::set_center_open(true)</code>；<code>center</code> 的关闭信号调用 <code>NotificationWindow::set_center_open(false)</code>，覆盖再次点击标题区域、点击弹窗外与 Escape。</li>
   <li><code>NotificationWindow</code> 是独立 layer-shell 窗口，不 grab；生命周期由每条通知的计时器与显式关闭请求管理，位置水平中心对齐标题区域。</li>
-  <li>中心记录按到达顺序新→旧保存；按应用聚合，组按最后一条消息时间新→旧，组内同样新→旧。组标题点击展开/收缩，展开时只显示该组；组标题右侧关闭按钮清空本组。</li>
+  <li>中心记录按到达顺序新→旧保存；按应用聚合，组按最后一条消息时间新→旧，组内同样新→旧。组标题点击展开/收缩，收缩后只保留聚合标题，展开时只显示该组；组标题右侧关闭按钮清空本组。</li>
   <li>组内超过 <code>GROUP_PREVIEW_COUNT</code> 条时只显示最新 <code>GROUP_PREVIEW_COUNT</code> 条 + 「…」条目；点击「…」展开该组全部消息，其它组隐藏。</li>
+  <li>标题/正文因裁剪省略时，将完整文本设为对应控件的 tooltip；悬停消息卡显示全文。</li>
   <li>贴栏通知窗口内多张卡片纵向堆叠；新条在最上，同 id 原位替换并重置计时，超过 <code>POPUP_VISIBLE_MAX</code> 条显示隐藏计数。有限超时的条目独立计时；超时仅移除贴栏卡片，<code>transient</code> 记录同时发送 <code>NotificationClose { id, reason: Expired }</code>，非 transient 记录的中心条目保留。</li>
   <li>超时取 <code>NotificationRecord.expire_timeout_ms</code>：<code>Some(0)</code> 常驻，<code>Some(ms)</code> 按 ms；<code>None</code> 时低优先级取 <code>POPUP_LOW_TIMEOUT_MS</code>，普通与紧急常驻。常驻条目不创建计时器。</li>
   <li>通知中心打开时 <code>NotificationWindow::set_center_open(true)</code>：窗口隐藏，记录与计时器保留；关闭时重新显示未过期记录。期间到达的通知只入栈，不显示。</li>
@@ -855,6 +858,20 @@ NoticeEvent::Fatal { message }
   <li>错误文案：标题「通知中心暂时不可用」；正文取 <code>NotificationStatus::Unavailable.message</code>（NameTaken 为「另一个通知服务正在运行，bread 无法接管 org.freedesktop.Notifications。」，Fatal 为 bnote 报告的原因）；刷新按钮位于正文下方。</li>
   <li>不自动重试、不排队、不替换已有通知服务；重试完全由用户点击刷新按钮触发。</li>
   <li>运行中 Fatal 会清空通知缓存与贴栏通知；重试成功后从空列表恢复。</li>
+</ul>
+
+<h3 id="sec-5-8">5.8. 通知中心开关</h3>
+<pre><code>title_label.connect_clicked(...)（绑定标题点击）
+└── InfoCenterWidget::toggle_center()
+     ├── 判断：已打开 → PopupManager::close_group("info")
+     └── 判断：未打开 → PopupManager::open(center, "info")
+          └── NotificationWindow::set_center_open(true)
+
+center.connect_closed(...)（绑定关闭信号）
+└── NotificationWindow::set_center_open(false)</code></pre>
+<ul class="note">
+  <li>打开时通知中心 popover 抓取输入，贴栏通知窗口隐藏但保留记录与计时；关闭后只恢复未过期的贴栏记录。</li>
+  <li>打开、关闭与分组展开/收缩只改本地视图，不改通知缓存，也不补发已超时的贴栏卡片。</li>
 </ul>
 
 </main>
