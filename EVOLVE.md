@@ -186,3 +186,30 @@
 | `ABOUT.html` | GOAL / 用户交互 | 不动 | 测试手段不改变产品能力描述 |
 | `bnote/*` | — | 不动 | 资源测试不触及通知协议库 |
 | `TODO.md` | 第七项「搭建一些资源占用和能耗相关的测试手段…」 | 改 | 追加 `[已解决]` 标记 |
+
+## 工作区悬停窗口列表（TODO 第 8 项）
+
+- 需求：工作区按钮悬停不再显示纯文本 tooltip，改为显示该工作区的窗口列表；首期只预览窗口标题，条件允许时再考虑加入整个工作区的截图预览。
+- 实现思路：
+  - `WorkspaceState` 增加 `windows: Vec<WorkspaceWindow>`；`WorkspaceWindow` 携带归一化地址、标题、class，供当前标题列表与后续截图预览复用。
+  - daemon 在重建工作区切片时查询 `clients -j`，按 `workspace.id` 聚合窗口，并按 `focusHistoryID` 升序排列（最近聚焦在前）；打开、关闭、移动窗口沿用既有 resync 事件，标题变化则原地更新对应条目，避免额外查询。
+  - 工作区按钮由 `set_tooltip_text` 改为 `query_tooltip` 自定义浮层：显示工作区名与窗口标题，最多 10 条，超出显示「… 还有 N 个窗口」，空工作区显示「无窗口」。
+  - 浮层宽 220px、`surface` 底 `fg` 字、1px `gold` 边框、圆角 8px、内边距 6px／水平 8px；工作区名 `gold` 加粗，窗口标题单行省略。点击切换与滚轮切换行为不变。
+  - 截图预览本期不实现：保留 `address` / `class` 作为后续扩展数据，但不在本项定义截图采集、缓存与刷新链路。
+  - 代码分支 `feat/workspace-window-list`，提交 `7c4a2c0`；`cargo test` 22 项全部通过，GTK CSS 解析通过。
+- 文档操作：
+
+| 文档 | 章节 | 操作 | 内容 |
+|------|------|------|------|
+| `ABOUT.html` | 用户交互 · 界面交互（工作区切换行） | 改 | 补充悬停显示窗口标题列表，截图预览标注为后续可选 |
+| `USER.html` | 5.2.2 Workspace 按钮 | 改 | 增加窗口列表原型与视觉契约：排序、最多 10 条、空态、220px 浮层、颜色/圆角/省略 |
+| `style.css` | 工作区悬停窗口列表 | 增 | 新增 `.mk-ws-tip*` 原型样式 |
+| `CORE.html` | 1. 文件树 | 改 | `workspace.rs` 职责补充悬停窗口列表 |
+| `CORE.html` | 4.3 daemon/hyprland.rs | 改 | `ClientInfo` 增加 `focus_history_id`；注记 clients 为工作区列表提供 title/class/focusHistoryID |
+| `CORE.html` | 4.12 bar/modules/workspace.rs | 改 | 增加 `build_ws_tooltip` 签名与自定义 tooltip 行为说明 |
+| `CORE.html` | 4.19 shared/model.rs | 改 | 新增 `WorkspaceWindow`；`WorkspaceState` 增加 `windows` 快照 |
+| `PROVIDER.html` | 4.1 Hyprland IPC（clients 查询行） | 改 | 登记 `title` / `class` / `focusHistoryID` 的消费与排序用途 |
+| `USER.html` | 5.2.5 通知弹窗、5.2.6 通知中心 | 不动 | 本项只改工作区悬停列表，不触及通知几何与交互 |
+| `BUILD.html` | 全部 | 不动 | 无构建命令或用户配置变化 |
+| `bnote/*` | — | 不动 | 工作区窗口列表属于宿主 UI，不触及通知协议库 |
+| `TODO.md` | 第八项「workspace悬停不再弹tooltip…」 | 改 | 追加 `[已解决]` 标记 |

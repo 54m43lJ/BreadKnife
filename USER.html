@@ -130,11 +130,21 @@
       </div>
     </div>
   </div>
+  <div class="mk-scene">
+    <div class="mk-ws-tip">
+      <div class="mk-ws-tip-title">工作区 2</div>
+      <div class="mk-ws-tip-row">文档 - BreadKnife</div>
+      <div class="mk-ws-tip-row">终端</div>
+      <div class="mk-ws-tip-more">… 还有 2 个窗口</div>
+    </div>
+  </div>
 </div>
 <ul class="note">
   <li>从左至右：无窗口、无窗口且活跃、有窗口、有窗口且活跃、有窗口且紧急、有窗口且紧急且活跃。</li>
   <li>基底：无窗口＝直径 4px 圆点，有窗口＝20×15px 长方形（圆角半径 10px），均取 <code>purple</code>；紧急＝长方形整体取 <code>fg</code>，仅限有窗口。</li>
   <li>活跃叠点直径 4px 取 <code>fg</code>；紧急基底上叠点取 <code>purple</code>，紧急态即基底与叠点两色互换；无窗口且活跃时叠点与基底圆点等大重叠，视觉为单个 <code>fg</code> 圆点。</li>
+  <li>悬停工作区按钮显示窗口标题浮层：按 Hyprland 焦点历史排序（最近聚焦在前），最多 10 条，超出显示「… 还有 N 个窗口」；无窗口显示「无窗口」。首期仅标题，截图预览为后续可选扩展。</li>
+  <li>浮层宽 220px、<code>surface</code> 底 <code>fg</code> 字、1px <code>gold</code> 边框、圆角 8px、内边距 6px／水平 8px；工作区名 <code>gold</code> 加粗，窗口行 1 行省略。</li>
   <li>可见性矩阵见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>；状态过渡 150ms ease。</li>
 </ul>
 
