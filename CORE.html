@@ -370,14 +370,14 @@ impl NotificationWindow {
 
 pub const POPUP_VISIBLE_MAX: usize;        // 推荐值 10
 pub const GROUP_PREVIEW_COUNT: usize;      // 推荐值 3
-pub const POPUP_DEFAULT_TIMEOUT_MS: u64;   // 推荐值 30_000</code></pre>
+pub const POPUP_LOW_TIMEOUT_MS: u64;       // 推荐值 30_000；仅 Low 未指定超时时使用</code></pre>
 <ul class="note">
   <li><code>InfoCenterWidget::new</code> 先建标题容器，再创建通知中心 popover（<code>PopupManager</code> 组 <code>info</code>）与独立的 <code>NotificationWindow</code>；贴栏通知不参与 <code>PopupManager</code>。</li>
   <li><code>NotificationWindow</code> 是独立 layer-shell 窗口，不 grab；生命周期由每条通知的计时器与显式关闭请求管理，位置水平中心对齐标题区域。</li>
   <li>中心记录按到达顺序新→旧保存；按应用聚合，组按最后一条消息时间新→旧，组内同样新→旧。组标题点击展开/收缩，展开时只显示该组；组标题右侧关闭按钮清空本组。</li>
   <li>组内超过 <code>GROUP_PREVIEW_COUNT</code> 条时只显示最新 <code>GROUP_PREVIEW_COUNT</code> 条 + 「…」条目；点击「…」展开该组全部消息，其它组隐藏。</li>
-  <li>贴栏通知窗口内多张卡片纵向堆叠；新条在最上，同 id 原位替换并重置计时，超过 <code>POPUP_VISIBLE_MAX</code> 条显示隐藏计数。每条独立计时；超时仅移除贴栏卡片，<code>transient</code> 记录同时发送 <code>NotificationClose { id, reason: Expired }</code>，非 transient 记录的中心条目保留。</li>
-  <li>超时取 <code>NotificationRecord.expire_timeout_ms</code>：<code>Some(0)</code> 常驻，<code>Some(ms)</code> 按 ms；<code>None</code> 时紧急常驻、普通/低优先级取 <code>POPUP_DEFAULT_TIMEOUT_MS</code>。</li>
+  <li>贴栏通知窗口内多张卡片纵向堆叠；新条在最上，同 id 原位替换并重置计时，超过 <code>POPUP_VISIBLE_MAX</code> 条显示隐藏计数。有限超时的条目独立计时；超时仅移除贴栏卡片，<code>transient</code> 记录同时发送 <code>NotificationClose { id, reason: Expired }</code>，非 transient 记录的中心条目保留。</li>
+  <li>超时取 <code>NotificationRecord.expire_timeout_ms</code>：<code>Some(0)</code> 常驻，<code>Some(ms)</code> 按 ms；<code>None</code> 时低优先级取 <code>POPUP_LOW_TIMEOUT_MS</code>，普通与紧急常驻。常驻条目不创建计时器。</li>
   <li>通知中心打开时 <code>NotificationWindow::set_center_open(true)</code>：窗口隐藏，记录与计时器保留；关闭时重新显示未过期记录。期间到达的通知只入栈，不显示。</li>
   <li><code>show</code> 仅在记录非空且窗口不可见时设置窗口可见；空栈不创建可见窗口；<code>hide</code> 仅隐藏，不清理记录。</li>
   <li>动作按钮按 <code>actions</code> 顺序显示；默认文字，<code>action_icons</code> 为真且图标命中时用 action key 作为图标名、label 作为 tooltip，未命中回退文字。按钮发送 <code>NotificationActivate { id, action_key: Some(key) }</code>，左键点击卡片发送 <code>NotificationActivate { id, action_key: None }</code>。</li>
