@@ -3,9 +3,13 @@ participant "通知发送方" as app
 participant "D-Bus 会话总线" as bus
 participant "breadknife（bread）" as bread
 
-app -> bus: Notify / CloseNotification
-bus -> bread: 通知参数 / 关闭请求
+app -> bus: Notify
+bus -> bread: 通知参数
 bread -> bread: 内部处理（归一、缓存、推送、弹窗）
-bread -> bus: NotificationClosed / ActionInvoked
-bus -> app: NotificationClosed / ActionInvoked
+app -> bus: CloseNotification
+bus -> bread: 关闭请求
+bread -> bus: NotificationClosed
+bus -> app: NotificationClosed
+bread -> bus: ActionInvoked
+bus -> app: ActionInvoked
 @enduml

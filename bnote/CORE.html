@@ -112,6 +112,8 @@ impl Bus {
     pub(crate) fn spawn&lt;F&gt;(&amp;self, f: F)
     where
         F: Future&lt;Output = ()&gt; + Send + 'static;
+    pub(crate) fn report_fatal(&amp;self, message: String);
+    pub(crate) fn claim_stop(&amp;self) -&gt; bool;
     pub(crate) fn shutdown(&amp;self);
 }</code></pre>
 <ul class="note">

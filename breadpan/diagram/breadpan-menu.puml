@@ -4,7 +4,9 @@ participant breadpan
 participant "Item（dbusmenu）" as item
 
 消费方 -> breadpan: menu() / menu_expand() / 交互入口
-breadpan -> item: AboutToShow → GetLayout → GetGroupProperties
+breadpan -> item: AboutToShow
+breadpan -> item: GetLayout
+breadpan -> item: GetGroupProperties
 item --> breadpan: 布局 + 属性
 breadpan -> breadpan: 内部处理（组装该层快照）
 breadpan --> 消费方: MenuSnapshot

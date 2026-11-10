@@ -4,7 +4,9 @@ participant "breadknife（bread）" as bread
 participant "托盘 Item" as item
 
 用户 -> bread: 右键托盘图标
-bread -> item: AboutToShow → GetLayout → GetGroupProperties
+bread -> item: AboutToShow
+bread -> item: GetLayout
+bread -> item: GetGroupProperties
 item --> bread: 菜单布局
 bread -> bread: 内部处理（渲染弹出菜单）
 用户 -> bread: 点击菜单条目

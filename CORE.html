@@ -79,10 +79,7 @@ scripts/
 </ul>
 
 <h2 id="sec-4">4. 内部类型与方法签名</h2>
-<ul class="note">
-  <li>收录标准：只列关键内部类型与方法；条目只承载签名与一行用途，方法内部步骤归 <a href="#sec-5">§5</a> 调用栈，未列出者皆为局部实现细节；</li>
-  <li>标注 <code>//见 USER §xx.xx</code> 的条目为 USER（USER.html）已定义语义的统一引用格式；其余为与实现同步的 Rust 形体签名。共享模型字段以本节类型定义为契约。</li>
-</ul>
+<p>只列关键内部类型与方法；条目承载签名与一行用途，方法内部步骤归 <a href="#sec-5">§5</a> 调用栈。标注 <code>//见 USER §xx.xx</code> 的条目引用 USER（USER.html）已定义语义，其余为与实现同步的 Rust 形体签名；共享模型字段以本节类型定义为契约。</p>
 
 <h3 id="sec-4-main">4.1. main.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>fn main();</code></pre>
@@ -227,7 +224,7 @@ fn to_record(notice: bnote::Notice) -&gt; NotificationRecord;</code></pre>
   <li><code>unavailable_message</code> 对 <code>NameTaken</code> 返回固定文案，其它错误返回 <code>Error</code> 的文本。</li>
   <li>能力清单与语义见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>；<code>SessionConfig.capabilities</code> 返回 §4.5 声明的能力。</li>
   <li>服务器信息：name <code>bread</code>、vendor <code>BreadKnife</code>、version 取 <code>env!("CARGO_PKG_VERSION")</code>、spec_version <code>1.2</code>；<code>command_timeout_ms</code> 取 <code>NOTIFICATION_COMMAND_TIMEOUT_MS</code>（推荐值 5_000）。</li>
-  <li>手动重试由通知中心的刷新按钮触发 <code>Request::NotificationRetry</code>；daemon 先停机旧服务，再重新调用 <code>NotificationService::start</code>，不排队、不替换已有通知服务。</li>
+  <li>手动重试由通知中心的刷新按钮触发 <code>Request::NotificationRetry</code>；daemon 先停机现有服务，再重新调用 <code>NotificationService::start</code>，不排队、不替换已有通知服务。</li>
   <li>命令线程失败只记日志；窗口 UI 乐观更新，重连快照时校正。</li>
 </ul>
 

@@ -5,7 +5,8 @@ participant "D-Bus 会话总线" as bus
 participant "存量 Item" as item
 
 消费方 -> breadpan: start()
-breadpan -> bus: 申请 Watcher 名 + 订阅变更 / 死亡清理信号
+breadpan -> bus: 申请 Watcher 名
+breadpan -> bus: 订阅变更 / 死亡清理信号
 breadpan -> item: 反向发现（ListNames 扫描 + 探测）
 item --> breadpan: 存量 Item
 breadpan -> breadpan: 内部处理（登记最小集、现场读取、组装快照）

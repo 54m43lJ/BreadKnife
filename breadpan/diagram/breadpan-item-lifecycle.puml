@@ -9,7 +9,8 @@ breadpan -> breadpan: 内部处理（登记最小集）
 breadpan --> 消费方: Added(id)
 
 == 变更 ==
-item -> breadpan: PropertiesChanged / 官方 New* 信号
+item -> breadpan: PropertiesChanged
+item -> breadpan: New* 信号
 breadpan -> breadpan: 内部处理（合并通告）
 breadpan --> 消费方: Changed(id)
 

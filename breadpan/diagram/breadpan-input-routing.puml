@@ -5,7 +5,7 @@ participant "Item" as item
 
 消费方 -> breadpan: 语义输入方法
 breadpan -> breadpan: 内部处理（校验与路由）
-breadpan -> item: Activate / SecondaryActivate / ContextMenu / Scroll / dbusmenu Event
+breadpan -> item: 语义输入对应的 SNI 方法
 item --> breadpan: 应答（VOID 送达）
 breadpan --> 消费方: InteractionOutcome / 回执事件 / 错误
 @enduml

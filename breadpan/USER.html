@@ -19,23 +19,19 @@
 <h2 id="sec-1">1. 术语</h2>
 <table>
   <tr><th>术语</th><th>含义</th></tr>
-  <tr><td>Watcher</td><td>总线上的 <code>org.kde.StatusNotifierWatcher</code> 服务，负责登记托盘项（<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-watcher">官方定义 §4</a>，原文拼写为 org.freedesktop，见下方命名注）。本库内置该角色（watcher 模块）：启动即在会话总线申请持有其名字（不可被替换）</td></tr>
+  <tr><td>Watcher</td><td>总线上的 <code>org.kde.StatusNotifierWatcher</code> 服务，负责登记托盘项（<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-watcher">官方定义 §4</a>；原文拼写为 org.freedesktop，本库使用事实实现名 org.kde）。本库内置该角色（watcher 模块）：启动即在会话总线申请持有其名字（不可被替换）</td></tr>
   <tr><td>Host</td><td>托盘图标的展示方（<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-host">官方定义 §5</a>）。本库自包含：逻辑 Host 即进程内下游（消费方代码），经 <a href="#sec-4-1">§4.1</a> 的 Rust API 交互，不经总线登记</td></tr>
-  <tr><td>Item</td><td>一个托盘项，即某个应用在总线上导出的 <code>org.kde.StatusNotifierItem</code> 对象（<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item">官方定义 §3</a>，原文拼写为 org.freedesktop，见下方命名注）</td></tr>
+  <tr><td>Item</td><td>一个托盘项，即某个应用在总线上导出的 <code>org.kde.StatusNotifierItem</code> 对象（<a href="https://specifications.freedesktop.org/status-notifier-item/latest-single/#status-notifier-item">官方定义 §3</a>；原文拼写为 org.freedesktop，本库使用事实实现名 org.kde）</td></tr>
   <tr><td>Menu</td><td>Item 通过 <code>Menu</code> 属性指向的 <code>com.canonical.dbusmenu</code> 对象（接口定义原文：<a href="reference/com.canonical.dbusmenu.xml">reference/com.canonical.dbusmenu.xml</a>）</td></tr>
   <tr><td>知名名</td><td>well-known name：以 <code>.</code> 分隔的总线名（<code>com.abc.myname</code> 形态），由连接向总线申请持有</td></tr>
   <tr><td>唯一名</td><td>unique connection name：总线为每个连接分配的唯一标识符，以 <code>:</code> 开头（<code>:1.22</code> 形态），连接存续期内不变、不可申请</td></tr>
   <tr><td>对象路径</td><td>object path：以 <code>/</code> 分隔的寻址字符串（如 <code>/StatusNotifierItem</code>），方法调用与信号来源的定位地址</td></tr>
   <tr><td>服务名</td><td>Item 报到时登记的名字，TrayItemId 的取值：知名名或唯一名皆可（注册参数三形态就地解析，<a href="CORE.html#sec-5-3-1">CORE §5.3.1</a>）</td></tr>
   <tr><td>会话总线</td><td>DBus session bus，本库全部通信发生在此（<a href="https://dbus.freedesktop.org/doc/dbus-specification.html">D-Bus 规范</a>）</td></tr>
-  <tr><td>zbus</td><td>纯 Rust 的 DBus 实现；本库启用其 tokio 特性，DBus 收发宿主于库内 tokio 运行时</td></tr>
-  <tr><td>tokio</td><td>异步运行时；本库内部自带（CurrentThread，独占内部线程），消费方无需装配——事件通道（tokio mpsc）的消费端与执行器无关</td></tr>
   <tr><td>GTK 主线程</td><td>GTK/GLib 主循环（MainContext）所在线程；一切 UI 操作与事件消费闭包都在此执行——消费方经 <code>glib::spawn_future_local</code> 把事件流消费 future 挂到本上下文</td></tr>
 </table>
 <ul class="note">
-  <li>命名从事实规范（org.kde.*）：SNI 官方文本拼写为 <code>org.freedesktop.*</code>，但现行实现——KDE、AppIndicator 及各 Host/Item（如 nm-applet）——一律 <code>org.kde.*</code>；</li>
-  <li>本库的前缀处理（申请 / 广播 / 监听 / 探测）见 <a href="#sec-2">§2 通用约定</a>；</li>
-  <li>若改用 <code>org.freedesktop</code> 名，将与已持有 <code>org.kde</code> 名的既有 Watcher 并存为两个登记中心，登记项互不可见。</li>
+  <li>本库的前缀处理见 <a href="CORE.html#sec-2">CORE §2</a>。</li>
 </ul>
 <ul class="note">
   <li>官方规范中 bus name 是唯一名与知名名的合称（<code>:</code> 开头者为唯一名，其余为知名名）；本文档不以 bus name 单独指称任一类，一律用「唯一名」「知名名」；</li>
@@ -46,7 +42,6 @@
 <ul>
   <li><strong>列表输出按 id 排序</strong>：在册条目的一切列表形态输出——快照 <code>Snapshot.items</code>、<code>items()</code>、协议面属性 <code>RegisteredStatusNotifierItems</code>——一律按 id 升序排列；顺序由内容唯一确定，与发现序 / 内部迭代序 / 并发完成序无关。</li>
   <li><strong>数据即取即最新</strong>：查询返回总线当前值；事件只报事实、不携带数据，变化后由消费方查询。</li>
-  <li><strong>前缀策略</strong>：本库自身命名（Watcher 服务名 / 协议面接口名 / 信号广播）只采用 <code>org.kde.*</code>（业界普遍实践）；寻址外部应用（属性读取 / 交互调用）采用 fallback——<code>org.kde.*</code> 优先、<code>org.freedesktop.*</code> 回退，且超时的调用不再重试另一前缀；解析入站消息（方法调用 / 信号匹配等）两前缀宽容处理。</li>
   <li><strong>同步封装</strong>：公开面全同步；异步收敛于实现（同步桥 + 库内运行时）。阻塞是契约的一部分。</li>
 </ul>
 
@@ -57,14 +52,14 @@
 
 <h3 id="sec-3-2">3.2. 事件投递链</h3>
 <p>
-  事件在内部 tokio 运行时组装完成后投入<strong>单实例</strong> tokio mpsc 通道；消费方以
+  事件经<strong>单实例</strong> tokio mpsc 通道交付；消费方以
   <code>recv().await</code> 消费——GTK 主线程经 <code>glib::spawn_future_local</code> 驱动
   （<code>while let Some(ev) = rx.recv().await { … }</code>），非 GTK 消费方在任意执行器 await 即可。
   通道发放与消费端约束见下表；背压等投递语义见 <a href="#sec-4-2">§4.2</a>。
 </p>
 <table>
   <tr><th>环节</th><th>机制</th><th>约束</th></tr>
-  <tr><td>事件通道<br><code>Tray::start</code></td><td>tokio mpsc，单实例：<code>start</code> 组装完成即交付唯一 <code>Receiver</code>，此后不再发放；不设追加订阅（确需多方消费由消费方自行转发）；交付语义（顺序/合并/背压）见 <a href="#sec-4-2">§4.2</a></td><td>消费端与执行器无关；库内运行时对消费方不可见（消费方无需装配 tokio）</td></tr>
+  <tr><td>事件通道<br><code>Tray::start</code></td><td>tokio mpsc，单实例：<code>start</code> 组装完成即交付唯一 <code>Receiver</code>，此后不再发放；不设追加订阅（确需多方消费由消费方自行转发）；交付语义（顺序/合并/背压）见 <a href="#sec-4-2">§4.2</a></td><td>消费端与执行器无关；消费方无需装配任何异步运行时</td></tr>
   <tr><td>消费端<br><code>glib::spawn_future_local</code></td><td>消费方在 GTK 主线程 spawn 事件消费 future，逐事件驱动 UI 更新；库不提供桥接函数，桥接代码归消费方</td><td>闭包在主线程执行，阻塞即卡 UI；库不创建 GLib 上下文</td></tr>
 </table>
 
@@ -145,7 +140,7 @@ impl Tray {
 }
 
 // ── Handle：逻辑 Host 的完整操作面 ──
-pub struct TrayHandle { shared: Arc&lt;RuntimeShared&gt; }  // Clone + Send + Sync + 'static；RuntimeShared 见 CORE §3.2
+pub struct TrayHandle { shared: Arc&lt;RuntimeShared&gt; }  // Clone + Send + Sync + 'static；RuntimeShared 见 CORE §4.2
 
 impl TrayHandle {
     // ── 查询：现场读取（DBus 即时读取 → 原生结构；items() 为全量刷新操作）──
@@ -429,7 +424,7 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
 <p>
   watcher 模块在会话总线导出 <code>org.kde.StatusNotifierWatcher</code>（<a href="#sec-1">§1 术语</a>）。
   该面是外部 Item 应用（图标提供方）与本库的唯一总线契约；逻辑 Host 不经总线（<a href="#sec-4-1">§4.1</a>）。
-  接受侧前缀的处理见 <a href="#sec-2">§2 通用约定</a>；本面广播只经 <code>org.kde.*</code> 发出，不做多前缀重复播报。
+  接受侧前缀的处理见 <a href="CORE.html#sec-2">CORE §2</a>；本面广播只经 <code>org.kde.*</code> 发出，不做多前缀重复播报。
 </p>
 <table>
   <tr><th>DBus 成员</th><th>类型</th><th>语义</th></tr>
