@@ -197,7 +197,6 @@ fn add_icon(inner: &Rc<TrayInner>, view: &TrayItemView) {
     button.set_focusable(false);
 
     let paintable = icon_paintable_of(&view.icon);
-    apply_pad_class(&button, &view.icon);
     let image = gtk::Image::from_paintable(Some(&paintable));
     image.set_pixel_size(ICON_SIZE);
     button.set_child(Some(&image));
@@ -241,77 +240,6 @@ fn remove_icon(inner: &Rc<TrayInner>, id: &str) {
     if let Some(button) = button {
         inner.container.remove(&button);
     }
-}
-
-/// 对比底色垫高（深浅随图标反相）：采样像素亮度决定底色深浅。
-fn apply_pad_class(button: &gtk::Button, view: &IconView) {
-    match icon_is_dark(view) {
-        Some(true) => button.add_css_class("tray-pad-on-dark"),
-        Some(false) => button.add_css_class("tray-pad-on-light"),
-        None => {}
-    }
-}
-
-/// 像素平均亮度判定：位图（原始字节）/ 文件路径（纹理）/ 主题名（回源文件）；
-/// 不可得 → None（不加垫色）。
-fn icon_is_dark(view: &IconView) -> Option<bool> {
-    match view {
-        IconView::Pixmap { width, height, argb } => {
-            luminance_of_samples(argb.chunks_exact(4), *width, *height)
-        }
-        IconView::Path(path) => {
-            let texture = gtk::gdk::Texture::from_filename(path).ok()?;
-            texture_luminance(&texture)
-        }
-        IconView::Name(name) => {
-            // 主题命中的 IconPaintable 回源文件路径取纹理
-            let paintable =
-                breadpan::gtk::icon_paintable(&breadpan::IconSource::Name(name.clone()));
-            let icon_paintable = paintable.downcast_ref::<gtk::IconPaintable>()?;
-            let path = icon_paintable.file()?.path()?;
-            let texture = gtk::gdk::Texture::from_filename(path).ok()?;
-            texture_luminance(&texture)
-        }
-    }
-}
-
-fn texture_luminance(texture: &gtk::gdk::Texture) -> Option<bool> {
-    let w = texture.width();
-    let h = texture.height();
-    if w <= 0 || h <= 0 || w as i64 * h as i64 > 4096 * 4096 {
-        return None;
-    }
-    let stride = (w * 4) as usize;
-    let mut buf = vec![0u8; stride * h as usize];
-    gtk::gdk::prelude::TextureExtManual::download(texture, &mut buf, stride);
-    luminance_of_samples(buf.chunks_exact(4), w as u32, h as u32)
-}
-
-/// 4 字节像素采样的 alpha 加权亮度（≤512 采样；通道序对均值无影响）。
-fn luminance_of_samples<'a>(
-    pixels: impl Iterator<Item = &'a [u8]>,
-    width: u32,
-    height: u32,
-) -> Option<bool> {
-    let total = (width as usize) * (height as usize);
-    if total == 0 {
-        return None;
-    }
-    let step = (total / 512).max(1);
-    let mut sum = 0f64;
-    let mut count = 0f64;
-    for (i, px) in pixels.enumerate() {
-        if i % step != 0 || px.len() < 4 {
-            continue;
-        }
-        let a = px[3] as f64 / 255.0;
-        sum += a * (px[0] as f64 + px[1] as f64 + px[2] as f64) / 3.0;
-        count += a;
-    }
-    if count < 1.0 {
-        return None;
-    }
-    Some(sum / count / 255.0 < 0.55)
 }
 
 // ── 手势 → IPC → daemon ──

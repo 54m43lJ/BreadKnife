@@ -82,7 +82,7 @@ impl WorkspaceWidget {
         indicator.set_halign(gtk::Align::Center);
         indicator.set_valign(gtk::Align::Center);
         if ws.urgent {
-            indicator.add_css_class("on-warning");
+            indicator.add_css_class("on-urgent");
         }
         indicator.set_visible(ws.active);
 
