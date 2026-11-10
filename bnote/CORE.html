@@ -15,7 +15,6 @@
 ├── Cargo.toml          # crate 清单：依赖与版本
 ├── examples/
 │   └── server.rs       # 交互式测试服务器：stdin 驱动宿主 API
-├── reference/          # 官方规范清理版（第 2–9 章，分章文件）
 ├── tests/
 │   └── protocol.rs     # 协议集成测试：隔离 session bus 上的方法 / 事件 / 信号
 └── src/
@@ -25,7 +24,7 @@
     ├── <a href="#sec-4-events">events.rs</a>     # NoticeEvent 队列与投递
     ├── <a href="#sec-4-server">server.rs</a>     # <a href="PROVIDER.html#sec-4-1">org.freedesktop.Notifications</a> 服务端方法应答
     ├── <a href="#sec-4-signal">signal.rs</a>     # <a href="PROVIDER.html#sec-4-2">NotificationClosed / ActionInvoked / ActivationToken</a> 发射
-    ├── <a href="#sec-4-hints">hints.rs</a>      # hints 解析与归一（urgency / image-data / image-path / action-icons / transient / resident）
+    ├── <a href="#sec-4-hints">hints.rs</a>      # hints 解析与归一（urgency / image-data / image-path / action-icons / transient / resident / sound）
     └── <a href="#sec-4-types">types.rs</a>      # Notice / NoticeEvent / SessionConfig 等共享类型</code></pre>
 <ul class="note">
   <li>本库自持连接与运行时：宿主不装配 zbus/tokio；事件流异步，回发命令同步。</li>
@@ -114,7 +113,7 @@ impl Bus {
 </ul>
 
 <h3 id="sec-4-events">4.4. src/events.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub(crate) const EVENT_QUEUE_CAPACITY: usize;   // 参考值 64；实际值以代码为准
+<pre><code>pub(crate) const EVENT_QUEUE_CAPACITY: usize;   // 推荐值 64；实际值以代码为准
 
 pub(crate) struct EventQueue {
     tx: Mutex&lt;Option&lt;mpsc::Sender&lt;NoticeEvent&gt;&gt;&gt;,
@@ -226,11 +225,14 @@ pub(crate) struct HintSet {
     pub(crate) action_icons: bool,
     pub(crate) transient: bool,
     pub(crate) resident: bool,
+    pub(crate) sound_file: Option&lt;String&gt;,
+    pub(crate) sound_name: Option&lt;String&gt;,
+    pub(crate) suppress_sound: bool,
 }</code></pre>
 <ul class="note">
   <li><code>parse</code> 同时接收 <code>Notify</code> 的 <code>app_icon</code> 参数；图标优先级为 <code>image-data &gt; image-path &gt; app_icon &gt; icon_data</code>。<code>HintSet.icon</code> 保存归一结果；无图标为 <code>None</code>。</li>
   <li><code>image-data</code> / <code>icon_data</code> 严格校验：<code>bits_per_sample</code> 必须为 8，<code>channels</code> 必须为 <code>has_alpha ? 4 : 3</code>；不满足则忽略该 hint 并回退。</li>
-  <li><code>hints</code> 只承载 hint 派生字段（urgency / icon / action_icons / transient / resident）；<code>actions</code> 与 <code>expire_timeout</code> 由 <code>Server::notify</code> 从 <code>NotifyParams</code> 读取。</li>
+  <li><code>hints</code> 只承载 hint 派生字段（urgency / icon / action_icons / transient / resident / sound-file / sound-name / suppress-sound）；<code>actions</code> 与 <code>expire_timeout</code> 由 <code>Server::notify</code> 从 <code>NotifyParams</code> 读取。</li>
 </ul>
 
 <h3 id="sec-4-types">4.8. src/types.rs <a href="#sec-1">↑ 文件树</a></h3>

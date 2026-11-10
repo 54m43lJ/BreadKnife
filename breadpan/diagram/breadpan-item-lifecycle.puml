@@ -1,31 +1,25 @@
 @startuml breadpan-item-lifecycle
 participant "Item 应用" as item
-participant "breadpan（watcher 模块）" as bp
-participant "事件通道" as ch
+participant breadpan
+participant 消费方
 
 == 报到 ==
-item -> bp: RegisterStatusNotifierItem(服务名 + 路径)
-bp -> bp: 登记最小集入册
-bp -> ch: Added(id)
+item -> breadpan: RegisterStatusNotifierItem(服务名 + 路径)
+breadpan -> breadpan: 内部处理（登记最小集）
+breadpan --> 消费方: Added(id)
 
-== 变更（窗口合并）==
-item -> bp: PropertiesChanged
-item -> bp: 官方 New* 信号
-note right of item
-  NewStatus / NewIcon / NewTitle / NewToolTip /
-  NewOverlayIcon / NewAttentionIcon（SNI §3.3）
-end note
-bp -> bp: 信号入待通告集合
-bp -> ch: Changed(id)
+== 变更 ==
+item -> breadpan: PropertiesChanged / 官方 New* 信号
+breadpan -> breadpan: 内部处理（合并通告）
+breadpan --> 消费方: Changed(id)
 
-== 同名换主（NameOwnerChanged：新属主非空）==
-item --> bp: NameOwnerChanged(服务名, 旧属主 → 新属主)
-bp -> bp: 属主唯一名重绑定；路由字段就地重探
-bp -> ch: OwnerChanged(id)
+== 同名换主 ==
+item -> breadpan: NameOwnerChanged(旧属主 → 新属主)
+breadpan -> breadpan: 内部处理（属主重绑定、路由重探）
+breadpan --> 消费方: OwnerChanged(id)
 
-== 死亡（NameOwnerChanged：new_owner 为空）==
-note over item: （Item 进程退出 / 崩溃）
-item --> bp: NameOwnerChanged(服务名, 属主 → "")
-bp -> bp: 簿记移除
-bp -> ch: Removed(id)
+== 死亡 ==
+item -> breadpan: NameOwnerChanged(属主 → "")
+breadpan -> breadpan: 内部处理（簿记移除）
+breadpan --> 消费方: Removed(id)
 @enduml

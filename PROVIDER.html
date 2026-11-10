@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadknife 依赖契约</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+
+<h1>breadknife 依赖契约</h1>
+<blockquote>
+  本文档定义 bread 消费的外部协议与系统服务：只记录实际消费的子集，完整权威定义见
+  <a href="reference/">reference/</a> 与各厂商文档。
+</blockquote>
+
+<h2 id="sec-1">1. 术语</h2>
+<table>
+  <tr><th>术语</th><th>定义</th></tr>
+  <tr><td>Hyprland IPC</td><td>Hyprland 合成器在 <code>$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/</code> 下提供的 Unix Socket 事件流；本项目的显示器 / 工作区 / 活动窗口 / 紧急状态来源</td></tr>
+  <tr><td>workspace 规则</td><td>Hyprland 配置中的静态工作区绑定，决定哪些工作区常驻显示在某显示器</td></tr>
+  <tr><td>调节后端</td><td>音量与亮度的外部命令行工具；缺席时对应功能降级</td></tr>
+</table>
+
+<h2 id="sec-2">2. 通用约定</h2>
+<ul>
+  <li><strong>只读监听</strong>：Hyprland IPC 只订阅事件，不向该 Socket 回复；查询类数据经 <code>hyprctl</code> 获取。</li>
+  <li><strong>缺失降级</strong>：DBus 服务或外部工具缺席时，对应入口隐藏或操作项灰置，不阻断其余功能。</li>
+  <li><strong>错误隔离</strong>：单个服务 / 工具失败只影响该能力域，不终止 bread。</li>
+</ul>
+
+<h2 id="sec-3">3. 边界流程</h2>
+<div class="diagram"><img src="diagram/breadknife-provider.svg" alt="外部依赖交互"></div>
+
+<h2 id="sec-4">4. 接口</h2>
+
+<h3 id="sec-4-1">4.1. Hyprland IPC</h3>
+<p>事件流路径：<code>$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock</code>；契约：只订阅不回复。</p>
+<table>
+  <tr><th>事件</th><th>契约</th></tr>
+  <tr><td><code>monitoradded</code> / <code>monitorremoved</code></td><td>创建 / 销毁对应显示器的任务栏</td></tr>
+  <tr><td><code>workspace&gt;&gt;X</code></td><td>更新工作区映射并推送工作区切片</td></tr>
+  <tr><td><code>activewindow</code></td><td>更新并推送活动窗口</td></tr>
+  <tr><td><code>urgent&gt;&gt;X</code></td><td>窗口请求关注 → 所在工作区紧急位置位（清除语义见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>）</td></tr>
+  <tr><td><code>configreloaded</code></td><td>全量重同步：重扫显示器清单、重建映射并对齐任务栏</td></tr>
+</table>
+<ul class="note">
+  <li>查询类数据（显示器、工作区、客户端、workspace 规则）经 <code>hyprctl -j</code> 获取；字段口径以 <a href="reference/hyprland-ipc.html">reference/hyprland-ipc.html</a>、<a href="reference/hyprland-hyprctl.html">hyprctl</a>、<a href="reference/hyprland-dispatcher.html">dispatcher</a> 为准。</li>
+  <li>工作区切换经 dispatcher 执行；目标语法与回退策略见 <a href="CODE.html#sec-4-hyprland">CODE §4.2</a>。</li>
+</ul>
+
+<h3 id="sec-4-2">4.2. 系统 DBus 服务</h3>
+<table>
+  <tr><th>服务</th><th>消费内容</th><th>缺席行为</th></tr>
+  <tr><td>UPower（system bus）</td><td>电池电量与充电状态</td><td>电池入口隐藏</td></tr>
+  <tr><td>NetworkManager（system bus）</td><td>网络连接状态</td><td>网络入口隐藏</td></tr>
+  <tr><td>BlueZ（system bus）</td><td>蓝牙开关与连接数</td><td>蓝牙项隐藏或灰置</td></tr>
+  <tr><td>MPRIS（session bus）</td><td>媒体播放状态与控制</td><td>媒体控制灰置</td></tr>
+</table>
+<ul class="note">
+  <li>仅消费上述状态与操作子集；完整接口定义见
+  <a href="https://upower.freedesktop.org/">UPower</a>、
+  <a href="https://networkmanager.dev/docs/api/latest/">NetworkManager</a>、
+  <a href="https://github.com/bluez/bluez">BlueZ</a> 与
+  <a href="https://specifications.freedesktop.org/mpris-spec/latest/">MPRIS</a>。</li>
+</ul>
+
+<h3 id="sec-4-3">4.3. 外部调节工具</h3>
+<table>
+  <tr><th>工具</th><th>用途</th><th>缺席行为</th></tr>
+  <tr><td><code>pamixer</code></td><td>音量读取与设置</td><td>音量滑块灰置</td></tr>
+  <tr><td><code>brightnessctl</code></td><td>内置面板亮度</td><td>亮度滑块灰置</td></tr>
+  <tr><td><code>ddcutil</code></td><td>外接显示器亮度（DDC/CI）</td><td>外接显示器亮度不可调</td></tr>
+</table>
+
+<h3 id="sec-4-4">4.4. 通知协议</h3>
+<p>通知守护消费 <code>org.freedesktop.Notifications</code>；协议子集、hints 归一与能力契约见
+<a href="bnote/PROVIDER.html">bnote/PROVIDER.html</a>。</p>
+
+<h3 id="sec-4-5">4.5. 托盘协议</h3>
+<p>托盘消费 StatusNotifierItem 与 DBusMenu；协议面与错误语义见
+<a href="breadpan/ARCHITECTURE.html#sec-4-4">breadpan/ARCHITECTURE.html §4.4</a>。</p>
+
+</main>
+</body>
+</html>

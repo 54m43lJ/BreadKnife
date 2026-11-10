@@ -5,7 +5,7 @@ participant "客户端" as client
 
 == 装配 ==
 host -> lib : Session::start(config)
-lib -> lib : 建连、注册服务
+lib -> lib : 内部处理（建连、注册服务）
 lib --> host : (SessionHandle, NoticeReceiver)
 == 事件（异步） ==
 client -> lib : Notify

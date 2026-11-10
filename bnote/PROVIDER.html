@@ -50,7 +50,7 @@ GetServerInformation()          -&gt; (name: String, vendor: String,
   <tr><th>方法</th><th>说明</th></tr>
   <tr><td><code>Notify</code></td><td>提交通知，应答其 id；<code>replaces_id</code> 归一见 §4.3</td></tr>
   <tr><td><code>CloseNotification</code></td><td>客户端请求关闭；关闭后按规范回发 <code>NotificationClosed</code></td></tr>
-  <tr><td><code>GetCapabilities</code></td><td>能力协商；清单由宿主装配时声明，支持状态见 <a href="#sec-4-5">§4.5</a></td></tr>
+  <tr><td><code>GetCapabilities</code></td><td>能力协商；清单由宿主装配时声明，能力契约见 <a href="#sec-4-5">§4.5</a></td></tr>
   <tr><td><code>GetServerInformation</code></td><td>服务器信息；四元组由宿主装配时声明</td></tr>
 </table>
 <table>
@@ -90,6 +90,9 @@ ActivationToken(id: u32, token: String)</code></pre>
   <tr><td>hint <code>urgency</code></td><td><code>Notice.urgency</code></td><td>byte 0/1/2 → Low / Normal / Critical；缺失、未知值或类型不符 → Normal</td></tr>
   <tr><td>hint <code>transient</code></td><td><code>Notice.transient</code></td><td>BOOLEAN；缺失、类型不符或 false → false</td></tr>
   <tr><td>hint <code>resident</code></td><td><code>Notice.resident</code></td><td>BOOLEAN；缺失、类型不符或 false → false</td></tr>
+  <tr><td>hint <code>sound-file</code></td><td><code>Notice.sound_file</code></td><td>STRING；缺失、类型不符或空串 → <code>None</code></td></tr>
+  <tr><td>hint <code>sound-name</code></td><td><code>Notice.sound_name</code></td><td>STRING；缺失、类型不符或空串 → <code>None</code></td></tr>
+  <tr><td>hint <code>suppress-sound</code></td><td><code>Notice.suppress_sound</code></td><td>BOOLEAN；缺失、类型不符或 false → false</td></tr>
   <tr><td><code>app_icon</code> 与 hints <code>image-data</code> / <code>image-path</code> / <code>icon_data</code></td><td><code>Notice.icon</code></td><td>按规范优先级取一个：<code>image-data</code> &gt; <code>image-path</code> &gt; <code>app_icon</code> &gt; <code>icon_data</code>；<code>app_icon</code> / <code>image-path</code> 非空 → <code>NoticeIcon::Name</code>（主题名或 <code>file://</code> URI）；<code>image-data</code> / <code>icon_data</code> 为 8-bit、通道数由 <code>has_alpha</code> 决定 → <code>NoticeIcon::Pixels</code>（RGB/RGBA，按 rowstride 压紧）；全空 → <code>NoticeIcon::None</code></td></tr>
   <tr><td><code>expire_timeout</code> 参数</td><td><code>Notice.expire_timeout_ms</code></td><td>-1（及其它负值）→ <code>None</code>（按宿主默认）；0 → <code>Some(0)</code>（常驻）；正数 → <code>Some(ms)</code>（<a href="reference/9.dbus-protocol.html#command-notify">规范 §Notify</a>）</td></tr>
 </table>
@@ -128,28 +131,26 @@ org.freedesktop.DBus.Error.Failed(message)</code></pre>
   <li>错误名沿用 D-Bus 标准错误；规范未定义通知专用错误，权威定义见 <a href="https://dbus.freedesktop.org/doc/dbus-specification.html#message-protocol-messages-error">D-Bus 规范 · Errors</a>。</li>
 </ul>
 
-<h3 id="sec-4-5">4.5. 标准能力清单与支持状态</h3>
-<p>能力由宿主在 <code>SessionConfig.capabilities</code> 中声明，bnote 原样交付 <code>GetCapabilities</code>；语义以 <a href="reference/9.dbus-protocol.html#command-get-capabilities">规范 §9.1.1</a> 为准。下表登记本项目宿主 bread 的目标支持状态。</p>
+<h3 id="sec-4-5">4.5. 标准能力清单</h3>
+<p>能力由宿主在 <code>SessionConfig.capabilities</code> 中声明，bnote 原样交付 <code>GetCapabilities</code>；语义以 <a href="reference/9.dbus-protocol.html#command-get-capabilities">规范 §9.1.1</a> 为准。下表定义 bread 宿主声明的能力契约。</p>
 <table>
-  <tr><th>能力</th><th>目标</th><th>当前</th><th>说明</th></tr>
-  <tr><td><code>action-icons</code></td><td>支持</td><td>待实现</td><td>通知带 <code>action-icons</code> hint 时，动作 key 作为图标名渲染，label 作为 tooltip / 无障碍文本；图标未命中回退文字。</td></tr>
-  <tr><td><code>actions</code></td><td>支持</td><td>待实现</td><td>渲染动作按钮并执行；默认文字，<code>action-icons</code> hint + 能力支持时用图标。左键触发 default / 唯一动作后关闭该条（<code>resident</code> 除外）。</td></tr>
-  <tr><td><code>body</code></td><td>支持</td><td>支持</td><td>显示正文。</td></tr>
-  <tr><td><code>body-hyperlinks</code></td><td>支持</td><td>待实现</td><td>正文中的超链接可点击。</td></tr>
-  <tr><td><code>body-images</code></td><td>支持</td><td>待实现</td><td>正文中的图片内联显示。</td></tr>
-  <tr><td><code>body-markup</code></td><td>支持</td><td>待实现</td><td>解析规范允许的标记文本；不支持的标记按纯文本降级。</td></tr>
-  <tr><td><code>icon-multi</code></td><td>支持</td><td>不声明</td><td>多帧图标动画；bnote 多帧扩展完成前以 <code>icon-static</code> 过渡。</td></tr>
-  <tr><td><code>icon-static</code></td><td>过渡</td><td>声明</td><td>当前单帧图标；多帧落地后与 <code>icon-multi</code> 互斥，不再声明。</td></tr>
-  <tr><td><code>persistence</code></td><td>支持</td><td>待实现</td><td>方案 A：内存保留至 daemon / 桌面会话结束；<code>transient</code> 绕过，<code>resident</code> 动作后保留；不落盘、不跨重启。</td></tr>
-  <tr><td><code>sound</code></td><td>支持</td><td>待实现</td><td>播放 <code>sound-file</code> / <code>sound-name</code>；<code>suppress-sound</code> 抑制；bnote hints 扩展完成后声明。</td></tr>
-  <tr><td><code>x-vendor-*</code></td><td>不支持</td><td>不声明</td><td>不声明厂商扩展能力。</td></tr>
+  <tr><th>能力</th><th>说明</th></tr>
+  <tr><td><code>action-icons</code></td><td>通知带 <code>action-icons</code> hint 时，动作 key 作为图标名渲染，label 作为 tooltip / 无障碍文本；图标未命中回退文字。</td></tr>
+  <tr><td><code>actions</code></td><td>渲染动作按钮并执行；默认文字，<code>action-icons</code> hint + 能力支持时用图标。左键触发 default / 唯一动作后关闭该条（<code>resident</code> 除外）。</td></tr>
+  <tr><td><code>body</code></td><td>显示正文。</td></tr>
+  <tr><td><code>body-hyperlinks</code></td><td>正文中的超链接可点击。</td></tr>
+  <tr><td><code>body-images</code></td><td>正文中的图片内联显示。</td></tr>
+  <tr><td><code>body-markup</code></td><td>解析规范允许的标记文本；不支持的标记按纯文本降级。</td></tr>
+  <tr><td><code>icon-static</code></td><td>单帧图标；与 <code>icon-multi</code> 互斥。</td></tr>
+  <tr><td><code>persistence</code></td><td>内存保留至 daemon / 桌面会话结束；<code>transient</code> 绕过，<code>resident</code> 动作后保留；不落盘、不跨重启。</td></tr>
+  <tr><td><code>sound</code></td><td>播放 <code>sound-file</code> / <code>sound-name</code>；<code>suppress-sound</code> 抑制。</td></tr>
 </table>
 <ul class="note">
   <li>bnote 只校验能力串格式与互斥，不解释能力语义；本表约束的是 bread 宿主的声明，不是库的强制白名单。</li>
-  <li><code>SessionConfig.capabilities</code> 只应返回本表“当前”已就绪的项；目标为“不支持”的项不得出现在 <code>GetCapabilities</code>，实现或 bnote 字段/hints 未就绪的项也不得提前返回。</li>
-  <li><code>icon-multi</code> / <code>icon-static</code> 互斥，不得同时声明：bnote 多帧扩展完成前返回 <code>icon-static</code>，完成后返回 <code>icon-multi</code>。</li>
+  <li><code>SessionConfig.capabilities</code> 返回本表声明的能力；未列出的能力（含 <code>icon-multi</code>）与 <code>x-vendor-*</code> 扩展不声明。</li>
+  <li><code>icon-static</code> / <code>icon-multi</code> 互斥，不得同时声明；本契约声明 <code>icon-static</code>。</li>
   <li><code>action-icons</code> 依赖 bnote 暴露同名 hint 并完成解析。</li>
-  <li><code>persistence</code> 的保留语义与 <code>transient</code> / <code>resident</code> 见 <a href="USER.html#sec-4-3">USER §4.3</a>；bnote 需先把这两个 hint 暴露给宿主。</li>
+  <li><code>persistence</code> 的保留语义与 <code>transient</code> / <code>resident</code> 见 <a href="USER.html#sec-4-3">USER §4.3</a>。</li>
   <li>能力名称、语义与互斥规则以 <a href="reference/9.dbus-protocol.html#command-get-capabilities">规范 §9.1.1</a> 为准。</li>
 </ul>
 

@@ -1,14 +1,10 @@
 @startuml breadknife-monitor-hotplug
 participant Hyprland
-participant "bread daemon" as daemon
-participant "窗口进程" as win
+participant "breadknife（bread）" as bread
 
-Hyprland -> daemon: monitoradded
-daemon -> daemon: 更新映射
-daemon -> win: spawn 窗口进程（新显示器）
-win --> daemon: 就绪（已取快照）
-Hyprland -> daemon: monitorremoved
-daemon -> win: 终止窗口进程
-daemon -> daemon: 移除映射条目
-note over daemon: 窗口崩溃 → 延时重试 spawn（有次数上限）
+Hyprland -> bread: monitoradded
+bread -> bread: 内部处理（更新映射、创建窗口进程）
+Hyprland -> bread: monitorremoved
+bread -> bread: 内部处理（终止窗口进程、移除映射）
+note over bread: 窗口崩溃 → 延时重试创建（有次数上限）
 @enduml
