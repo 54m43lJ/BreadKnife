@@ -68,6 +68,7 @@ fn sample_snapshot() -> WindowSnapshot {
             urgent: true,
             active: false,
             has_windows: true,
+            windows: Vec::new(),
         }],
         active: ActiveWindow { class: "firefox".into(), title: "Test".into() },
         tray: vec![TrayItemView {

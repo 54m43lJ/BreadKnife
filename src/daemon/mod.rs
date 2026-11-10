@@ -17,6 +17,7 @@ use breadpan::{TrayEvent, TrayHandle};
 
 use crate::shared::model::{
     NotificationRecord, StateDelta, SystemState, TrayItemView, WindowSnapshot, WorkspaceState,
+    WorkspaceWindow,
 };
 use crate::shared::protocol::{Frame, Push, Request, Response};
 
@@ -244,6 +245,9 @@ impl Daemon {
                 self.active_addr = hyprland::normalize_addr(&addr);
             }
             WindowTitle { addr, title } => {
+                if !addr.is_empty() {
+                    self.update_workspace_window_title(&addr, &title);
+                }
                 if !addr.is_empty() && hyprland::normalize_addr(&addr) == self.active_addr {
                     self.active_window.title = title;
                     self.broadcast(Push::State(StateDelta {
@@ -310,12 +314,32 @@ impl Daemon {
     }
 
     /// 工作区切片重建：显示器 × 工作区清单（现存 ∪ 规则声明）。
+    /// 标题事件只改对应条目，避免为非活跃窗口标题触发 clients 全量查询。
+    fn update_workspace_window_title(&mut self, addr: &str, title: &str) {
+        let addr = hyprland::normalize_addr(addr);
+        let mut changed = false;
+        for slice in self.workspaces.values_mut() {
+            for workspace in slice {
+                for window in &mut workspace.windows {
+                    if window.title != title && hyprland::normalize_addr(&window.address) == addr {
+                        window.title = title.to_owned();
+                        changed = true;
+                    }
+                }
+            }
+        }
+        if changed {
+            self.push_workspace_slices();
+        }
+    }
+
     fn rebuild_workspace_slices(&mut self) {
+        let clients = hyprland::clients();
         let mut slices: HashMap<String, Vec<WorkspaceState>> = HashMap::new();
         for m in &self.monitors {
             slices.insert(
                 m.name.clone(),
-                workspace_slice(m, &self.ws_all, &self.ws_rules, &self.urgent),
+                workspace_slice(m, &self.ws_all, &self.ws_rules, &self.urgent, &clients),
             );
         }
         self.workspaces = slices;
@@ -725,7 +749,26 @@ fn workspace_slice(
     ws_all: &[hyprland::WorkspaceInfo],
     rules: &[hyprland::WorkspaceRuleInfo],
     urgent: &HashSet<i64>,
+    clients: &[hyprland::ClientInfo],
 ) -> Vec<WorkspaceState> {
+    let mut windows_by_ws: HashMap<i64, Vec<(i32, WorkspaceWindow)>> = HashMap::new();
+    for client in clients {
+        windows_by_ws
+            .entry(client.workspace.id)
+            .or_default()
+            .push((
+                client.focus_history_id,
+                WorkspaceWindow {
+                    address: hyprland::normalize_addr(&client.address),
+                    title: client.title.clone(),
+                    class: client.class.clone(),
+                },
+            ));
+    }
+    for windows in windows_by_ws.values_mut() {
+        windows.sort_by_key(|(focus_history_id, _)| *focus_history_id);
+    }
+
     let mut slice: Vec<WorkspaceState> = ws_all
         .iter()
         .filter(|ws| ws.monitor == monitor.name)
@@ -735,6 +778,10 @@ fn workspace_slice(
             urgent: urgent.contains(&ws.id),
             active: monitor.active_ws.as_ref().is_some_and(|a| a.id == ws.id),
             has_windows: ws.windows > 0,
+            windows: windows_by_ws
+                .remove(&ws.id)
+                .map(|windows| windows.into_iter().map(|(_, window)| window).collect())
+                .unwrap_or_default(),
         })
         .collect();
 
@@ -762,6 +809,7 @@ fn workspace_slice(
             urgent: false,
             active: false,
             has_windows: false,
+            windows: Vec::new(),
         });
     }
 
@@ -772,7 +820,7 @@ fn workspace_slice(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon::hyprland::{MonitorInfo, WorkspaceInfo, WorkspaceRef};
+    use crate::daemon::hyprland::{ClientInfo, MonitorInfo, WorkspaceInfo, WorkspaceRef};
 
     fn mon(name: &str, active: Option<i64>) -> MonitorInfo {
         MonitorInfo {
@@ -837,7 +885,7 @@ mod tests {
             rule("special:magic", "DP-2", true), // 动态选择器：跳过
         ];
         let urgent: HashSet<i64> = [1].into_iter().collect();
-        let slice = workspace_slice(&m, &ws_all, &rules, &urgent);
+        let slice = workspace_slice(&m, &ws_all, &rules, &urgent, &[]);
 
         let names: Vec<&str> = slice.iter().map(|s| s.name.as_str()).collect();
         // 命名工作区（合成负 id）排最前，其后按 id：1、2、5
@@ -856,6 +904,61 @@ mod tests {
         assert!(!five.active && !five.has_windows && !five.urgent);
         let web = &slice[0];
         assert!(!web.active && !web.has_windows && !web.urgent);
+    }
+
+    #[test]
+    fn workspace_slice_groups_clients_and_sorts_by_focus_history() {
+        let m = mon("DP-2", Some(1));
+        let ws_all = vec![
+            WorkspaceInfo {
+                id: 1,
+                name: "1".into(),
+                monitor: "DP-2".into(),
+                windows: 2,
+            },
+            WorkspaceInfo {
+                id: 2,
+                name: "2".into(),
+                monitor: "DP-2".into(),
+                windows: 1,
+            },
+        ];
+        let clients = vec![
+            ClientInfo {
+                address: "0xaaa".into(),
+                title: "older".into(),
+                class: "app-a".into(),
+                focus_history_id: 3,
+                workspace: WorkspaceRef { id: 1 },
+            },
+            ClientInfo {
+                address: "0xbbb".into(),
+                title: "newest".into(),
+                class: "app-b".into(),
+                focus_history_id: 0,
+                workspace: WorkspaceRef { id: 1 },
+            },
+            ClientInfo {
+                address: "0xccc".into(),
+                title: "other".into(),
+                class: "app-c".into(),
+                focus_history_id: 1,
+                workspace: WorkspaceRef { id: 2 },
+            },
+        ];
+
+        let slice = workspace_slice(&m, &ws_all, &[], &HashSet::new(), &clients);
+        assert_eq!(slice[0].windows.len(), 2);
+        assert_eq!(
+            slice[0]
+                .windows
+                .iter()
+                .map(|window| window.title.as_str())
+                .collect::<Vec<_>>(),
+            ["newest", "older"]
+        );
+        assert_eq!(slice[1].windows.len(), 1);
+        assert_eq!(slice[1].windows[0].title, "other");
     }
 
     fn rule(selector: &str, monitor: &str, enabled: bool) -> hyprland::WorkspaceRuleInfo {

@@ -6,12 +6,21 @@ use serde::{Deserialize, Serialize};
 // ── 工作区（形态见 README「界面交互」；色彩映射见 ARCHITECTURE §3.10）──
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkspaceWindow {
+    pub address: String,
+    pub title: String,
+    pub class: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkspaceState {
     pub id: i64,
     pub name: String,
     pub urgent: bool,
     pub active: bool,
     pub has_windows: bool,
+    /// 窗口列表按 Hyprland 焦点历史排序（最近聚焦在前）。
+    pub windows: Vec<WorkspaceWindow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

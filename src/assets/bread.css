@@ -76,6 +76,28 @@ button:hover {
     background-color: @purple;
 }
 
+/* 工作区悬停浮层：窗口标题列表 */
+tooltip {
+    background-color: @surface;
+    color: @fg;
+    border: 1px solid @gold;
+    border-radius: 8px;
+}
+.ws-tip { padding: 6px 8px; }
+.ws-tip-title {
+    color: @gold;
+    font-weight: bold;
+}
+.ws-tip-row {
+    color: @fg;
+    font-size: 12px;
+}
+.ws-tip-empty,
+.ws-tip-more {
+    color: @muted;
+    font-size: 11px;
+}
+
 /* ── 窗口信息 ── */
 .title-box {
     padding: 2px 8px;

@@ -9,7 +9,7 @@ use std::rc::Rc;
 use gtk::prelude::*;
 
 use crate::bar::ipc::IpcClient;
-use crate::shared::model::WorkspaceState;
+use crate::shared::model::{WorkspaceState, WorkspaceWindow};
 use crate::shared::protocol::Request;
 
 pub struct WorkspaceWidget {
@@ -91,9 +91,16 @@ impl WorkspaceWidget {
         overlay.add_overlay(&indicator);
         button.set_child(Some(&overlay));
 
+        let windows = ws.windows.clone();
+        let ws_name = ws.name.clone();
+        button.set_has_tooltip(true);
+        button.connect_query_tooltip(move |_, _, _, _, tooltip| {
+            tooltip.set_custom(Some(&build_ws_tooltip(&ws_name, &windows)));
+            true
+        });
+
         let ipc = self.ipc.clone();
         let target = ws.name.clone();
-        button.set_tooltip_text(Some(&format!("workspace {}", ws.name)));
         button.connect_clicked(move |_| {
             let ipc = ipc.clone();
             let target = target.clone();
@@ -106,4 +113,47 @@ impl WorkspaceWidget {
 
         button
     }
+}
+
+/// 工作区悬停浮层：首期只列窗口标题；超过 10 条折叠为计数。
+fn build_ws_tooltip(name: &str, windows: &[WorkspaceWindow]) -> gtk::Box {
+    let root = gtk::Box::new(gtk::Orientation::Vertical, 3);
+    root.add_css_class("ws-tip");
+    root.set_size_request(220, -1);
+
+    let title = gtk::Label::new(Some(&format!("工作区 {name}")));
+    title.set_xalign(0.0);
+    title.add_css_class("ws-tip-title");
+    root.append(&title);
+
+    if windows.is_empty() {
+        let empty = gtk::Label::new(Some("无窗口"));
+        empty.set_xalign(0.0);
+        empty.add_css_class("ws-tip-empty");
+        root.append(&empty);
+        return root;
+    }
+
+    for window in windows.iter().take(10) {
+        let text = if window.title.trim().is_empty() {
+            "未命名窗口"
+        } else {
+            window.title.trim()
+        };
+        let row = gtk::Label::new(Some(text));
+        row.set_xalign(0.0);
+        row.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        row.set_max_width_chars(36);
+        row.add_css_class("ws-tip-row");
+        root.append(&row);
+    }
+
+    if windows.len() > 10 {
+        let more = gtk::Label::new(Some(&format!("… 还有 {} 个窗口", windows.len() - 10)));
+        more.set_xalign(0.0);
+        more.add_css_class("ws-tip-more");
+        root.append(&more);
+    }
+
+    root
 }

@@ -52,6 +52,12 @@ fn default_true() -> bool {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ClientInfo {
     pub address: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub class: String,
+    #[serde(default, rename = "focusHistoryID")]
+    pub focus_history_id: i32,
     pub workspace: WorkspaceRef,
 }
 
