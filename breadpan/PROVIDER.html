@@ -56,12 +56,15 @@
 <table>
   <tr><th>DBus 成员</th><th>类型</th><th>语义</th></tr>
   <tr><td><code>RegisterStatusNotifierItem</code></td><td>方法</td><td>Item 报到：登记服务名 + 对象路径；同名重复报到幂等；同一对象以不同形态重复报到并入同一 id（升级机制见 <a href="USER.html#sec-4-2">USER §4.2</a> NameChanged）</td></tr>
-  <tr><td><code>RegisteredStatusNotifierItems</code></td><td>属性</td><td>读取：当前在册 Item 清单</td></tr>
+  <tr><td><code>RegisteredStatusNotifierItems</code></td><td>属性</td><td>读取：当前在册 Item 清单，按首见序输出（<a href="USER.html#sec-2">USER §2</a>）</td></tr>
   <tr><td><code>RegisterStatusNotifierHost</code></td><td>方法</td><td>兼容桩：受理即忘——自包含设计不对进程外 Host 负责</td></tr>
   <tr><td><code>IsStatusNotifierHostRegistered</code></td><td>属性</td><td>兼容桩：恒真——逻辑 Host 进程内在位；个别 Item 探测此接口后才报到</td></tr>
   <tr><td><code>StatusNotifierItemRegistered</code></td><td>信号</td><td>广播：Item 报到（协议面保真，供总线观察方）</td></tr>
   <tr><td><code>StatusNotifierItemUnregistered</code></td><td>信号</td><td>广播：Item 离开（死亡清理）</td></tr>
 </table>
+<ul class="note">
+  <li><code>RegisteredStatusNotifierItems</code> 的顺序是本库附加契约：按首见序保持稳定；SNI 规范未规定该属性顺序。</li>
+</ul>
 <h4>错误应答</h4>
 <pre><code>org.freedesktop.DBus.Error.InvalidArgs(message)
 org.freedesktop.DBus.Error.Failed(message)</code></pre>

@@ -96,6 +96,8 @@ pub const MINIMIZED_WORKSPACE: &amp;str;            // 推荐值 "special:minimi
 pub struct Daemon {
     pub(crate) rx: Receiver&lt;DaemonEvent&gt;,
     pub(crate) tray: Option&lt;TrayHandle&gt;,
+    pub(crate) tray_registry: HashMap&lt;String, TrayItemView&gt;,
+    pub(crate) tray_order: Vec&lt;String&gt;,               // 图标显示序（首见序）
     pub(crate) notification: Option&lt;NotificationService&gt;,
     pub(crate) notifications: VecDeque&lt;NotificationRecord&gt;,
     pub(crate) minimized: Vec&lt;MinimizedWindow&gt;,
@@ -230,6 +232,7 @@ pub fn menu_activate(handle: &amp;TrayHandle, item: &amp;str, entry: i32)
   <li>封装边界：托盘域总线互动全部由 breadpan 封装于 daemon；窗口不接触 SNI / DBusMenu 协议细节、不持有托盘 DBus 连接，只接收数据并渲染。</li>
   <li>执行位置：全部托盘调用（交互、菜单读取）在 daemon 内执行，breadpan 的同步阻塞不冻结窗口。</li>
   <li>驱动源：breadpan 事件（快照、生命周期、属性、菜单变更、回执）是托盘 UI 更新的唯一驱动源，经 daemon 转换为窗口推送。</li>
+  <li>显示序沿用 breadpan 首见序：<code>TrayEvent::Snapshot</code> 按原序建立 <code>tray_order</code>，<code>TrayEvent::Added</code> 立即追加右端，<code>NameChanged</code> 原位换键并广播 <code>TrayUpdate::Renamed</code>（不补 Removed / Added），<code>Removed</code> 删除；<code>TrayView</code> 只更新内容、不改变顺序；daemon 不按 id 重排。</li>
 </ul>
 
 <h3 id="sec-4-system">4.5. daemon/system.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -524,6 +527,9 @@ impl TrayWidget {
     pub fn on_menu_read_done(&amp;self, item: &amp;str, result: Result&lt;Response, String&gt;);
     pub fn on_hover_menu_done(&amp;self, item: &amp;str, token: u64, result: Result&lt;Response, String&gt;);
 }</code></pre>
+<ul class="note">
+  <li>图标按传入顺序横向排列：<code>Added</code> 追加右端，<code>Changed</code> 原位更新图标 / 提示 / 状态、不改变位置，<code>Renamed</code> 原位换键，<code>Removed</code> 删除后其余图标不移动；属性变化不得以先删后加实现。</li>
+</ul>
 
 <h3 id="sec-4-center">4.17. bar/modules/center.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct CenterWidget {
@@ -658,6 +664,7 @@ pub enum TrayUpdate {
     Added(TrayItemView),
     Removed(String),
     Changed(TrayItemView),
+    Renamed { old: String, new: String },   // 同一 Item id 重键：原位换键，不增删
 }
 
 pub struct MenuSnapshot { pub parent_id: i32, pub revision: u32, pub items: Vec&lt;MenuItem&gt; }
@@ -753,7 +760,8 @@ pub struct StateDelta {
 <ul class="note">
   <li><code>WorkspaceState</code>：本屏工作区清单＝现存工作区 ∪ 绑定到本屏的静态 workspace 规则（有规则无窗口＝非活跃工作区）；启动/插拔/配置重载时全量重建（按名去重 + id 排序）。<code>windows</code> 为该工作区窗口标题快照，按 <code>focusHistoryID</code> 升序（最近聚焦在前）。</li>
   <li><code>WorkspaceWindow</code>：<code>address</code> 为归一化窗口地址，<code>title</code> / <code>class</code> 供悬停列表与后续截图预览使用；列表随打开、关闭、移动、标题变化事件刷新。</li>
-  <li><code>WindowSnapshot</code>：单窗口所需状态——本屏工作区、活动窗口、托盘、通知、通知服务状态、最小化窗口、CSS 路径；首连全量。</li>
+  <li><code>WindowSnapshot</code>：单窗口所需状态——本屏工作区、活动窗口、托盘、通知、通知服务状态、最小化窗口、CSS 路径；首连全量；<code>tray</code> 按首见序排列（见 <a href="breadpan/USER.html#sec-2">breadpan USER §2</a>）。</li>
+  <li><code>TrayUpdate</code>：<code>Added</code> 追加右端、<code>Changed</code> 原位更新、<code>Renamed</code> 原位换键、<code>Removed</code> 删除；窗口按该语义维护首见序。</li>
   <li><code>MinimizedWindow</code>：<code>address</code> 为归一化窗口地址，<code>class</code> / <code>title</code> 用于图标与标题，<code>monitor</code> 为窗口归属显示器；daemon 维护列表顺序，新条目追加右侧，窗口标题变化原地更新。</li>
   <li><code>StateDelta.minimized</code> 为完整列表快照；列表变化时广播全部窗口，各窗口按 <code>monitor</code> 过滤。</li>
   <li><code>NotificationRecord</code>：由 <code>bnote::Notice</code> 投影，保留 id、应用名、图标三态、标题、正文、动作、<code>action_icons</code>、紧急度、请求超时、<code>transient</code> / <code>resident</code>、<code>sound_file</code> / <code>sound_name</code> / <code>suppress_sound</code>；窗口只消费共享模型，不接触 bnote 类型。</li>

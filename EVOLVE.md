@@ -213,3 +213,31 @@
 | `BUILD.html` | 全部 | 不动 | 无构建命令或用户配置变化 |
 | `bnote/*` | — | 不动 | 工作区窗口列表属于宿主 UI，不触及通知协议库 |
 | `TODO.md` | 第八项「workspace悬停不再弹tooltip…」 | 改 | 追加 `[已解决]` 标记 |
+
+## breadpan 托盘排序稳定（TODO 第 9 项）
+
+- 需求：breadpan 现有的列表排序按 id 升序，像 fcitx 这类频繁变化或重新报到的 Item 会因 id 变化、条目增删而在列表中来回移动；需要一种更稳定的排序逻辑，使已有条目的位置不受其它条目变化影响。
+- 实现思路：
+  - 列表输出改为「首见序」：Item 首次入册时分配单调递增序号；`Refreshed` / `Renamed` 保留序号，`Removed` 后重新报到按新条目追加到末尾。
+  - 启动快照的存量 Item 先按服务名升序确定首见序，运行期新报到按到达顺序递增；不再依赖 HashMap 迭代序或并发取数完成序。
+  - `Snapshot.items` / `items()` / `RegisteredStatusNotifierItems` 统一按首见序输出；同一 Item 的 id 重键只换 id、不换位置。
+  - daemon 维护 `tray_order` 并沿用 breadpan 顺序：`TrayEvent::Snapshot` 按原序建立，`TrayEvent::Added` 立即追加右端，`NameChanged` 原位换键并广播 `TrayUpdate::Renamed`，`Removed` 删除；`TrayView` 只更新内容、不改变顺序，不按 id 重排。
+  - 窗口托盘模块 `apply(Changed)` 原位更新图标 / 提示 / 状态，`Renamed` 原位换键，不得先删后加，避免属性变化把图标推到末尾。
+  - 共享 IPC 的 `TrayUpdate` 增加 `Renamed` 变体；不新增 DBus / 外部协议消息、外部依赖或构建步骤。排序是 breadpan 与宿主 UI 的共享约定，统一由 breadpan USER §2 与根 USER §5.2.3 定义。
+- 文档操作：
+
+| 文档 | 章节 | 操作 | 内容 |
+|------|------|------|------|
+| `breadpan/USER.html` | 1. 术语、2. 通用约定 | 改 | 新增「首见序」术语；列表输出由按 id 排序改为按首见序，明确已有条目不动、新条目追加、id 重键保位 |
+| `breadpan/CORE.html` | 4.4 tracker.rs | 改 | `ItemEntry` 增加 `seq`，`ItemTracker` 增加 `next_seq`、`ordered_ids`；`all()` 按首见序；说明序号分配与保留规则 |
+| `breadpan/CORE.html` | 4.6.4 iface.rs、5.1.2 反向发现、5.1.3 快照投递 | 改 | 协议属性按首见序输出；启动候选按服务名升序固定首见序；删除快照中的按 id 重排步骤并改写注记 |
+| `breadpan/PROVIDER.html` | 4.1 协议面 | 改 | `RegisteredStatusNotifierItems` 标注首见序，并注明 SNI 规范未规定该属性顺序 |
+| `CORE.html` | 4.2 daemon/mod.rs、4.4 daemon/tray.rs | 改 | `Daemon` 增加 `tray_registry` / `tray_order`；daemon 保留 breadpan 顺序，不按 id 重排 |
+| `CORE.html` | 4.16 bar/modules/tray.rs、4.19 shared/model.rs | 改 | `TrayUpdate` 增加 `Renamed`；托盘图标 Added 追加、Changed 原位更新、Renamed 原位换键、Removed 删除；`WindowSnapshot.tray` 按首见序 |
+| `USER.html` | 5.2.3 托盘与托盘菜单 | 改 | 增加图标顺序契约：首见序、已有图标不因其它项变化移动、新图标追加右侧、id 重键保位 |
+| `ABOUT.html` | 用户交互 · 界面交互（系统托盘行） | 不动 | 高层行为不变；顺序细节归 USER §5.2.3 |
+| `PROVIDER.html` | 全部 | 不动 | 排序是 breadpan 内部契约，不改变 Hyprland / 通知等外部边界 |
+| `BUILD.html` | 全部 | 不动 | 无新增依赖、命令或用户配置 |
+| `bnote/*` | — | 不动 | 通知协议库不涉及托盘排序 |
+| `style.css` | — | 不动 | 不改变任何视觉数值或样式类 |
+| `TODO.md` | 第九项「breadpan 现在的排序逻辑…」 | 改 | 追加 `[已解决]` 标记 |

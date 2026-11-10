@@ -27,6 +27,7 @@
   <tr><td>唯一名</td><td>unique connection name：总线为每个连接分配的唯一标识符，以 <code>:</code> 开头（<code>:1.22</code> 形态），连接存续期内不变、不可申请</td></tr>
   <tr><td>对象路径</td><td>object path：以 <code>/</code> 分隔的寻址字符串（如 <code>/StatusNotifierItem</code>），方法调用与信号来源的定位地址</td></tr>
   <tr><td>服务名</td><td>Item 报到时登记的名字，TrayItemId 的取值：知名名或唯一名皆可（注册参数三形态就地解析，<a href="CORE.html#sec-5-3-1">CORE §5.3.1</a>）</td></tr>
+  <tr><td>首见序</td><td>Item 首次进入登记簿记的先后顺序：启动快照的存量 Item 按服务名升序确定，此后新报到追加到末尾；同一 Item 的 id 重键（<a href="#sec-4-2">§4.2</a> NameChanged）保持原位，移除后重新报到按新条目重新计算</td></tr>
   <tr><td>会话总线</td><td>DBus session bus，本库全部通信发生在此（<a href="https://dbus.freedesktop.org/doc/dbus-specification.html">D-Bus 规范</a>）</td></tr>
   <tr><td>GTK 主线程</td><td>GTK/GLib 主循环（MainContext）所在线程；一切 UI 操作与事件消费闭包都在此执行——消费方经 <code>glib::spawn_future_local</code> 把事件流消费 future 挂到本上下文</td></tr>
 </table>
@@ -40,7 +41,7 @@
 
 <h2 id="sec-2">2. 通用约定</h2>
 <ul>
-  <li><strong>列表输出按 id 排序</strong>：在册条目的一切列表形态输出——快照 <code>Snapshot.items</code>、<code>items()</code>、协议面属性 <code>RegisteredStatusNotifierItems</code>——一律按 id 升序排列；顺序由内容唯一确定，与发现序 / 内部迭代序 / 并发完成序无关。</li>
+  <li><strong>列表输出按首见序</strong>：在册条目的一切列表形态输出——快照 <code>Snapshot.items</code>、<code>items()</code>、协议面属性 <code>RegisteredStatusNotifierItems</code>——一律按首见序排列。已有条目在其它条目加入、移除或属性变化时保持相对位置不动；同一 Item 的 id 重键不改变位置；新条目追加到末尾。启动快照的存量 Item 先按服务名升序确定首见序，运行期报到按到达顺序递增；顺序与内部迭代序 / 并发完成序无关。</li>
   <li><strong>数据即取即最新</strong>：查询返回总线当前值；事件只报事实、不携带数据，变化后由消费方查询。</li>
   <li><strong>同步封装</strong>：公开面全同步；阻塞是契约的一部分，异步实现细节见 <a href="CORE.html">CORE.html</a>。</li>
 </ul>

@@ -143,10 +143,14 @@ impl EventQueue {
     pub alive: bool,       // 最近一次存活探测结论
     pub menu: Option&lt;String&gt;, // dbusmenu 对象路径；None = 无 DBusMenu
     pub menu_only: bool,   // 整项即菜单（左键路由依据）
+    pub seq: u64,          // 首见序：首次入册分配；Refreshed / Renamed 保持
 }
 /// upsert 结果：新条目 / 原地刷新 / id 升级（§5.3.1）
 pub(crate) enum Upsert { Inserted, Refreshed, Renamed { old: TrayItemId, new: TrayItemId } }
-pub(crate) struct ItemTracker { items: HashMap&lt;TrayItemId, ItemEntry&gt; }
+pub(crate) struct ItemTracker {
+    items: HashMap&lt;TrayItemId, ItemEntry&gt;,
+    next_seq: u64,         // 下一个首见序号；仅新条目递增
+}
 impl ItemTracker {
     /// 报到入册：双注册并入的落点（§5.3.1）
     pub(crate) fn upsert(&amp;mut self, entry: ItemEntry) -&gt; Upsert;
@@ -165,11 +169,16 @@ impl ItemTracker {
     pub(crate) fn is_alive(&amp;self, id: &amp;TrayItemId) -&gt; Option&lt;bool&gt;;
     /// 覆盖存活结论（周期探测回写）
     pub(crate) fn set_alive(&amp;mut self, service: &amp;str, alive: bool);
-    /// 全量条目快照（快照 / 心跳的并发遍历源）
+    /// 全量条目快照（按首见序；快照 / 心跳的并发遍历源）
     pub(crate) fn all(&amp;self) -&gt; Vec&lt;ItemEntry&gt;;
+    /// 在册 id 清单（按首见序；协议属性输出）
+    pub(crate) fn ordered_ids(&amp;self) -&gt; Vec&lt;TrayItemId&gt;;
     /// 清空簿记（Displaced / 停机路径）
     pub(crate) fn clear(&amp;mut self) -&gt; Vec&lt;ItemEntry&gt;;
 }</code></pre>
+<ul class="note">
+  <li><code>seq</code> 在首次 <code>upsert</code> 插入时由 <code>next_seq</code> 分配；<code>Refreshed</code> 与 <code>Renamed</code> 保留原值，<code>unregister</code> 后重新报到按新条目追加。列表输出统一按 <code>seq</code> 升序（USER §2）。</li>
+</ul>
 
 <h3 id="sec-4-props">4.5. props.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>/// 现场读取单个 Item → TrayItem（items()/item()/Snapshot 的统一取数路径）
@@ -197,7 +206,7 @@ pub(crate) fn split_service_arg(arg: &amp;str, sender: Option&lt;&amp;str&gt;) -
 /// 报到受理（§5.3.1；announce=false 供反向发现静默入册）
 pub(crate) async fn register_item(bus: &amp;BusCenter, service_arg: &amp;str,
                                   sender: Option&lt;&amp;str&gt;, announce: bool) -&gt; Result&lt;bool, TrayError&gt;;
-/// 启动期反向发现（§5.1.2）
+/// 启动期反向发现（候选按服务名升序入册，固定首见序；§5.1.2）
 async fn discover_existing(bus: &amp;BusCenter) -&gt; Vec&lt;String&gt;;
 /// 存量 Item 双级探测（§5.1.2）
 async fn probe_item_iface(bus: &amp;BusCenter, name: &amp;str) -&gt; Result&lt;bool, TrayError&gt;;
@@ -307,7 +316,7 @@ impl WatcherIface {
         service: &amp;str,
     );   // #[zbus(header)] 取消息头 sender → dbus::register_item（§5.3.1）
     #[zbus(property)]
-    fn registered_status_notifier_items(&amp;self) -&gt; Vec&lt;String&gt;;  // → 在册清单（排序见 <a href="USER.html#sec-2">USER §2</a>）
+    fn registered_status_notifier_items(&amp;self) -&gt; Vec&lt;String&gt;;  // → 在册清单（首见序，<a href="USER.html#sec-2">USER §2</a>）
     fn register_status_notifier_host(&amp;self, service: &amp;str);     // 兼容桩：受理即忘
     #[zbus(property)]
     fn is_status_notifier_host_registered(&amp;self) -&gt; bool;       // 兼容桩：恒真
@@ -423,6 +432,7 @@ fn repl();   // 查询与交互命令循环</code></pre>
 <h4 id="sec-5-1-2">5.1.2. 反向发现（存量 Item 双级探测）</h4>
 <pre><code>内部: dbus::discover_existing(bus)
 ├── bus.call(ListNames)
+├── candidates.sort()   // 固定启动首见序：存量 Item 按服务名升序入册
 ├── probe_item_iface(bus, name)   // 逐候选
 │    ├── bus.call(Introspect(name, /StatusNotifierItem))
 │    └── 失败或无接口名 → props::read_all(name, /StatusNotifierItem)
@@ -435,17 +445,16 @@ fn repl();   // 查询与交互命令循环</code></pre>
 
 <h4 id="sec-5-1-3">5.1.3. 快照投递与栅栏（queue_snapshot）</h4>
 <pre><code>内部: dbus::queue_snapshot(bus)
-├── ItemTracker::all()
+├── ItemTracker::all()   // 首见序
 ├── bus.rt.spawn(...)   // 逐条并发
 │    └── props::fetch_item(bus, entry)
-├── items.sort_by_key(id)
 ├── events.send(TrayEvent::Snapshot{items})
 ├── bus.mark_snapshot_done()
 └── bus.take_deferred_removed()
      └── events.send(TrayEvent::Removed(id))   // 逐条</code></pre>
 <ul class="note">
   <li><code>fetch_item</code> = <code>read_all</code> + <code>tray_item_from_props</code>；单个读取失败只记过程叙述，该 Item 不入快照。</li>
-  <li>列表输出按 id 排序（见 <a href="USER.html#sec-2">USER §2</a>）。</li>
+  <li>列表输出按首见序（见 <a href="USER.html#sec-2">USER §2</a>）；存量 Item 的入册顺序在发现阶段已按服务名升序固定，快照不再重排。</li>
   <li><code>events.send</code> 与 <code>bus.mark_snapshot_done</code> 之间无 await：单线程运行时内不可分割，不存在「快照已入队、栅栏未置位」中间态。</li>
   <li>延迟移除只补投快照内 id；快照外按从未出现丢弃。</li>
 </ul>
