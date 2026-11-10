@@ -24,6 +24,7 @@
   <tr><td>托盘协议栈</td><td><code>breadpan</code> 随仓库落位（路径依赖，纯 Rust，无系统级构建依赖）</td></tr>
   <tr><td>通知协议库</td><td><code>bnote</code> 随仓库落位（路径依赖；zbus / tokio 由库内部持有，宿主不装配总线运行时）</td></tr>
   <tr><td>通知事件消费</td><td>宿主侧以 <code>futures::executor::block_on</code> 驱动 <code>NoticeReceiver::recv</code> 的异步事件流，不引入额外运行时</td></tr>
+  <tr><td>Python 3</td><td><code>scripts/hypr-smoke.sh</code> 的 socket2 事件采样与 <code>scripts/resource-smoke.py</code> 的资源/能耗采样</td></tr>
   <tr><td>可选系统工具</td><td><code>pamixer</code>（音量）、<code>brightnessctl</code>（亮度：内置面板）、<code>ddcutil</code>（亮度：外接显示器，DDC/CI）、<code>canberra-gtk-play</code>（通知提示音）、<code>xdg-open</code>（通知正文链接）——缺席时对应功能降级，不阻断构建。媒体（MPRIS）/ 网络（NetworkManager）/ 蓝牙（BlueZ）经 DBus 消费，无需额外工具</td></tr>
   <tr><td>测试环境</td><td>应用测试无需显示服务；breadpan / bnote 库测试需 DBus session bus（<code>dbus-run-session</code>）</td></tr>
 </table>
@@ -33,11 +34,31 @@
 cargo build --release
 cargo test                                           # 应用：协议回环 / 控制行解析
 dbus-run-session -- cargo test --manifest-path breadpan/Cargo.toml   # 库：全量 mock 测试
-dbus-run-session -- cargo test --manifest-path bnote/Cargo.toml      # 库：协议集成测试</code></pre>
+dbus-run-session -- cargo test --manifest-path bnote/Cargo.toml      # 库：协议集成测试
+python3 scripts/resource-smoke.py --duration 30                     # 资源：idle 基线
+python3 scripts/resource-smoke.py --duration 20 --during '...'      # 资源：场景采样</code></pre>
 <ul class="note">
   <li>应用 crate 依赖 breadpan、bnote 路径依赖，根目录一条命令即可整体构建；</li>
   <li>库测试须独立在 <code>breadpan/</code> / <code>bnote/</code> 清单下执行（breadpan 见其 BUILD.html）；</li>
   <li>Hyprland 接口冒烟：真机会话内执行 <code>scripts/hypr-smoke.sh</code>（套接字可达 / hyprctl 数据源 / dispatch 语义 / socket2 事件流；<code>SKIP_DISPATCH=1</code> 可跳过会换工作区的相对切换项）。</li>
+</ul>
+
+<h3>2.1. 资源与能耗采样</h3>
+<p><code>scripts/resource-smoke.py</code> 对运行中的 bread daemon 与窗口进程采样，输出平均/峰值 CPU、RSS/PSS、上下文切换率，并在可读时附带 RAPL 包能耗与电池功率；<code>--json</code> 便于存档与回归比较。</p>
+<table>
+  <tr><th>指标</th><th>来源</th><th>判读</th></tr>
+  <tr><td>平均 / 峰值 CPU</td><td><code>/proc/PID/stat</code> 采样差</td><td>idle 目标接近 0；峰值用于定位事件突发</td></tr>
+  <tr><td>RSS / PSS</td><td><code>/proc/PID/status</code> / <code>smaps_rollup</code></td><td>PSS 更适合含共享内存的多进程总量；同时记录峰值</td></tr>
+  <tr><td>上下文切换率</td><td><code>voluntary</code> + <code>nonvoluntary</code></td><td>idle 应保持低频；异常升高通常意味着轮询或抖动</td></tr>
+  <tr><td>能耗</td><td>RAPL <code>energy_uj</code></td><td>包级能耗，适合同机相对比较；读取需权限，不可读时为 N/A</td></tr>
+  <tr><td>电池功率</td><td><code>power_supply/BAT*/power_now</code></td><td>笔记本无 RAPL 权限时的替代参考</td></tr>
+  <tr><td>CPU pressure</td><td><code>/proc/pressure/cpu</code></td><td>与能耗/峰值联合判断系统级争用</td></tr>
+</table>
+<ul class="note">
+  <li>先启动 bread，再运行采样；脚本本身不触发 UI 操作，场景由 <code>--during</code> 注入，例如通知突发：<code>--during 'for i in $(seq 1 20); do notify-send "test $i" body; done'</code>。</li>
+  <li>固定流程：idle 30s 基线 → 单场景采样 → 同机同会话重复；比较相对变化，不用绝对值跨机器比较。</li>
+  <li>回归阈值：<code>--max-avg-cpu</code> / <code>--max-peak-cpu</code> / <code>--max-rss-mb</code> / <code>--max-energy-j</code>，超限退出码 1；设置了能耗阈值但 RAPL 不可读同样判失败。</li>
+  <li>采集范围为当前存活的 <code>bread</code> daemon 与 <code>bread __window</code> 进程；窗口热插拔期间新进程会从出现时刻开始计入。</li>
 </ul>
 
 <h2>3. 安装指南</h2>

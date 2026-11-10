@@ -20,7 +20,7 @@
   - 提示音：`sound`（bnote 需暴露 `sound-file` / `sound-name` / `suppress-sound`；播放后端待定）
   - 持久化：内存保留至 daemon / 桌面会话结束，弹窗 timeout 只移除卡片；bnote 需暴露 `transient` / `resident`
   - 扩展能力 `x-vendor-*`：不实现
-- 搭建一些资源占用和能耗相关的测试手段
+- 搭建一些资源占用和能耗相关的测试手段 [已解决]
   - 主要优化峰值CPU占用和对应的能耗
   - 也考虑优化内存占用，并尽可能把常态CPU占用降至0（基本事件驱动，只允许少量低频轮询）
 - workspace悬停不再弹tooltip,弹窗口列表
