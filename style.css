@@ -205,7 +205,7 @@ footer {
 
 /* 通知弹窗 */
 .mk-notif {
-  width: 300px; border-radius: 15px; border: 1px solid #9D7E4D;
+  width: 300px; margin: 2px auto 0; border-radius: 15px; border: 1px solid #9D7E4D;
   background: #3E3542; color: #D6CAB6; padding: 10px 8px 12px;
   position: relative; font-size: 12px;
 }
@@ -218,8 +218,9 @@ footer {
 .mk-nicon { width: 32px; height: 32px; border-radius: 6px; border: 1.6px solid currentColor; flex: none; opacity: .85; }
 
 /* 通知中心 */
+.mk-titlezone { width: 256px; margin: 0 auto; text-align: center; }
 .mk-nc {
-  width: 480px; max-width: 100%; margin: 2px auto 0;
+  width: 256px; max-width: 100%; margin: 2px auto 0;
   background: #231F1F; color: #D6CAB6;
   border: 1px solid #9D7E4D; border-radius: 10px; padding: 4px; font-size: 12px;
 }
@@ -228,11 +229,18 @@ footer {
 .mk-nc-gh {
   background: #D6CAB6; color: #231F1F; border-radius: 6px;
   font-weight: bold; padding: 3px 8px; margin: 4px 0;
+  display: flex; align-items: center; gap: 6px;
 }
 .mk-nc-gh:first-of-type { margin-top: 0; }
-.mk-nc-gh .arr { font-size: 10px; margin-right: 6px; }
+.mk-nc-gh .arr { font-size: 10px; margin-right: 0; }
+.mk-nc-gh .nm { flex: 1; }
+.mk-nc-gx { font-size: 12px; opacity: .7; flex: none; }
 .mk-nc-item {
   background: #3E3542; border-radius: 8px; padding: 5px 8px 6px; margin-bottom: 4px;
+}
+.mk-nc-item.crit { background: #CC2A47; color: #FFF7E4; }
+.mk-nc-more {
+  color: #9D7E4D; text-align: center; font-size: 11px; padding: 2px 0 4px;
 }
 .mk-nc-tr { display: flex; align-items: center; gap: 8px; }
 .mk-nc-t { font-weight: bold; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

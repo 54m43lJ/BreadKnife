@@ -153,8 +153,11 @@ pub struct Notice {
     pub summary: String,
     pub body: String,
     pub actions: Vec&lt;Action&gt;,
+    pub action_icons: bool,
     pub urgency: Urgency,
     pub expire_timeout_ms: Option&lt;u32&gt;,
+    pub transient: bool,
+    pub resident: bool,
 }
 
 pub enum Urgency { Low, Normal, Critical }
@@ -162,15 +165,18 @@ pub struct Action { pub key: String, pub label: String }
 pub enum NoticeIcon { None, Name(String), Pixels { width: i32, height: i32, rgba: Vec&lt;u8&gt; } }</code></pre>
 <table>
   <tr><th>对象 / 字段</th><th>定义</th></tr>
-  <tr><td><code>SessionConfig.capabilities</code></td><td>能力清单：宿主装配时声明支持的特性串</td></tr>
+  <tr><td><code>SessionConfig.capabilities</code></td><td>能力清单：宿主装配时声明支持的特性串；标准清单与支持状态见 <a href="PROVIDER.html#sec-4-5">PROVIDER §4.5</a></td></tr>
   <tr><td><code>SessionConfig.server_info</code></td><td>服务器信息：名字 / 厂商 / 版本 / 规范版本</td></tr>
   <tr><td><code>SessionConfig.command_timeout_ms</code></td><td><code>SessionHandle</code> 同步命令等待上限；超时返回 <code>Error::Timeout</code>；<code>Session::start</code> 与 <code>SessionHandle::shutdown</code> 的等待超时由宿主自行管理</td></tr>
   <tr><td><code>Notice.id</code></td><td>本库分配的非 0 标识；同 id 替换由本库处理</td></tr>
   <tr><td><code>Notice.app_name</code> / <code>summary</code> / <code>body</code></td><td>应用名 / 标题 / 正文</td></tr>
   <tr><td><code>Notice.icon</code></td><td>图标三态：无 / 主题名或 <code>file://</code> URI / 位图</td></tr>
   <tr><td><code>Notice.actions</code></td><td>键值对列表，键用于动作回发</td></tr>
+  <tr><td><code>Notice.action_icons</code></td><td><code>action-icons</code> hint；为真时动作 key 作为图标名，label 作为提示</td></tr>
   <tr><td><code>Notice.urgency</code></td><td>紧急度（Low / Normal / Critical），缺省 Normal</td></tr>
   <tr><td><code>Notice.expire_timeout_ms</code></td><td>请求的超时；<code>None</code>＝按宿主默认，<code>Some(0)</code>＝常驻，其余正数为毫秒</td></tr>
+  <tr><td><code>Notice.transient</code></td><td><code>transient</code> hint；为真时绕过宿主持久化</td></tr>
+  <tr><td><code>Notice.resident</code></td><td><code>resident</code> hint；为真时动作触发后保留通知</td></tr>
 </table>
 <ul class="note">
   <li>能力清单在 <code>Session::start</code> 时校验：每项非空、仅 ASCII 字母数字与 <code>-</code>；<code>icon-static</code> 与 <code>icon-multi</code> 互斥；不合法返回 <code>Error::InvalidArgs</code>。</li>

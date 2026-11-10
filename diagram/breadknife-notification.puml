@@ -7,6 +7,8 @@ participant "窗口进程" as win
 app -> DBus: Notify
 DBus -> daemon: 通知参数（org.freedesktop.Notifications）
 daemon -> daemon: 组装并缓存通知记录
-daemon -> win: 推送（全部窗口）
-win -> win: 当前显示器弹出贴栏通知；更新通知中心
+daemon -> daemon: 经 Hyprland 判定当前显示器
+daemon -> win: 推送通知记录（全部窗口，通知中心）
+daemon -> win: 推送弹窗（仅当前显示器）
+win -> win: 更新通知中心；当前显示器弹出贴栏通知
 @enduml

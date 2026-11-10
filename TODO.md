@@ -1,5 +1,5 @@
 - 收到notification紧贴任务栏下方正中弹窗，样式和淡出规则参考我的dunst配置，但是标题居中，右上角带关闭按钮
-  - 左键点击消息正常触发事件，fallback是切换到该程序所在的工作区并focus该窗口
+  - 左键点击消息正常触发事件并关闭该条（无动作仅关闭）
   - 中键点击消息关闭
 - 点击标题栏弹出消息中心，宽度占40%屏幕，高度根据消息列表动态变化，最大值为100%屏幕
   - 消息按应用聚合，聚合后按时间排序，最后一个推送通知的应用在最上面,聚合标题是应用名，可以点击收缩
@@ -12,3 +12,16 @@
   - 左键点击即打开窗口
   - 中键点击关闭
   - 暂时不实现右键菜单
+- 通知弹窗当前显示器判定：测试 Hyprland IPC socket 与 `hyprctl` 命令两种方式，确定 daemon 获取当前显示器的实现
+- 实现分支重构任务：按 ARCH §3.9 九色色板迁移 `bread.css` 与 `src/`（旧 token 名、托盘动态垫高、`success` 等），完成整体色板迁移
+- 通知能力实现（目标见 bnote/PROVIDER §4.5）
+  - action：渲染动作按钮（默认文字，`action-icons` 时图标）并执行；bnote 需暴露 `action-icons` hint
+  - 外观：`body-markup` / `body-hyperlinks` / `body-images`；`icon-multi`（bnote 需多帧图标支持）
+  - 提示音：`sound`（bnote 需暴露 `sound-file` / `sound-name` / `suppress-sound`；播放后端待定）
+  - 持久化：内存保留至 daemon / 桌面会话结束，弹窗 timeout 只移除卡片；bnote 需暴露 `transient` / `resident`
+  - 扩展能力 `x-vendor-*`：不实现
+- 搭建一些资源占用和能耗相关的测试手段
+  - 主要优化峰值CPU占用和对应的能耗
+  - 也考虑优化内存占用，并尽可能把常态CPU占用降至0（基本事件驱动，只允许少量低频轮询）
+- workspace悬停不再弹tooltip,弹窗口列表
+  - 目前只计划预览标题，条件允许的话还加入整个工作区的“截图”预览

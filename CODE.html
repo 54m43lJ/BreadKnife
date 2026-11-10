@@ -31,8 +31,8 @@
     │   ├── <a href="#sec-3-style">style.rs</a>      # 按 daemon 跟踪的路径加载 CSS；reload 重读
     │   └── modules/
     │       ├── <a href="#sec-3-workspace">workspace.rs</a>    # 工作区条（渲染 + 手势捕获）
-    │       ├── <a href="#sec-3-info">info.rs</a>        # 活动窗口图标 / 标题 + 通知中心（含不可用 / 重试态）
-    │       ├── <a href="#sec-3-popup">popup.rs</a>        # 弹窗会话：grab 弹窗统一托管（根窗口 / 上级弹窗定位 · 任务栏内捕获关闭 · Escape / toggle）
+    │       ├── <a href="#sec-3-info">info.rs</a>        # 活动窗口图标 / 标题 + 通知中心 popover + 贴栏通知窗口（独立 layer-shell，无 grab）
+    │       ├── <a href="#sec-3-popup">popup.rs</a>        # 弹窗会话：grab 弹窗统一托管（含通知中心 · 根窗口 / 上级弹窗定位 · 任务栏内捕获关闭 · Escape / toggle）
     │       ├── <a href="#sec-3-tray">tray.rs</a>         # 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）
     │       └── <a href="#sec-3-center">center.rs</a>       # 控制中心入口与弹出面板
     ├── shared/           # daemon / 窗口共用
@@ -43,7 +43,7 @@
         └── bread.css     # 默认主题（变量定义）</code></pre>
 <ul class="note">
   <li>同一二进制承载三种角色：daemon、窗口（由 daemon spawn）、客户端（指令转发）；</li>
-  <li>渲染归模块：窗口主进程只维护窗口实例与数据分发，一切渲染（含托盘菜单弹窗）由对应模块包干。</li>
+  <li>渲染归模块：窗口主进程只维护窗口实例与数据分发，一切渲染（含托盘菜单、通知中心与贴栏通知）由对应模块包干。</li>
 </ul>
 
 <h2 id="sec-2">2. 通用约定</h2>
@@ -57,7 +57,9 @@
 <h3 id="sec-3-daemon-mod">3.1. daemon/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub fn run(control_path: &amp;str) -&gt; Result&lt;(), String&gt;;
 
-pub struct Daemon { /* 事件通道、breadpan 句柄、通知服务句柄与可用性、系统状态、窗口表、显示器 / 工作区映射 */ }
+pub const NOTIFICATION_CACHE_CAPACITY: usize;   // 推荐值 512
+
+pub struct Daemon { /* 事件通道、breadpan 句柄、通知服务与缓存、系统状态、窗口表、显示器 / 工作区映射 */ }
 
 pub enum DaemonEvent {
     Hyprland(hyprland::HyprlandEvent),
@@ -66,7 +68,8 @@ pub enum DaemonEvent {
     Control(ControlCommand),
     System(SystemState),
     Notification(NotificationRecord),
-    NotificationStatus(bool),
+    NotificationClosed(u32),
+    NotificationStatus(NotificationStatus),
     ChildExited { monitor: String },
     TrayView { id: String, view: TrayItemView },
     TrayViewGone { id: String },
@@ -89,7 +92,14 @@ impl Daemon {
     fn exec_tray(&amp;self, out: &amp;Sender&lt;Frame&gt;, id: u64,
                  f: impl FnOnce(&amp;TrayHandle) -&gt; Response + Send + 'static);
     fn on_control(&amp;mut self, cmd: ControlCommand);
-    fn on_notification_status(&amp;mut self, available: bool);
+    fn on_notification(&amp;mut self, record: NotificationRecord);
+    fn on_notification_closed(&amp;mut self, id: u32);
+    fn on_notification_status(&amp;mut self, status: NotificationStatus);
+    fn close_notification(&amp;mut self, id: u32, reason: NotificationCloseReason);
+    fn close_notification_group(&amp;mut self, app_name: &amp;str);
+    fn clear_notifications(&amp;mut self);
+    fn discard_notifications(&amp;mut self);
+    fn activate_notification(&amp;mut self, id: u32, action_key: Option&lt;&amp;str&gt;);
     fn retry_notification(&amp;mut self);
     fn open_windows(&amp;mut self, name: String, monitor: Option&lt;String&gt;);
     fn snapshot_for(&amp;self, monitor: &amp;str) -&gt; WindowSnapshot;
@@ -110,6 +120,7 @@ pub struct ClientInfo { pub address: String, pub workspace: WorkspaceRef }
 pub fn monitors() -&gt; Vec&lt;MonitorInfo&gt;;
 pub fn workspaces() -&gt; Vec&lt;WorkspaceInfo&gt;;
 pub fn clients() -&gt; Vec&lt;ClientInfo&gt;;
+pub fn current_monitor() -&gt; Option&lt;String&gt;;   // 待实现，可以根据实际情况调整；IPC socket / hyprctl 待测试
 pub fn workspace_rules() -&gt; Vec&lt;WorkspaceRuleInfo&gt;;
 pub fn rule_workspace(rule: &amp;WorkspaceRuleInfo) -&gt; Option&lt;(String, Option&lt;i64&gt;)&gt;;   // 静态选择器 → (名称, id 提示)
 pub fn normalize_addr(addr: &amp;str) -&gt; String;                                      // 去 0x 前缀、小写
@@ -149,15 +160,35 @@ pub fn set_volume(value: u32);            // pamixer
 pub fn set_brightness(value: u32);        // brightnessctl / ddcutil</code></pre>
 
 <h3 id="sec-3-notify">3.5. daemon/notify.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct NotificationService {
-    pub session: bnote::SessionHandle,
-    pub events: bnote::NoticeReceiver,
+<pre><code>pub const NOTIFICATION_COMMAND_TIMEOUT_MS: u64;   // 推荐值 5_000
+pub struct NotificationService { /* bnote 会话、事件线程、命令线程 */ }
+
+pub enum NotificationCommand {
+    Close { id: u32, reason: bnote::CloseReason },
+    InvokeAction { id: u32, key: String },
+    Shutdown,
 }
 
-pub fn start(tx: Sender&lt;DaemonEvent&gt;) -&gt; Result&lt;NotificationService, bnote::Error&gt;;</code></pre>
+pub fn start(tx: Sender&lt;DaemonEvent&gt;) -&gt; Result&lt;NotificationService, bnote::Error&gt;;
+
+impl NotificationService {
+    pub fn close(&amp;self, id: u32, reason: bnote::CloseReason);
+    pub fn invoke_action(&amp;self, id: u32, key: &amp;str);
+    pub fn shutdown(&amp;self);
+}
+
+fn session_config() -&gt; bnote::SessionConfig;
+fn unavailable_message(err: bnote::Error) -&gt; String;
+fn to_record(notice: bnote::Notice) -&gt; NotificationRecord;</code></pre>
 <ul class="note">
-  <li>初始结果经 <code>DaemonEvent::NotificationStatus</code> 送入 daemon：成功为 true，<code>NameTaken</code> 为 false。</li>
-  <li>手动重试由通知中心的刷新按钮触发 <code>Request::RetryNotification</code>；daemon 重新调用 <code>NotificationService::start</code>，不排队、不替换已有服务。</li>
+  <li><code>start</code> 同步建立 bnote 会话；事件线程以 <code>futures::executor::block_on(NoticeReceiver::recv())</code> 消费异步事件流，命令线程串行执行阻塞的 <code>SessionHandle</code> 调用。</li>
+  <li>事件映射：<code>Notify</code> → <code>DaemonEvent::Notification</code>，<code>Close</code> → <code>NotificationClosed</code>，<code>Fatal</code> → <code>NotificationStatus(Unavailable { message })</code>。</li>
+  <li><code>to_record</code> 原样映射 <code>Notice</code> 的 id / app_name / icon / summary / body / actions / action_icons / urgency / expire_timeout_ms / transient / resident；窗口只消费共享模型，不接触 bnote 类型。</li>
+  <li><code>unavailable_message</code> 对 <code>NameTaken</code> 返回固定文案，其它错误返回 <code>Error</code> 的文本。</li>
+  <li>能力清单与支持状态见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>；<code>SessionConfig.capabilities</code> 只返回当前已就绪的项。</li>
+  <li>服务器信息：name <code>bread</code>、vendor <code>BreadKnife</code>、version 取 <code>env!("CARGO_PKG_VERSION")</code>、spec_version <code>1.2</code>；<code>command_timeout_ms</code> 取 <code>NOTIFICATION_COMMAND_TIMEOUT_MS</code>（推荐值 5_000）。</li>
+  <li>手动重试由通知中心的刷新按钮触发 <code>Request::NotificationRetry</code>；daemon 先停机旧服务，再重新调用 <code>NotificationService::start</code>，不排队、不替换已有通知服务。</li>
+  <li>命令线程失败只记日志；窗口 UI 乐观更新，重连快照时校正。</li>
 </ul>
 
 <h3 id="sec-3-windows">3.6. daemon/windows.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -181,7 +212,7 @@ pub fn hello_reply(out: &amp;Sender&lt;Frame&gt;, id: u64, snapshot: WindowSnaps
 <h3 id="sec-3-bar-mod">3.8. bar/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub fn run(monitor: &amp;str, socket: &amp;Path) -&gt; Result&lt;(), String&gt;;
 
-pub struct WindowApp { /* GTK 应用、IPC 客户端、四个模块 */ }
+pub struct WindowApp { /* GTK 应用、IPC 客户端、workspace/info（含通知中心与贴栏通知窗口）/tray/center */ }
 
 pub enum UiTask {
     Push(Push),
@@ -198,6 +229,10 @@ impl WindowApp {
     fn handle_push(&amp;self, push: Push);
     fn apply_snapshot(&amp;self, snapshot: &amp;WindowSnapshot);
 }</code></pre>
+<ul class="note">
+  <li><code>Notification</code> → <code>InfoCenterWidget::upsert_center</code>；<code>NotificationPopup</code> → <code>push_popup</code>；<code>NotificationRemoved</code> / <code>NotificationCleared</code> → 同步通知中心与贴栏栈。</li>
+  <li><code>State</code> / <code>Snapshot</code> 携带 <code>NotificationStatus</code>，据此更新中心不可用态并清空贴栏栈。</li>
+</ul>
 
 <h3 id="sec-3-bar-ipc">3.9. bar/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct IpcClient { /* 连接、请求 id、等待者表、UI 队列 */ }
@@ -220,15 +255,55 @@ impl WorkspaceWidget {
 }</code></pre>
 
 <h3 id="sec-3-info">3.12. bar/modules/info.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct InfoCenterWidget { pub container: gtk::Box, /* 图标、标题、通知列表 */ }
+<pre><code>pub struct InfoCenterWidget { pub container: gtk::Box, /* 图标、标题、通知中心、贴栏通知窗口 */ }
 
 impl InfoCenterWidget {
-    pub fn new(window: &amp;gtk::Window, popup: Rc&lt;PopupManager&gt;) -&gt; Self;
+    pub fn new(ipc: Arc&lt;IpcClient&gt;, monitor: &amp;str, window: &amp;gtk::Window,
+               popup: Rc&lt;PopupManager&gt;) -&gt; Self;
     pub fn set_active(&amp;self, active: &amp;ActiveWindow);
-    pub fn set_notification_available(&amp;self, available: bool);
-    pub fn notify(&amp;self, record: NotificationRecord);
+    pub fn set_notification_status(&amp;self, status: &amp;NotificationStatus);
+    pub fn set_records(&amp;self, records: &amp;[NotificationRecord]);
+    pub fn upsert_center(&amp;self, record: NotificationRecord);
+    pub fn remove_notification(&amp;self, id: u32);
+    pub fn clear_notifications(&amp;self, app_name: Option&lt;&amp;str&gt;);
+    pub fn push_popup(&amp;self, record: NotificationRecord);
     pub fn set_notification_retry(&amp;self, retry: Rc&lt;dyn Fn()&gt;);
-}</code></pre>
+}
+
+struct NotificationWindow { /* 独立 layer-shell 窗口、记录、计时器、标题区锚点 */ }
+
+impl NotificationWindow {
+    fn new(ipc: Arc&lt;IpcClient&gt;, monitor: &amp;str, window: &amp;gtk::Window,
+           anchor: &amp;impl IsA&lt;gtk::Widget&gt;) -&gt; Rc&lt;Self&gt;;
+    fn push(&amp;self, record: NotificationRecord);
+    fn remove(&amp;self, id: u32);
+    fn clear(&amp;self, app_name: Option&lt;&amp;str&gt;);
+    fn set_status(&amp;self, status: &amp;NotificationStatus);
+    fn set_center_open(&amp;self, open: bool);
+    fn show(&amp;self);
+    fn hide(&amp;self);
+    fn rebuild(&amp;self);
+}
+
+pub const POPUP_VISIBLE_MAX: usize;        // 推荐值 10
+pub const GROUP_PREVIEW_COUNT: usize;      // 推荐值 3
+pub const POPUP_DEFAULT_TIMEOUT_MS: u64;   // 推荐值 30_000</code></pre>
+<ul class="note">
+  <li><code>InfoCenterWidget::new</code> 先建标题容器，再创建通知中心 popover（<code>PopupManager</code> 组 <code>info</code>）与独立的 <code>NotificationWindow</code>；贴栏通知不参与 <code>PopupManager</code>。</li>
+  <li><code>NotificationWindow</code> 是独立 layer-shell 窗口，不 grab；生命周期由每条通知的计时器与显式关闭请求管理，位置水平中心对齐标题区域。</li>
+  <li>中心记录按到达顺序新→旧保存；按应用聚合，组按最后一条消息时间新→旧，组内同样新→旧。组标题点击展开/收缩，展开时只显示该组；组标题右侧关闭按钮清空本组。</li>
+  <li>组内超过 <code>GROUP_PREVIEW_COUNT</code> 条时只显示最新 <code>GROUP_PREVIEW_COUNT</code> 条 + 「…」条目；点击「…」展开该组全部消息，其它组隐藏。</li>
+  <li>贴栏通知窗口内多张卡片纵向堆叠；新条在最上，同 id 原位替换并重置计时，超过 <code>POPUP_VISIBLE_MAX</code> 条显示隐藏计数。每条独立计时；超时仅移除贴栏卡片，<code>transient</code> 记录同时发送 <code>NotificationClose { id, reason: Expired }</code>，非 transient 记录的中心条目保留。</li>
+  <li>超时取 <code>NotificationRecord.expire_timeout_ms</code>：<code>Some(0)</code> 常驻，<code>Some(ms)</code> 按 ms；<code>None</code> 时紧急常驻、普通/低优先级取 <code>POPUP_DEFAULT_TIMEOUT_MS</code>。</li>
+  <li>通知中心打开时 <code>NotificationWindow::set_center_open(true)</code>：窗口隐藏，记录与计时器保留；关闭时重新显示未过期记录。期间到达的通知只入栈，不显示。</li>
+  <li><code>show</code> 仅在记录非空且窗口不可见时设置窗口可见；空栈不创建可见窗口；<code>hide</code> 仅隐藏，不清理记录。</li>
+  <li>动作按钮按 <code>actions</code> 顺序显示；默认文字，<code>action_icons</code> 为真且图标命中时用 action key 作为图标名、label 作为 tooltip，未命中回退文字。按钮发送 <code>NotificationActivate { id, action_key: Some(key) }</code>，左键点击卡片发送 <code>NotificationActivate { id, action_key: None }</code>。</li>
+  <li>daemon 触发动作后关闭该条（<code>resident</code> 保留）；无可用动作时左键仅关闭该条。中键/关闭按钮发送 <code>NotificationClose { id, reason: Dismissed }</code>；右键发送 <code>NotificationClear</code>。中心内消息与组按钮复用同一组请求。</li>
+  <li>通知中心的消息卡同样渲染动作按钮；默认文字，<code>action_icons</code> 为真且图标命中时用图标。点击发送 <code>NotificationActivate { id, action_key: Some(key) }</code>。</li>
+  <li><code>remove_notification</code> / <code>clear_notifications</code> 同时更新中心列表与贴栏通知窗口；快照只填充通知中心，贴栏通知窗口不重放历史。</li>
+  <li>服务不可用时中心显示失败说明与刷新按钮，贴栏通知窗口清空并隐藏。</li>
+  <li>图标三态：<code>None</code> 隐藏、<code>Name</code> 按图标主题查找、<code>Pixels</code> 转纹理；主题未命中按缺失降级隐藏。</li>
+</ul>
 
 <h3 id="sec-3-popup">3.13. bar/modules/popup.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct PopupManager { /* 打开表、按下关闭记录、悬停锚点与轮询状态 */ }
@@ -253,6 +328,9 @@ pub fn point_at_expanded(popover: &amp;gtk::Popover, parent: &amp;impl IsA&lt;gt
                          anchor: &amp;impl IsA&lt;gtk::Widget&gt;, expand_x: f64);
 pub fn hover_switch&lt;F: Fn(u64) + 'static&gt;(manager: &amp;Rc&lt;PopupManager&gt;,
                                           anchor: &amp;impl IsA&lt;gtk::Widget&gt;, switch: F);</code></pre>
+<ul class="note">
+  <li>通知中心使用组标签 <code>info</code> 并由 <code>PopupManager</code> 托管；贴栏通知是独立 layer-shell 窗口，不参与 <code>PopupManager</code>。</li>
+</ul>
 
 <h3 id="sec-3-tray">3.14. bar/modules/tray.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct TrayWidget { /* 图标容器、菜单会话、IPC、UI 队列、弹窗管理器 */ }
@@ -291,6 +369,7 @@ impl CenterWidget {
 }
 
 pub enum MediaOp { PlayPause, Next, Prev }
+pub enum NotificationCloseReason { Dismissed, Expired }
 
 pub enum Request {              //见 ARCHITECTURE §4.4
     Hello { monitor: String },
@@ -302,7 +381,11 @@ pub enum Request {              //见 ARCHITECTURE §4.4
     MediaControl { op: MediaOp },
     VolumeSet { value: u32 },
     BrightnessSet { value: u32 },
-    RetryNotification,
+    NotificationRetry,
+    NotificationClose { id: u32, reason: NotificationCloseReason },
+    NotificationCloseGroup { app_name: String },
+    NotificationClear,
+    NotificationActivate { id: u32, action_key: Option&lt;String&gt; },
 }
 
 pub enum Response {             //见 ARCHITECTURE §4.4
@@ -318,6 +401,9 @@ pub enum Push {                 //见 ARCHITECTURE §4.4
     Tray(TrayUpdate),
     MenuChanged { item: String },
     Notification(NotificationRecord),
+    NotificationPopup(NotificationRecord),
+    NotificationRemoved(u32),
+    NotificationCleared(Option&lt;String&gt;),
     Reload,
 }
 
@@ -413,12 +499,31 @@ pub struct NetworkState { pub kind: String, pub connected: bool }
 pub struct BluetoothState { pub powered: bool, pub connected: u32 }
 pub struct VolumeState { pub percent: u32, pub muted: bool }
 
-pub struct NotificationRecord {
+pub enum NotificationUrgency { Low, Normal, Critical }
+pub struct NotificationAction { pub key: String, pub label: String }
+pub enum NotificationIcon {
+    None,
+    Name(String),
+    Pixels { width: u32, height: u32, rgba: Vec&lt;u8&gt; },
+}
+
+pub struct NotificationRecord {     // bnote::Notice 的共享投影
     pub id: u32,
     pub app_name: String,
-    pub icon: String,
+    pub icon: NotificationIcon,
     pub summary: String,
     pub body: String,
+    pub actions: Vec&lt;NotificationAction&gt;,
+    pub action_icons: bool,
+    pub urgency: NotificationUrgency,
+    pub expire_timeout_ms: Option&lt;u32&gt;,
+    pub transient: bool,
+    pub resident: bool,
+}
+
+pub enum NotificationStatus {
+    Ready,
+    Unavailable { message: String },
 }
 
 pub struct WindowSnapshot {     //见 ARCHITECTURE §4.5
@@ -427,7 +532,7 @@ pub struct WindowSnapshot {     //见 ARCHITECTURE §4.5
     pub active: ActiveWindow,
     pub tray: Vec&lt;TrayItemView&gt;,
     pub notifications: Vec&lt;NotificationRecord&gt;,
-    pub notification_available: bool,
+    pub notification: NotificationStatus,
     pub system: SystemState,
     pub css_path: String,
 }
@@ -436,7 +541,7 @@ pub struct StateDelta {         //见 ARCHITECTURE §4.4
     pub workspaces: Option&lt;Vec&lt;WorkspaceState&gt;&gt;,
     pub active: Option&lt;ActiveWindow&gt;,
     pub system: Option&lt;SystemState&gt;,
-    pub notification_available: Option&lt;bool&gt;,
+    pub notification: Option&lt;NotificationStatus&gt;,
 }</code></pre>
 
 <h2 id="sec-4">4. 关键流程调用栈（伪码）</h2>
@@ -447,6 +552,7 @@ pub struct StateDelta {         //见 ARCHITECTURE §4.4
 ├── protocol::pid_file() 校验（存活则拒绝）并写入自身 PID
 ├── hyprland::watch(tx)（socket2 只读监听线程）
 ├── tray::start(tx)（breadpan 组装；失败降级 None）
+├── notify::start(tx)（bnote 装配；失败 → NotificationStatus(Unavailable)）
 ├── ipc::serve_control(control_path, tx)
 ├── ipc::serve_windows(window_path, tx)
 ├── system::start(tx)（UPower / NetworkManager / BlueZ / MPRIS）
@@ -469,7 +575,7 @@ pub struct StateDelta {         //见 ARCHITECTURE §4.4
 │         ├── 层壳窗口：init_layer_shell / set_layer(Top) / 锚定 Left|Right|Top / namespace "bread" / auto_exclusive_zone_enable
 │         ├── find_monitor(name) → set_monitor / set_default_size；connect_geometry_notify 跟踪分辨率
 │         ├── PopupManager::install(window)
-│         ├── WorkspaceWidget::new / InfoCenterWidget::new / TrayWidget::new / CenterWidget::new
+│         ├── WorkspaceWidget::new / InfoCenterWidget::new(ipc, monitor, window, popup) / TrayWidget::new / CenterWidget::new
 │         ├── CenterBox 布局（workspace | info | tray + center）
 │         ├── glib::timeout_add_local(UI_DRAIN)（排空 UiTask）
 │         └── glib::timeout_add_seconds_local(2)（daemon_alive() 周期检查）
@@ -512,7 +618,12 @@ pub struct StateDelta {         //见 ARCHITECTURE §4.4
 ├── Close { name, monitor } → desired.remove + kill_window()
 ├── OpenAll / CloseAll → 作用于全部显示器
 ├── Reload → broadcast(Push::Reload)（窗口按跟踪路径重读 CSS）
-└── Exit → kill_window(全部) → TrayHandle::shutdown() → shutdown_files() → std::process::exit(0)</code></pre>
+└── Exit
+     ├── kill_window(全部)
+     ├── TrayHandle::shutdown()
+     ├── NotificationService::shutdown()
+     ├── shutdown_files()
+     └── std::process::exit(0)</code></pre>
 
 <h3 id="sec-4-4">4.4. 托盘交互与菜单（窗口 ↔ daemon）</h3>
 <pre><code>TrayWidget 手势（左 / 中 / 右 / 四向滚轮）
@@ -527,30 +638,89 @@ pub struct StateDelta {         //见 ARCHITECTURE §4.4
 └── 悬停切换：popup::hover_switch → Request::TrayMenuRead → on_hover_menu_done（世代校验）</code></pre>
 
 <h3 id="sec-4-5">4.5. 通知到达</h3>
-<pre><code>DBus Notify 调用（daemon 通知守护）
-├── NotificationService::start(tx) → SessionHandle + NoticeReceiver
-├── 事件线程循环 NoticeReceiver::recv()
-│    └── NoticeEvent::Notify → DaemonEvent::Notification(NotificationRecord)
-├── 同 id 替换 / 新 id 入队（上限见代码）
-└── broadcast(Push::Notification(record))
-     └── WindowApp::handle_push → InfoCenterWidget::notify（列表上限见代码）</code></pre>
+<pre><code>DBus Notify 调用（bnote 自持连接）
+└── NotificationService 事件线程 NoticeReceiver::recv()
+     └── NoticeEvent::Notify → DaemonEvent::Notification(to_record(notice))
+          └── Daemon::on_notification(record)
+               ├── notifications.upsert(record)
+               ├── 超过 NOTIFICATION_CACHE_CAPACITY
+               │    ├── notifications.pop_back()
+               │    ├── NotificationService::close(id, bnote::CloseReason::Expired)
+               │    └── broadcast(Push::NotificationRemoved(id))
+               ├── broadcast(Push::Notification(record))（全部窗口，通知中心缓存）
+               │    └── WindowApp::handle_push → InfoCenterWidget::upsert_center(record)
+               ├── hyprland::current_monitor()
+               └── push_to(monitor, Push::NotificationPopup(record))（仅当前显示器）
+                    └── WindowApp::handle_push → InfoCenterWidget::push_popup(record)
+                         └── NotificationWindow::push(record)（重置计时 + rebuild；中心打开时只入栈）</code></pre>
 
-<h3 id="sec-4-6">4.6. 通知服务 NameTaken 与手动重试</h3>
-<pre><code>bnote::Session::start(config)
-├── Ok(session) → tx.send(DaemonEvent::NotificationStatus(true))
-└── Err(NameTaken) → tx.send(DaemonEvent::NotificationStatus(false))
-    ├── Daemon::on_notification_status(false)
-    │   ├── broadcast(Push::State { notification_available: false })
-    │   │   └── WindowApp::handle_push → InfoCenterWidget::set_notification_available(false)
-    │   └── InfoCenterWidget 显示不可用错误 + 刷新按钮
-    └── 用户点击刷新 → Request::RetryNotification
-        └── Daemon::retry_notification()
-            └── 重新调用 bnote::Session::start(config)
-                ├── Ok → NotificationStatus(true) → 恢复通知列表 / 空态
-                └── Err(NameTaken) → 保留错误态</code></pre>
+<h3 id="sec-4-6">4.6. 通知关闭、清理与动作</h3>
+
+<h4 id="sec-4-6-1">4.6.1. 单条关闭</h4>
+<pre><code>窗口/计时器 → Request::NotificationClose { id, reason }
+└── Daemon::close_notification(id, reason)
+     ├── notifications.remove(id)
+     ├── NotificationService::close(id, bnote::CloseReason::{Dismissed|Expired})
+     └── broadcast(Push::NotificationRemoved(id))
+          └── WindowApp::handle_push → InfoCenterWidget::remove_notification(id)</code></pre>
+<pre><code>客户端 CloseNotification（bnote 自动回发 NotificationClosed）
+└── NoticeEvent::Close { id } → DaemonEvent::NotificationClosed(id)
+     └── Daemon::on_notification_closed(id)
+          ├── notifications.remove(id)
+          └── broadcast(Push::NotificationRemoved(id))</code></pre>
+
+<h4 id="sec-4-6-2">4.6.2. 组关闭与全部清理</h4>
+<pre><code>中心组关闭 → Request::NotificationCloseGroup { app_name }
+└── Daemon::close_notification_group(app_name)
+     ├── notifications.collect_ids(app_name)
+     ├── NotificationService::close(id, Dismissed) × N
+     ├── notifications.remove(id) × N
+     └── broadcast(Push::NotificationCleared(Some(app_name)))
+
+全部清理 → Request::NotificationClear
+└── Daemon::clear_notifications()
+     ├── NotificationService::close(id, Dismissed) × N
+     ├── notifications.clear()
+     └── broadcast(Push::NotificationCleared(None))</code></pre>
+
+<h4 id="sec-4-6-3">4.6.3. 左键动作与关闭</h4>
+<pre><code>窗口左键/动作按钮 → Request::NotificationActivate { id, action_key }
+└── Daemon::activate_notification(id, action_key)
+     ├── 记录不存在 → 返回
+     ├── 有动作 → NotificationService::invoke_action(id, key)
+     ├── 有动作且 resident → 返回（保留条目）
+     └── 无动作或非 resident → Daemon::close_notification(id, Dismissed)</code></pre>
 <ul class="note">
-  <li>错误文案：标题「通知中心暂时不可用」，正文「另一个通知服务正在运行，bread 无法接管 org.freedesktop.Notifications。」；刷新按钮位于正文下方。</li>
+  <li>左键的 <code>action_key</code> 为 <code>None</code>，取 <code>default</code> 或唯一动作；动作按钮带对应 key。</li>
+  <li>有动作时触发后关闭该条；<code>resident</code> 记录保留。无可用动作时左键仅关闭该条。</li>
+  <li>通知协议没有可映射到具体应用/窗口的字段，左键不做来源应用聚焦回退。</li>
+</ul>
+
+<h3 id="sec-4-7">4.7. 通知服务状态与重试</h3>
+<pre><code>bnote::Session::start(config)
+├── Ok(service) → Daemon::on_notification_status(Ready)
+└── Err(err) → Daemon::on_notification_status(Unavailable { message: unavailable_message(err) })
+
+Daemon::on_notification_status(status)
+├── status 为 Unavailable → Daemon::discard_notifications()（不调用 bnote 关闭）
+│    └── broadcast(Push::NotificationCleared(None))
+└── broadcast(Push::State { notification: status })
+     └── WindowApp::handle_push → InfoCenterWidget::set_notification_status(status)
+
+用户点击刷新 → Request::NotificationRetry
+└── Daemon::retry_notification()
+    ├── NotificationService::shutdown()
+    └── NotificationService::start(tx)
+        ├── Ok → Daemon::on_notification_status(Ready)
+        └── Err(err) → Daemon::on_notification_status(Unavailable { message: unavailable_message(err) })
+
+NoticeEvent::Fatal { message }
+└── DaemonEvent::NotificationStatus(Unavailable { message })
+     └── Daemon::on_notification_status(status)</code></pre>
+<ul class="note">
+  <li>错误文案：标题「通知中心暂时不可用」；正文取 <code>NotificationStatus::Unavailable.message</code>（NameTaken 为「另一个通知服务正在运行，bread 无法接管 org.freedesktop.Notifications。」，Fatal 为 bnote 报告的原因）；刷新按钮位于正文下方。</li>
   <li>不自动重试、不排队、不替换已有通知服务；重试完全由用户点击刷新按钮触发。</li>
+  <li>运行中 Fatal 会清空通知缓存与贴栏通知；重试成功后从空列表恢复。</li>
 </ul>
 
 </main>

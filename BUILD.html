@@ -24,18 +24,21 @@
   <tr><td>Rust 工具链</td><td>rustup / cargo（edition 2024）</td></tr>
   <tr><td>GUI / 层壳</td><td>gtk4 / glib 开发包与 <code>gtk4-layer-shell</code>（仅窗口进程链接 GTK；gtk4-layer-shell 需从源码安装：<code>meson setup build &amp;&amp; sudo meson install -C build</code>）</td></tr>
   <tr><td>托盘协议栈</td><td><code>breadpan</code> 随仓库落位（路径依赖，纯 Rust——<strong>无 libastal 等系统级构建依赖</strong>）</td></tr>
+  <tr><td>通知协议库</td><td><code>bnote</code> 随仓库落位（路径依赖；zbus / tokio 由库内部持有，宿主不装配总线运行时）</td></tr>
+  <tr><td>通知事件消费</td><td>宿主侧以 <code>futures::executor::block_on</code> 驱动 <code>NoticeReceiver::recv</code> 的异步事件流，不引入额外运行时</td></tr>
   <tr><td>可选系统工具</td><td><code>pamixer</code>（音量）、<code>brightnessctl</code>（亮度：内置面板）、<code>ddcutil</code>（亮度：外接显示器，DDC/CI）——缺席时对应功能降级灰置，不阻断构建。媒体（MPRIS）/ 网络（NetworkManager）/ 蓝牙（BlueZ）经 DBus 消费，无需额外工具</td></tr>
-  <tr><td>测试环境</td><td>应用测试无需显示服务；breadpan 库测试需 DBus session bus（<code>dbus-run-session</code>）</td></tr>
+  <tr><td>测试环境</td><td>应用测试无需显示服务；breadpan / bnote 库测试需 DBus session bus（<code>dbus-run-session</code>）</td></tr>
 </table>
 
 <h2>编译与测试</h2>
 <pre><code>cargo build               # 调试构建（二进制 target/debug/bread）
 cargo build --release
 cargo test                                           # 应用：协议回环 / 控制行解析
-dbus-run-session -- cargo test --manifest-path breadpan/Cargo.toml   # 库：全量 mock 测试</code></pre>
+dbus-run-session -- cargo test --manifest-path breadpan/Cargo.toml   # 库：全量 mock 测试
+dbus-run-session -- cargo test --manifest-path bnote/Cargo.toml      # 库：协议集成测试</code></pre>
 <ul class="note">
-  <li>应用 crate 依赖 breadpan 路径依赖，根目录一条命令即可整体构建；</li>
-  <li>库测试须独立在 <code>breadpan/</code> 清单下执行（见其 BUILD.html）；</li>
+  <li>应用 crate 依赖 breadpan、bnote 路径依赖，根目录一条命令即可整体构建；</li>
+  <li>库测试须独立在 <code>breadpan/</code> / <code>bnote/</code> 清单下执行（breadpan 见其 BUILD.html）；</li>
   <li>Hyprland 接口冒烟：真机会话内执行 <code>scripts/hypr-smoke.sh</code>（套接字可达 / hyprctl 数据源 / dispatch 语义 / socket2 事件流；<code>SKIP_DISPATCH=1</code> 可跳过会换工作区的相对切换项）。</li>
 </ul>
 
