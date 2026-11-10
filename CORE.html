@@ -364,7 +364,7 @@ impl WorkspaceWidget {
 
 fn build_ws_tooltip(name: &amp;str, windows: &amp;[WorkspaceWindow]) -&gt; gtk::Box;</code></pre>
 <ul class="note">
-  <li><code>make_button</code> 以 <code>query_tooltip</code> 设置自定义浮层：工作区名加粗，窗口标题按焦点历史排序，最多 10 列；超出显示「… 还有 N 个窗口」，空工作区显示「无窗口」。首期不加载截图。</li>
+  <li><code>make_button</code> 以 <code>query_tooltip</code> 设置自定义浮层：工作区名加粗，窗口标题按焦点历史排序，最多 4 列；超出时第五条固定为「...」，空工作区显示「无窗口」。首期不加载截图。</li>
   <li>浮层宽 220px，样式类 <code>ws-tip*</code>；窗口标题单行省略；点击与滚轮切换行为不变。</li>
 </ul>
 

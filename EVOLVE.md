@@ -193,7 +193,7 @@
 - 实现思路：
   - `WorkspaceState` 增加 `windows: Vec<WorkspaceWindow>`；`WorkspaceWindow` 携带归一化地址、标题、class，供当前标题列表与后续截图预览复用。
   - daemon 在重建工作区切片时查询 `clients -j`，按 `workspace.id` 聚合窗口，并按 `focusHistoryID` 升序排列（最近聚焦在前）；打开、关闭、移动窗口沿用既有 resync 事件，标题变化则原地更新对应条目，避免额外查询。
-  - 工作区按钮由 `set_tooltip_text` 改为 `query_tooltip` 自定义浮层：显示工作区名与窗口标题，最多 10 条，超出显示「… 还有 N 个窗口」，空工作区显示「无窗口」。
+  - 工作区按钮由 `set_tooltip_text` 改为 `query_tooltip` 自定义浮层：显示工作区名与窗口标题，最多 4 条，超出时第五条固定为「...」，空工作区显示「无窗口」。
   - 浮层宽 220px、`surface` 底 `fg` 字、1px `gold` 边框、圆角 8px、内边距 6px／水平 8px；工作区名 `gold` 加粗，窗口标题单行省略。点击切换与滚轮切换行为不变。
   - 截图预览本期不实现：保留 `address` / `class` 作为后续扩展数据，但不在本项定义截图采集、缓存与刷新链路。
   - 代码分支 `feat/workspace-window-list`，提交 `7c4a2c0`；`cargo test` 22 项全部通过，GTK CSS 解析通过。
@@ -202,7 +202,7 @@
 | 文档 | 章节 | 操作 | 内容 |
 |------|------|------|------|
 | `ABOUT.html` | 用户交互 · 界面交互（工作区切换行） | 改 | 补充悬停显示窗口标题列表，截图预览标注为后续可选 |
-| `USER.html` | 5.2.2 Workspace 按钮 | 改 | 增加窗口列表原型与视觉契约：排序、最多 10 条、空态、220px 浮层、颜色/圆角/省略 |
+| `USER.html` | 5.2.2 Workspace 按钮 | 改 | 增加窗口列表原型与视觉契约：排序、最多 4 条、第五条省略号、空态、220px 浮层、颜色/圆角/省略 |
 | `style.css` | 工作区悬停窗口列表 | 增 | 新增 `.mk-ws-tip*` 原型样式 |
 | `CORE.html` | 1. 文件树 | 改 | `workspace.rs` 职责补充悬停窗口列表 |
 | `CORE.html` | 4.3 daemon/hyprland.rs | 改 | `ClientInfo` 增加 `focus_history_id`；注记 clients 为工作区列表提供 title/class/focusHistoryID |
