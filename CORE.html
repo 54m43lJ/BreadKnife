@@ -20,7 +20,7 @@
     ├── <a href="#sec-4-main">main.rs</a>           # 入口：子命令分发（daemon / open / close / …）
     ├── daemon/           # bread daemon（Model，无 GTK）
     │   ├── <a href="#sec-4-daemon-mod">mod.rs</a>        # 装配与事件循环；停机
-    │   ├── <a href="#sec-4-hyprland">hyprland.rs</a>   # Hyprland IPC 只读监听：显示器 / 工作区 / 活动窗口
+    │   ├── <a href="#sec-4-hyprland">hyprland.rs</a>   # Hyprland IPC 只读监听：显示器 / 工作区 / 活动窗口 / 最小化集合
     │   ├── <a href="#sec-4-daemon-tray">tray.rs</a>       # breadpan 组装（Tray::start）+ 事件泵 + 交互执行 + 菜单读取
     │   ├── <a href="#sec-4-system">system.rs</a>     # UPower / NetworkManager / MPRIS；pamixer / brightnessctl / ddcutil
     │   ├── <a href="#sec-4-notify">notify.rs</a>     # bnote 装配 + NameTaken 重试；通知守护角色
@@ -33,6 +33,7 @@
     │   └── modules/
     │       ├── <a href="#sec-4-workspace">workspace.rs</a>    # 工作区条（渲染 + 手势捕获）
     │       ├── <a href="#sec-4-info">info.rs</a>        # 活动窗口图标 / 标题 + 通知中心 popover + 贴栏通知窗口（独立 layer-shell，无 grab）
+    │       ├── <a href="#sec-4-dock">dock.rs</a>        # 最小化托盘：底部触发条 + 窗口条目（独立 layer-shell，无 grab）
     │       ├── <a href="#sec-4-popup">popup.rs</a>        # 弹窗会话：grab 弹窗统一托管（含通知中心 · 根窗口 / 上级弹窗定位 · 任务栏内捕获关闭 · Escape / toggle）
     │       ├── <a href="#sec-4-tray">tray.rs</a>         # 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）
     │       └── <a href="#sec-4-center">center.rs</a>       # 控制中心入口与弹出面板
@@ -62,7 +63,7 @@ scripts/
 <table>
   <tr><th>依赖</th><th>用途</th></tr>
   <tr><td><code>gtk4</code></td><td>窗口进程 GUI：控件、布局、图标主题</td></tr>
-  <tr><td><code>gtk4-layer-shell</code></td><td>任务栏与贴栏通知的 Wayland layer surface 锚定</td></tr>
+  <tr><td><code>gtk4-layer-shell</code></td><td>任务栏、贴栏通知与最小化托盘的 Wayland layer surface 锚定</td></tr>
   <tr><td><code>zbus</code></td><td>daemon 侧 D-Bus 客户端：UPower / NetworkManager / BlueZ / MPRIS</td></tr>
   <tr><td><code>breadpan</code></td><td>成员库：SNI / DBusMenu 托盘协议栈</td></tr>
   <tr><td><code>bnote</code></td><td>成员库：<code>org.freedesktop.Notifications</code> 协议</td></tr>
@@ -88,12 +89,14 @@ scripts/
 <pre><code>pub fn run(control_path: &amp;str) -&gt; Result&lt;(), String&gt;;
 
 pub const NOTIFICATION_CACHE_CAPACITY: usize;   // 推荐值 512
+pub const MINIMIZED_WORKSPACE: &amp;str;            // 推荐值 "special:minimized"
 
 pub struct Daemon {
     pub(crate) rx: Receiver&lt;DaemonEvent&gt;,
     pub(crate) tray: Option&lt;TrayHandle&gt;,
     pub(crate) notification: Option&lt;NotificationService&gt;,
     pub(crate) notifications: VecDeque&lt;NotificationRecord&gt;,
+    pub(crate) minimized: Vec&lt;MinimizedWindow&gt;,
     pub(crate) system: SystemState,
     pub(crate) windows: HashMap&lt;String, WindowProc&gt;,
     pub(crate) monitors: Vec&lt;MonitorInfo&gt;,
@@ -142,6 +145,11 @@ impl Daemon {
     fn discard_notifications(&amp;mut self);
     fn activate_notification(&amp;mut self, id: u32, action_key: Option&lt;&amp;str&gt;);
     fn retry_notification(&amp;mut self);
+    fn resync_minimized(&amp;mut self);
+    fn minimize_window(&amp;mut self, address: &amp;str);
+    fn restore_minimized(&amp;mut self, address: &amp;str);
+    fn close_minimized(&amp;mut self, address: &amp;str);
+    fn push_minimized(&amp;self);
     fn open_windows(&amp;mut self, name: String, monitor: Option&lt;String&gt;);
     fn snapshot_for(&amp;self, monitor: &amp;str) -&gt; WindowSnapshot;
     fn push_to(&amp;self, monitor: &amp;str, push: Push);
@@ -153,10 +161,16 @@ pub enum ControlCommand;     //见 USER §4.2</code></pre>
 
 <h3 id="sec-4-hyprland">4.3. daemon/hyprland.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct MonitorInfo { pub name: String, pub active_ws: Option&lt;WorkspaceRef&gt; }
-pub struct WorkspaceRef { pub id: i64 }
+pub struct WorkspaceRef { pub id: i64, pub name: String }
 pub struct WorkspaceInfo { pub id: i64, pub name: String, pub monitor: String, pub windows: u64 }
 pub struct WorkspaceRuleInfo { pub workspace_string: String, pub enabled: bool, pub monitor: String }
-pub struct ClientInfo { pub address: String, pub workspace: WorkspaceRef }
+pub struct ClientInfo {
+    pub address: String,
+    pub class: String,
+    pub title: String,
+    pub monitor: String,            // 已由 monitor id 解析为显示器名；无效时回退当前聚焦显示器
+    pub workspace: WorkspaceRef,
+}
 
 pub fn monitors() -&gt; Vec&lt;MonitorInfo&gt;;
 pub fn workspaces() -&gt; Vec&lt;WorkspaceInfo&gt;;
@@ -166,7 +180,11 @@ pub fn workspace_rules() -&gt; Vec&lt;WorkspaceRuleInfo&gt;;
 pub fn rule_workspace(rule: &amp;WorkspaceRuleInfo) -&gt; Option&lt;(String, Option&lt;i64&gt;)&gt;;   // 静态选择器 → (名称, id 提示)
 pub fn normalize_addr(addr: &amp;str) -&gt; String;                                      // 去 0x 前缀、小写
 pub fn workspace_of_client(address: &amp;str) -&gt; Option&lt;i64&gt;;
+pub fn active_workspace_name(monitor: &amp;str) -&gt; Option&lt;String&gt;;
 pub fn dispatch_workspace(target: &amp;str);                                          // Lua dispatch → 经典语法回退
+pub fn move_to_workspace(address: &amp;str, target: &amp;str);
+pub fn focus_window(address: &amp;str);
+pub fn close_window(address: &amp;str);
 pub fn watch(tx: Sender&lt;DaemonEvent&gt;);                                            // socket2 只读监听线程
 
 pub enum HyprlandEvent {
@@ -176,8 +194,18 @@ pub enum HyprlandEvent {
     ActiveWindowAddr(String),
     WindowTitle { addr: String, title: String },
     Urgent { addr: String },
+    MoveWindow { addr: String, workspace: String },
+    OpenWindow { addr: String, workspace: String, class: String, title: String },
+    CloseWindow(String),
+    Minimized { addr: String, minimized: bool },
     Resync,
 }</code></pre>
+<ul class="note">
+  <li><code>move_to_workspace</code> / <code>focus_window</code> / <code>close_window</code> 均以窗口 <code>address:</code> 选择器执行 Lua dispatch，失败时回退经典语法；窗口地址统一经 <code>normalize_addr</code> 归一。</li>
+  <li><code>minimized</code> 事件由外部 taskbar 通过 wlr-foreign-toplevel 请求触发；Hyprland 不因普通 CSD 最小化请求产生该事件。</li>
+  <li><code>clients()</code> 过滤最小化集合时消费 <code>workspace.name == MINIMIZED_WORKSPACE</code>；<code>monitor</code> 无效时回退当前聚焦显示器。</li>
+  <li><code>active_workspace_name</code> 返回普通工作区名；特殊工作区显示时取底层普通工作区，避免恢复目标仍是 <code>special:minimized</code>。</li>
+</ul>
 
 <h3 id="sec-4-daemon-tray">4.4. daemon/tray.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub fn start(tx: Sender&lt;DaemonEvent&gt;) -&gt; Option&lt;TrayHandle&gt;;    // 进程级组装一次；失败降级空托盘
@@ -270,6 +298,7 @@ pub struct WindowApp {
     ui_tx: Sender&lt;UiTask&gt;,
     workspace: WorkspaceWidget,
     info: InfoCenterWidget,
+    dock: DockWidget,
     tray: TrayWidget,
     center: CenterWidget,
 }
@@ -291,7 +320,7 @@ impl WindowApp {
 }</code></pre>
 <ul class="note">
   <li><code>Notification</code> → <code>InfoCenterWidget::upsert_center</code>；<code>NotificationPopup</code> → <code>push_popup</code>；<code>NotificationRemoved</code> / <code>NotificationCleared</code> → 同步通知中心与贴栏栈。</li>
-  <li><code>State</code> / <code>Snapshot</code> 携带 <code>NotificationStatus</code>，据此更新中心不可用态并清空贴栏栈。</li>
+  <li><code>State</code> / <code>Snapshot</code> 携带 <code>NotificationStatus</code>，据此更新中心不可用态并清空贴栏栈；携带的 <code>minimized</code> 列表喂给 <code>DockWidget</code>。</li>
 </ul>
 
 <h3 id="sec-4-bar-ipc">4.10. bar/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -391,7 +420,42 @@ pub const POPUP_LOW_TIMEOUT_MS: u64;       // 推荐值 30_000；仅 Low 未指�
   <li>图标三态：<code>None</code> 隐藏、<code>Name</code> 按图标主题查找、<code>Pixels</code> 转纹理；主题未命中按缺失降级隐藏。</li>
 </ul>
 
-<h3 id="sec-4-popup">4.14. bar/modules/popup.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-dock">4.14. bar/modules/dock.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct DockWidget {
+    trigger: gtk::Window,
+    panel: gtk::Window,
+    items: gtk::Box,
+    monitor: String,
+    ipc: Arc&lt;IpcClient&gt;,
+    data: RefCell&lt;Vec&lt;MinimizedWindow&gt;&gt;,
+    hide_timer: RefCell&lt;Option&lt;glib::SourceId&gt;&gt;,
+}
+
+impl DockWidget {
+    pub fn new(ipc: Arc&lt;IpcClient&gt;, monitor: &amp;str) -&gt; Rc&lt;Self&gt;;
+    pub fn set_items(&amp;self, items: &amp;[MinimizedWindow]);
+    fn rebuild(&amp;self);
+    fn show_panel(&amp;self);
+    fn hide_panel(&amp;self);
+    fn schedule_hide(&amp;self);
+    fn cancel_hide(&amp;self);
+    fn on_restore(&amp;self, address: &amp;str);
+    fn on_close(&amp;self, address: &amp;str);
+}
+
+pub const DOCK_TRIGGER_HEIGHT: i32;     // 推荐值 2
+pub const DOCK_HIDE_DELAY_MS: u64;      // 推荐值 300
+pub const DOCK_ITEM_WIDTH: i32;         // 推荐值 160
+pub const DOCK_MAX_WIDTH_RATIO: f64;    // 推荐值 0.88</code></pre>
+<ul class="note">
+  <li><code>trigger</code> 与 <code>panel</code> 是两个独立 layer-shell：<code>trigger</code> 为 2px 全宽底部条，<code>panel</code> 宽度按条目数计算并水平居中；两者 <code>exclusive_zone=0</code>、无 grab、键盘交互 none。</li>
+  <li><code>set_items</code> 过滤 <code>monitor</code> 与本窗口一致的最小化窗口；空列表隐藏 trigger 与 panel；非空时 trigger 常驻，panel 仅在指针进入 trigger 或 panel 时显示。</li>
+  <li>指针离开 panel 或 trigger 后 <code>DOCK_HIDE_DELAY_MS</code> 收起，重新进入取消计时。条目左键发送 <code>Request::MinimizedRestore</code>，中键/关闭键发送 <code>Request::MinimizedClose</code>；右键不绑定。</li>
+  <li>条目按 daemon 列表顺序渲染（旧→新，新条目右侧）；<code>rebuild</code> 重建条目，标题变化仅更新文本。图标按 <code>class</code> 从图标主题查找，未命中用通用占位图标。</li>
+  <li><code>panel</code> 宽度取「条目数 × <code>DOCK_ITEM_WIDTH</code> + padding」，上限「显示器宽度 × <code>DOCK_MAX_WIDTH_RATIO</code>」；超限时条目区横向滚动。</li>
+</ul>
+
+<h3 id="sec-4-popup">4.15. bar/modules/popup.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct PopupManager {
     open: RefCell&lt;HashMap&lt;String, gtk::Popover&gt;&gt;,
     press_closed: RefCell&lt;HashSet&lt;String&gt;&gt;,
@@ -423,7 +487,7 @@ pub fn hover_switch&lt;F: Fn(u64) + 'static&gt;(manager: &amp;Rc&lt;PopupManager
   <li>通知中心使用组标签 <code>info</code> 并由 <code>PopupManager</code> 托管；贴栏通知是独立 layer-shell 窗口，不参与 <code>PopupManager</code>。</li>
 </ul>
 
-<h3 id="sec-4-tray">4.15. bar/modules/tray.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-tray">4.16. bar/modules/tray.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct TrayWidget {
     container: gtk::Box,
     menus: RefCell&lt;HashMap&lt;String, gtk::Popover&gt;&gt;,
@@ -446,7 +510,7 @@ impl TrayWidget {
     pub fn on_hover_menu_done(&amp;self, item: &amp;str, token: u64, result: Result&lt;Response, String&gt;);
 }</code></pre>
 
-<h3 id="sec-4-center">4.16. bar/modules/center.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-center">4.17. bar/modules/center.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct CenterWidget {
     pub container: gtk::Box,
     ipc: Arc&lt;IpcClient&gt;,
@@ -461,7 +525,7 @@ impl CenterWidget {
     pub fn set_system(&amp;self, system: &amp;SystemState);
 }</code></pre>
 
-<h3 id="sec-4-protocol">4.17. shared/protocol.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-protocol">4.18. shared/protocol.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub enum InteractInput {
     Left { x: i32, y: i32 },
     Middle { x: i32, y: i32 },
@@ -482,6 +546,8 @@ pub enum Request {
     TrayMenuExpand { item: String, entry: i32 },
     TrayMenuActivate { item: String, entry: i32 },
     WorkspaceSwitch { target: String },
+    MinimizedRestore { address: String },
+    MinimizedClose { address: String },
     MediaControl { op: MediaOp },
     VolumeSet { value: u32 },
     BrightnessSet { value: u32 },
@@ -533,12 +599,13 @@ pub fn parse_control_line(line: &amp;str) -&gt; Option&lt;ControlCommand&gt;;</c
   <li>传输：Unix Socket（daemon 为服务端）；两类消息——窗口 → daemon 的请求（均有应答）与 daemon → 窗口的推送；首连握手后由 daemon 推送全量快照，此后增量衔接。</li>
   <li><code>hello</code>：窗口接入握手，显示器名 → 先推全量快照、后应答受理。</li>
   <li>请求语义：<code>tray.menu_read</code> / <code>tray.menu_expand</code> 返回菜单快照；<code>tray.interact</code> 返回路由结果（<code>Dispatched</code> / <code>Menu</code> 快照）；<code>notification.activate</code> 的动作 key 缺省取 <code>default</code> / 唯一动作，触发动作后关闭该条（<code>resident</code> 除外），无可用动作则直接关闭。</li>
-  <li>推送语义：<code>notification</code> 推送全部窗口用于通知中心缓存；<code>notification_popup</code> 仅推当前显示器；<code>notification_removed</code> / <code>notification_cleared</code> 推送全部窗口。</li>
+  <li>请求语义：<code>minimized.restore</code> 把窗口移到其显示器当前活动工作区并聚焦；<code>minimized.close</code> 请求关闭窗口；地址不在最小化集合时无操作。</li>
+  <li>推送语义：<code>notification</code> 推送全部窗口用于通知中心缓存；<code>notification_popup</code> 仅推当前显示器；<code>notification_removed</code> / <code>notification_cleared</code> 推送全部窗口；<code>state.minimized</code> 推送全部窗口，由各窗口按显示器过滤。</li>
   <li>大对象（如位图图标）可经 fd 传递升级（memfd + <code>SCM_RIGHTS</code>），协议骨架不变。</li>
   <li>断开处理：互动失败时窗口重连一次（按首连流程再取全量快照）；周期性存活检查（PID 文件）确认 daemon 已退出则自主退出。</li>
 </ul>
 
-<h3 id="sec-4-model">4.18. shared/model.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-model">4.19. shared/model.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct WorkspaceState {     // 形态见 ABOUT「界面交互」；色彩映射见 USER §5.2.2
     pub id: i64,
     pub name: String,
@@ -635,6 +702,13 @@ pub enum NotificationStatus {
     Unavailable { message: String },
 }
 
+pub struct MinimizedWindow {
+    pub address: String,
+    pub class: String,
+    pub title: String,
+    pub monitor: String,
+}
+
 pub struct WindowSnapshot {
     pub monitor: String,
     pub workspaces: Vec&lt;WorkspaceState&gt;,
@@ -642,6 +716,7 @@ pub struct WindowSnapshot {
     pub tray: Vec&lt;TrayItemView&gt;,
     pub notifications: Vec&lt;NotificationRecord&gt;,
     pub notification: NotificationStatus,
+    pub minimized: Vec&lt;MinimizedWindow&gt;,
     pub system: SystemState,
     pub css_path: String,
 }
@@ -651,16 +726,19 @@ pub struct StateDelta {
     pub active: Option&lt;ActiveWindow&gt;,
     pub system: Option&lt;SystemState&gt;,
     pub notification: Option&lt;NotificationStatus&gt;,
+    pub minimized: Option&lt;Vec&lt;MinimizedWindow&gt;&gt;,
 }</code></pre>
 <ul class="note">
   <li><code>WorkspaceState</code>：本屏工作区清单＝现存工作区 ∪ 绑定到本屏的静态 workspace 规则（有规则无窗口＝非活跃工作区）；启动/插拔/配置重载时全量重建（按名去重 + id 排序）。</li>
-  <li><code>WindowSnapshot</code>：单窗口所需状态——本屏工作区、活动窗口、托盘、通知、通知服务状态、CSS 路径；首连全量。</li>
+  <li><code>WindowSnapshot</code>：单窗口所需状态——本屏工作区、活动窗口、托盘、通知、通知服务状态、最小化窗口、CSS 路径；首连全量。</li>
+  <li><code>MinimizedWindow</code>：<code>address</code> 为归一化窗口地址，<code>class</code> / <code>title</code> 用于图标与标题，<code>monitor</code> 为窗口归属显示器；daemon 维护列表顺序，新条目追加右侧，窗口标题变化原地更新。</li>
+  <li><code>StateDelta.minimized</code> 为完整列表快照；列表变化时广播全部窗口，各窗口按 <code>monitor</code> 过滤。</li>
   <li><code>NotificationRecord</code>：由 <code>bnote::Notice</code> 投影，保留 id、应用名、图标三态、标题、正文、动作、<code>action_icons</code>、紧急度、请求超时、<code>transient</code> / <code>resident</code>、<code>sound_file</code> / <code>sound_name</code> / <code>suppress_sound</code>；窗口只消费共享模型，不接触 bnote 类型。</li>
   <li><code>NotificationStatus</code>：<code>Ready</code> / <code>Unavailable { message }</code>；通知服务启动成功为 <code>Ready</code>，启动失败或运行中终止为 <code>Unavailable</code>，变化时推送全部窗口。</li>
   <li>通知关闭原因：<code>Dismissed</code>（用户关闭 / 组清理 / 动作确认）/ <code>Expired</code>（<code>transient</code> 超时 / 缓存淘汰）；窗口请求映射为 bnote <code>CloseReason</code>；客户端 <code>CloseNotification</code> 由 bnote 自行回发 <code>CloseRequest</code>。</li>
 </ul>
 
-<h3 id="sec-4-tests">4.19. tests.rs <a href="#sec-1">↑ 文件树</a></h3>
+<h3 id="sec-4-tests">4.20. tests.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>#[test] fn protocol_roundtrip();
 #[test] fn parse_control_line_accepts_commands();
 #[test] fn daemon_alive_reads_pid();</code></pre>
@@ -683,6 +761,7 @@ pub struct StateDelta {
 │    ├── hyprland::workspace_rules()
 │    ├── clear_urgent_on_active_transition()
 │    ├── rebuild_workspace_slices()
+│    ├── Daemon::resync_minimized()
 │    ├── spawn_window(mon)
 │    └── push_workspace_slices()
 └── Daemon::run_loop()
@@ -698,6 +777,7 @@ pub struct StateDelta {
 │         ├── PopupManager::install(window)
 │         ├── WorkspaceWidget::new(ipc)
 │         ├── InfoCenterWidget::new(ipc, monitor, window, popup)
+│         ├── DockWidget::new(ipc, monitor)
 │         ├── TrayWidget::new(ipc, ui, window, popup)
 │         ├── CenterWidget::new(ipc, window, popup)
 │         ├── glib::timeout_add_local(UI_DRAIN, drain)
@@ -872,6 +952,65 @@ center.connect_closed(...)（绑定关闭信号）
 <ul class="note">
   <li>打开时通知中心 popover 抓取输入，贴栏通知窗口隐藏但保留记录与计时；关闭后只恢复未过期的贴栏记录。</li>
   <li>打开、关闭与分组展开/收缩只改本地视图，不改通知缓存，也不补发已超时的贴栏卡片。</li>
+</ul>
+
+<h3 id="sec-5-9">5.9. 最小化托盘</h3>
+<pre><code>启动 / 配置重载 / 显示器插拔
+└── Daemon::resync_minimized()
+     ├── hyprland::clients()
+     ├── 过滤 workspace.name == MINIMIZED_WORKSPACE
+     ├── 合并已有顺序，新窗口追加右侧
+     └── Daemon::push_minimized()
+          └── Daemon::broadcast(Push::State { minimized: Some(..) })
+               └── WindowApp::handle_push(push)
+                    └── DockWidget::set_items(items)
+
+movewindowv2 / openwindow / closewindow / monitorremoved / configreloaded
+└── Daemon::on_hyprland(ev)
+     └── Daemon::resync_minimized()
+          ├── hyprland::clients()
+          └── Daemon::push_minimized()
+
+windowtitlev2
+└── Daemon::on_hyprland(WindowTitle { addr, title })
+     ├── 更新 minimized 中同地址条目标题
+     └── Daemon::push_minimized()
+
+minimized&gt;&gt;地址,1
+└── Daemon::on_hyprland(ev)
+     └── Daemon::minimize_window(addr)
+          ├── hyprland::move_to_workspace(addr, MINIMIZED_WORKSPACE)
+          └── Daemon::resync_minimized()
+
+minimized&gt;&gt;地址,0
+└── Daemon::on_hyprland(ev)
+     └── Daemon::restore_minimized(addr)
+          ├── hyprland::active_workspace_name(monitor)
+          ├── hyprland::move_to_workspace(addr, target)
+          └── hyprland::focus_window(addr)
+
+底部触发条进入
+└── DockWidget::show_panel()
+     └── 设置 panel layer surface 可见
+
+panel / trigger 离开
+└── DockWidget::schedule_hide()
+     └── glib::timeout_add_local_once(DOCK_HIDE_DELAY_MS, hide_panel)
+
+条目左键 → IpcClient::request(Request::MinimizedRestore { address })
+└── Daemon::restore_minimized(address)
+     ├── hyprland::active_workspace_name(record.monitor)
+     ├── hyprland::move_to_workspace(address, target)
+     └── hyprland::focus_window(address)
+
+条目中键 / 关闭键 → IpcClient::request(Request::MinimizedClose { address })
+└── Daemon::close_minimized(address)
+     └── hyprland::close_window(address)</code></pre>
+<ul class="note">
+  <li>最小化集合以 Hyprland <code>special:minimized</code> 工作区为准；<code>minimized</code> 事件只是外部 taskbar 的辅助触发，普通 CSD 最小化请求不产生该事件。</li>
+  <li>恢复只把窗口移到其显示器当前活动工作区并聚焦，不保留原工作区；窗口离开最小化工作区后由 <code>movewindowv2</code> 驱动列表移除。</li>
+  <li>关闭请求成功与否以 <code>closewindow</code> 事件为准；请求失败不回滚列表，窗口仍保留在托盘中。</li>
+  <li>列表顺序由 daemon 的 <code>minimized</code> 向量维护；resync 保留已有顺序，新窗口按 <code>clients()</code> 顺序追加右侧。</li>
 </ul>
 
 </main>

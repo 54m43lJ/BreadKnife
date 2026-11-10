@@ -18,6 +18,12 @@
 <h2 id="sec-1">1. 术语</h2>
 <p>托盘域术语（Watcher、Item、渲染直出等）沿用成员库定义，见
 <a href="breadpan/USER.html#sec-1">breadpan/USER.html §1</a>，本文档不重复定义。</p>
+<table>
+  <tr><th>术语</th><th>定义</th></tr>
+  <tr><td>最小化工作区</td><td>Hyprland 特殊工作区 <code>special:minimized</code>；窗口是否属于最小化集合以该工作区归属判定</td></tr>
+  <tr><td>最小化窗口</td><td>位于最小化工作区的普通窗口；最小化动作由 Hyprland 配置或外部工具提供，bread 只负责收集与恢复</td></tr>
+  <tr><td>最小化托盘</td><td>屏幕底部自动隐藏的窗口入口；按显示器收集本屏最小化窗口，提供恢复与关闭</td></tr>
+</table>
 
 <h2 id="sec-2">2. 通用约定</h2>
 <ul>
@@ -276,6 +282,39 @@
   <li>手动重试：刷新按钮位于失败说明正文下方，点击后重新装配通知服务；成功则恢复正常列表 / 空态，仍失败则保留错误态。宿主不自动重试、不排队、不替换已有通知服务。</li>
   <li>弹出触发、悬停查看全文与左键/中键行为见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>。</li>
   <li>通知中心弹出时贴栏通知的显隐与计时见 <a href="#sec-5-2-5">§5.2.5</a>。</li>
+</ul>
+
+<h4 id="sec-5-2-7">5.2.7. 最小化托盘</h4>
+<div class="mk">
+  <div class="mk-scene">
+    <div class="mk-dock">
+      <div class="mk-dock-item">
+        <span class="mk-dock-ic"></span>
+        <span class="mk-dock-t">构建日志</span>
+        <span class="mk-dock-x">✕</span>
+      </div>
+      <div class="mk-dock-item hi">
+        <span class="mk-dock-ic"></span>
+        <span class="mk-dock-t">文档 - BreadKnife</span>
+        <span class="mk-dock-x">✕</span>
+      </div>
+      <div class="mk-dock-item">
+        <span class="mk-dock-ic"></span>
+        <span class="mk-dock-t">终端</span>
+        <span class="mk-dock-x">✕</span>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="note">
+  <li>每屏一条，面板水平居中于屏幕底部；无最小化窗口时完全隐藏，不占用底部输入区；有条目时保留 2px 高全宽触发条，指针进入后弹出面板，离开面板或触发条 300ms 后收起。</li>
+  <li>面板高 64px、内边距 6px、圆角 12px、底边距 8px；面板宽随条目增长，上限 88% 屏宽，超出时条目区横向滚动。</li>
+  <li>条目高 48px、宽 160px，图标 32px 左置，标题 1 行、超出省略，关闭键固定在条目右侧；条目横向排列。</li>
+  <li>面板 <code>surface</code> 底 <code>fg</code> 字、1px <code>gold</code> 边框；条目透明底，Hover <code>purple</code> 底 <code>cream</code> 字；关闭键取 <code>muted</code>，Hover 取 <code>red</code>；图标按窗口 class 从图标主题查找，未命中使用通用占位图标。</li>
+  <li>左键点击条目恢复窗口并聚焦；中键或关闭键关闭窗口；右键无动作（暂不实现菜单）。托盘不抢键盘焦点。</li>
+  <li>窗口进入最小化工作区即加入，按进入时间从旧到新排列，新条目追加在最右侧；标题变化实时更新，窗口移出或关闭即移除。</li>
+  <li>恢复目标为该窗口所属显示器的当前活动工作区；所属显示器移除后按 Hyprland 的新归属重新归类。</li>
+  <li>托盘不提供最小化动作；在 Hyprland 配置中把窗口移入 <code>special:minimized</code> 即可被收集，推荐键位见 <a href="BUILD.html">BUILD.html</a>。</li>
 </ul>
 
 </main>

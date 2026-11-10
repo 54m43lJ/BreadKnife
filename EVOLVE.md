@@ -52,3 +52,38 @@
 | `bnote/PROVIDER.html` | 4.5 标准能力清单 | 不动 | 通知中心是宿主 UI，能力契约与协议字段不变；与通知能力项重叠 |
 | `style.css` | 通知中心样例 `.mk-nc*` | 不动 | 现有样例已覆盖面板、分组、消息卡、更多条目与清理按钮，尺寸数值仍按注记与 CSS 为准 |
 | `TODO.md` | 第二项「点击标题栏弹出消息中心…」 | 改 | 追加 `[已解决]` 标记 |
+
+## 最小化托盘（TODO 第 3 项）
+
+- 需求：加入类 macOS 的底部最小化托盘，鼠标进入屏幕底边时弹出；窗口以图标+标题横向排列，条目右侧带关闭键；左键点击恢复并聚焦窗口，中键点击关闭窗口；暂不实现右键菜单。
+- 实现思路：
+  - 以 Hyprland 特殊工作区 `special:minimized` 作为最小化集合：窗口移入即被收集，移出或关闭即移除；最小化动作由 Hyprland 配置或外部工具提供，bread 负责收集与恢复。
+  - daemon 在启动、`movewindowv2` / `openwindow` / `closewindow` / `monitorremoved` / `configreloaded` 后查询 `clients -j` 重算集合；`windowtitlev2` 原地更新标题；列表顺序稳定，新条目追加右侧。
+  - 支持 Hyprland `minimized` 事件：外部 taskbar 请求最小化时把窗口移入 `special:minimized`，请求恢复时移回显示器当前活动工作区并聚焦。
+  - 每屏一条托盘，由窗口进程创建两个独立 layer-shell：2px 全宽底部触发条与动态宽度面板；均不 grab、不抢键盘焦点。指针进入触发条显示面板，离开面板/触发条 300ms 后收起。
+  - 面板宽随条目增长，上限 88% 屏宽，超出横向滚动；条目宽 160px、高 48px，图标 32px、标题 1 行省略、关闭键右侧；面板 `surface` 底 `fg` 字、1px `gold` 边框，条目 Hover `purple` 底 `cream` 字。
+  - 左键条目发送 `MinimizedRestore`，中键与关闭键发送 `MinimizedClose`；右键不绑定。恢复目标为窗口所属显示器的当前活动工作区，关闭使用 `closewindow`。
+  - 数据面新增 `MinimizedWindow`（address / class / title / monitor），经 `StateDelta.minimized` 广播全量列表，各窗口按显示器过滤；新增两个请求类型，不新增推送类型。
+  - 最小化动作不在 bread 内发起；BUILD 给出 Hyprland 键位示例，便于用户把窗口移入 `special:minimized`。
+- 文档操作：
+
+| 文档 | 章节 | 操作 | 内容 |
+|------|------|------|------|
+| `ABOUT.html` | 用户交互 · 界面交互（最小化托盘行） | 增 | 新增底部托盘的用户可见行为：悬停弹出、图标+标题、关闭键、左键恢复、中键关闭、无右键菜单 |
+| `ABOUT.html` | 用户交互 · 界面交互（注记） | 增 | 说明 `special:minimized` 集合、每屏一条、恢复目标与最小化动作边界，并链接 BUILD |
+| `USER.html` | 1. 术语 | 增 | 新增最小化工作区、最小化窗口、最小化托盘三个术语 |
+| `USER.html` | 5.2.7 最小化托盘 | 增 | 新增托盘原型与完整视觉/交互契约：显隐、尺寸、颜色、排序、多显示器、恢复与关闭 |
+| `style.css` | 最小化托盘样例 `.mk-dock*` | 增 | 新增托盘面板、条目、图标、标题与关闭键的原型式样式 |
+| `CORE.html` | 1. 文件树 | 改 | 新增 `bar/modules/dock.rs` 与 `hyprland.rs` 的最小化集合职责 |
+| `CORE.html` | 4.2 daemon/mod.rs | 改 | `Daemon` 增加 `minimized` 列表与 `MINIMIZED_WORKSPACE`；补充重同步、恢复、关闭、推送方法签名 |
+| `CORE.html` | 4.3 daemon/hyprland.rs | 改 | `ClientInfo` 补 class / title / monitor，`WorkspaceRef` 补 name；新增 `move_to_workspace` / `focus_window` / `close_window` / `active_workspace_name` 与最小化相关事件 |
+| `CORE.html` | 4.14 bar/modules/dock.rs | 增 | 新增 `DockWidget` 签名、两个 layer-shell 的触发/面板结构、显隐计时与常量 |
+| `CORE.html` | 4.18 shared/protocol.rs | 改 | 新增 `MinimizedRestore` / `MinimizedClose` 请求与请求/推送语义说明 |
+| `CORE.html` | 4.19 shared/model.rs | 改 | 新增 `MinimizedWindow`；`WindowSnapshot` / `StateDelta` 增加 `minimized` 列表 |
+| `CORE.html` | 5.1 启动 | 改 | 窗口装配加入 `DockWidget`，daemon 启动重同步加入 `resync_minimized` |
+| `CORE.html` | 5.9 最小化托盘 | 增 | 新增集合重同步、事件、恢复、关闭与 UI 显隐调用栈 |
+| `PROVIDER.html` | 1. 术语、4.1 Hyprland IPC | 改 | 新增最小化工作区术语；登记 `movewindowv2` / `openwindow` / `closewindow` / `windowtitlev2` / `minimized` 事件、客户端查询字段与三个窗口 dispatcher |
+| `BUILD.html` | 3.1 Linux、4. 补充说明 | 改 | 新增 Hyprland 最小化键位示例与托盘集成说明；补充「底部托盘不出现」的排查项 |
+| `USER.html` | 5.2.5 通知弹窗、5.2.6 通知中心 | 不动 | 前两项已完成，最小化托盘不改通知的几何、生命周期与交互 |
+| `bnote/PROVIDER.html` | 4.5 标准能力清单 | 不动 | 托盘是窗口管理 UI，不改变通知协议与服务能力；与通知能力项重叠 |
+| `TODO.md` | 第三项「加入一个类macOS的底部托盘…」 | 改 | 追加 `[已解决]` 标记 |

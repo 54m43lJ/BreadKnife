@@ -59,6 +59,14 @@ bread open-all            # 每台显示器开一条任务栏
 bread reload              # 热重载 CSS（改色即见）
 bread exit                # 优雅退出（终止全部窗口、释放托盘 Watcher 名）</code></pre>
 
+<h4>最小化托盘集成</h4>
+<pre><code>hl.bind("SUPER + M", hl.dsp.window.move({ workspace = "special:minimized", follow = false }))</code></pre>
+<ul class="note">
+  <li>bread 以 Hyprland 特殊工作区 <code>special:minimized</code> 作为最小化集合；把窗口移入即出现在该显示器底部托盘。</li>
+  <li>托盘左键恢复并聚焦，中键或关闭键关闭窗口，右键无菜单；恢复目标为该显示器当前活动工作区。</li>
+  <li>最小化动作不由 bread 提供，示例键位可按需修改；托盘不抢键盘焦点，指针离开后自动收起。</li>
+</ul>
+
 <h2>4. 补充说明</h2>
 <table>
   <tr><th>症状</th><th>定位</th></tr>
@@ -66,6 +74,7 @@ bread exit                # 优雅退出（终止全部窗口、释放托盘 Wat
   <tr><td>窗口未出现</td><td>查 daemon stderr 的 <code>[windows]</code> spawn / 崩溃重启日志；连续崩溃超限（60s 内 5 次）放弃并记录</td></tr>
   <tr><td>右键菜单延迟数秒</td><td>病态 Item 的菜单读取耗时（breadpan 同步调用阻塞调用线程）；阻塞发生在 daemon 专用线程，窗口不冻结</td></tr>
   <tr><td>通知中心暂时不可用</td><td>会话已有通知守护（如 dunst）持有 <code>org.freedesktop.Notifications</code>；通知中心显示不可用错误与刷新按钮，点击后手动重试装配</td></tr>
+  <tr><td>底部最小化托盘不出现</td><td>确认窗口位于 <code>special:minimized</code>；无最小化窗口时托盘完全隐藏；检查 daemon stderr 的 Hyprland 事件与 <code>clients</code> 查询日志</td></tr>
 </table>
 <ul class="note">
   <li>运行时文件：<code>$XDG_RUNTIME_DIR/bread.pid</code>（PID 文件）、<code>bread.sock</code>（控制）、<code>bread-windows.sock</code>（窗口 IPC）、<code>bread/bread.css</code>（落盘的默认主题）；控制套接字可用 <code>-s/--socket</code> 覆盖（窗口套接字随之派生）；</li>

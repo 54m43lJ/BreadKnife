@@ -18,8 +18,9 @@
 <h2 id="sec-1">1. 术语</h2>
 <table>
   <tr><th>术语</th><th>定义</th></tr>
-  <tr><td>Hyprland IPC</td><td>Hyprland 合成器在 <code>$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/</code> 下提供的 Unix Socket 事件流；本项目的显示器 / 工作区 / 活动窗口 / 紧急状态来源</td></tr>
+  <tr><td>Hyprland IPC</td><td>Hyprland 合成器在 <code>$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/</code> 下提供的 Unix Socket 事件流；本项目的显示器 / 工作区 / 活动窗口 / 紧急状态 / 最小化集合来源</td></tr>
   <tr><td>workspace 规则</td><td>Hyprland 配置中的静态工作区绑定，决定哪些工作区常驻显示在某显示器</td></tr>
+  <tr><td>最小化工作区</td><td>Hyprland 特殊工作区 <code>special:minimized</code>；bread 以其中的客户端作为最小化集合</td></tr>
   <tr><td>调节后端</td><td>音量与亮度的外部命令行工具；缺席时对应功能降级</td></tr>
 </table>
 
@@ -43,11 +44,24 @@
   <tr><td><code>workspace&gt;&gt;X</code></td><td>更新工作区映射并推送工作区切片</td></tr>
   <tr><td><code>activewindow</code></td><td>更新并推送活动窗口</td></tr>
   <tr><td><code>urgent&gt;&gt;X</code></td><td>窗口请求关注 → 所在工作区紧急位置位（清除语义见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>）</td></tr>
-  <tr><td><code>configreloaded</code></td><td>全量重同步：重扫显示器清单、重建映射并对齐任务栏</td></tr>
+  <tr><td><code>movewindowv2</code></td><td>窗口移入 / 移出最小化工作区 → 重同步最小化托盘</td></tr>
+  <tr><td><code>openwindow</code> / <code>closewindow</code></td><td>窗口打开 / 关闭 → 重同步最小化托盘</td></tr>
+  <tr><td><code>windowtitlev2</code></td><td>更新最小化托盘条目标题</td></tr>
+  <tr><td><code>minimized&gt;&gt;ADDR,0/1</code></td><td>外部 taskbar 请求最小化 / 恢复 → 将窗口移入 / 移出最小化工作区</td></tr>
+  <tr><td><code>configreloaded</code></td><td>全量重同步：重扫显示器清单、重建映射、重读最小化集合并对齐任务栏</td></tr>
+</table>
+<table>
+  <tr><th>接口</th><th>消费内容</th></tr>
+  <tr><td><code>hyprctl clients -j</code></td><td><code>address</code> / <code>class</code> / <code>title</code> / <code>workspace.name</code> / <code>monitor</code>；过滤 <code>special:minimized</code> 并确定归属显示器</td></tr>
+  <tr><td><code>hyprctl monitors -j</code></td><td>各显示器当前活动工作区（恢复目标）与宽度（托盘宽度上限）</td></tr>
+  <tr><td><code>hl.dsp.window.move({ workspace, window, follow = false })</code></td><td>移入最小化工作区或恢复到活动工作区</td></tr>
+  <tr><td><code>hl.dsp.focus({ window })</code></td><td>恢复后聚焦窗口</td></tr>
+  <tr><td><code>hl.dsp.window.close({ window })</code></td><td>关闭最小化窗口</td></tr>
 </table>
 <ul class="note">
   <li>查询类数据（显示器、工作区、客户端、workspace 规则）经 <code>hyprctl -j</code> 获取；字段口径以 <a href="reference/hyprland-ipc.html">reference/hyprland-ipc.html</a>、<a href="reference/hyprland-hyprctl.html">hyprctl</a>、<a href="reference/hyprland-dispatcher.html">dispatcher</a> 为准。</li>
-  <li>工作区切换经 dispatcher 执行；目标语法与回退策略见 <a href="CORE.html#sec-4-hyprland">CORE §4.2</a>。</li>
+  <li>工作区切换与最小化窗口操作经 dispatcher 执行；窗口选择器统一用 <code>address:</code>，Lua dispatch 失败时回退经典语法，见 <a href="CORE.html#sec-4-hyprland">CORE §4.3</a>。</li>
+  <li><code>minimized</code> 事件仅由外部 taskbar 通过 wlr-foreign-toplevel 请求触发；普通 CSD 最小化不保证产生。bread 以 <code>special:minimized</code> 工作区为准，事件只作为辅助触发。</li>
 </ul>
 
 <h3 id="sec-4-2">4.2. 系统 DBus 服务</h3>
