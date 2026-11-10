@@ -115,7 +115,7 @@ impl WorkspaceWidget {
     }
 }
 
-/// 工作区悬停浮层：首期只列窗口标题；超过 10 条折叠为计数。
+/// 工作区悬停浮层：首期只列窗口标题；最多 4 条，超出时第五条为省略号。
 fn build_ws_tooltip(name: &str, windows: &[WorkspaceWindow]) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 3);
     root.add_css_class("ws-tip");
@@ -134,7 +134,7 @@ fn build_ws_tooltip(name: &str, windows: &[WorkspaceWindow]) -> gtk::Box {
         return root;
     }
 
-    for window in windows.iter().take(10) {
+    for window in windows.iter().take(4) {
         let text = if window.title.trim().is_empty() {
             "未命名窗口"
         } else {
@@ -148,8 +148,8 @@ fn build_ws_tooltip(name: &str, windows: &[WorkspaceWindow]) -> gtk::Box {
         root.append(&row);
     }
 
-    if windows.len() > 10 {
-        let more = gtk::Label::new(Some(&format!("… 还有 {} 个窗口", windows.len() - 10)));
+    if windows.len() > 4 {
+        let more = gtk::Label::new(Some("..."));
         more.set_xalign(0.0);
         more.add_css_class("ws-tip-more");
         root.append(&more);
