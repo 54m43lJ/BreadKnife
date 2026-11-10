@@ -60,11 +60,6 @@ bread reload              # 热重载 CSS（改色即见）
 bread exit                # 优雅退出（终止全部窗口、释放托盘 Watcher 名）</code></pre>
 
 <h2>4. 补充说明</h2>
-<ul class="note">
-  <li>运行时文件：<code>$XDG_RUNTIME_DIR/bread.pid</code>（PID 文件）、<code>bread.sock</code>（控制）、<code>bread-windows.sock</code>（窗口 IPC）、<code>bread/bread.css</code>（落盘的默认主题）；控制套接字可用 <code>-s/--socket</code> 覆盖（窗口套接字随之派生）；</li>
-  <li>主题覆盖：<code>BREAD_CSS=/path/to/theme.css bread</code>——daemon 跟踪该路径，<code>bread reload</code> 广播重读；</li>
-  <li>VMware / vmwgfx 环境：窗口进程自动回退 <code>GSK_RENDERER=cairo</code>（规避 dmabuf 协议错误崩溃）。</li>
-</ul>
 <table>
   <tr><th>症状</th><th>定位</th></tr>
   <tr><td>托盘空 + <code>NameTaken</code> 日志</td><td>会话已有 SNI host（旧任务栏未退）——退出占用者后重启 daemon；breadpan 对该终局不自动重连（终局降级：不重试、不夺回）</td></tr>
@@ -72,6 +67,12 @@ bread exit                # 优雅退出（终止全部窗口、释放托盘 Wat
   <tr><td>右键菜单延迟数秒</td><td>病态 Item 的菜单读取耗时（breadpan 同步调用阻塞调用线程）；阻塞发生在 daemon 专用线程，窗口不冻结</td></tr>
   <tr><td>通知中心暂时不可用</td><td>会话已有通知守护（如 dunst）持有 <code>org.freedesktop.Notifications</code>；通知中心显示不可用错误与刷新按钮，点击后手动重试装配</td></tr>
 </table>
+<ul class="note">
+  <li>运行时文件：<code>$XDG_RUNTIME_DIR/bread.pid</code>（PID 文件）、<code>bread.sock</code>（控制）、<code>bread-windows.sock</code>（窗口 IPC）、<code>bread/bread.css</code>（落盘的默认主题）；控制套接字可用 <code>-s/--socket</code> 覆盖（窗口套接字随之派生）；</li>
+  <li>主题覆盖：<code>BREAD_CSS=/path/to/theme.css bread</code>——daemon 跟踪该路径，<code>bread reload</code> 广播重读；</li>
+  <li>VMware / vmwgfx 环境：窗口进程自动回退 <code>GSK_RENDERER=cairo</code>（规避 dmabuf 协议错误崩溃）。</li>
+</ul>
+
 
 </main>
 </body>

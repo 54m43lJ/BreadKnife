@@ -454,12 +454,13 @@ fn repl();   // 查询与交互命令循环</code></pre>
 <pre><code>pump_signal_stream(rule, bus, handler)
 ├── find_by_signal(发送者唯一名, 对象路径)
 ├── ItemTracker::update_routing(&amp;id, menu, menu_only)   // 仅 PropertiesChanged
-├── pending.insert(id)
-└── debounce_task(bus)
-     ├── pending.drain()
-     │    └── events.send(TrayEvent::Changed(id))   // 逐条
-     └── pending_menu.drain()
-          └── events.send(TrayEvent::MenuChanged(id))   // 逐条</code></pre>
+└── pending.insert(id)
+
+debounce_task(bus)
+├── pending.drain()
+│    └── events.send(TrayEvent::Changed(id))   // 逐条
+└── pending_menu.drain()
+     └── events.send(TrayEvent::MenuChanged(id))   // 逐条</code></pre>
 <ul class="note">
   <li>常驻信号任务共 6 条：<code>properties_changed_task</code> ×2、<code>item_signals_task</code> ×2、<code>dbusmenu_signals_task</code>；kde 与 fd 前缀各一条，经 <code>pump_signal_stream</code> 订阅消费。</li>
   <li><code>find_by_signal</code> 以（发送者唯一名, 对象路径）唯一命中；未命中丢弃。双注册已在报到阶段并入。</li>

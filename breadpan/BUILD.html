@@ -58,10 +58,6 @@ cargo run --example interactions</code></pre>
   <tr><td><code>minimal</code></td><td>打印快照（含各 Item 的标题/状态）与全部事件流——快照/出现/移除/变更/菜单变更/名称变更/换主/交互回执/内部叙述；持续消费至 Ctrl-C 或终局事件（Displaced / Fatal）</td></tr>
   <tr><td><code>interactions</code></td><td><strong>交互式宿主</strong>，与真实托盘程序同构：后台线程持续消费事件流并维护 Item 卡片册（快照重建 / Added 建卡 / Removed 删卡 / Changed 重读刷新 / NameChanged 迁卡，过程实时打印）；主线程 REPL 以「编号、精确 id 或 id 前缀」引用 Item，发起查询与全部交互，菜单互动现场读取并打印返回数据。<code>quit</code> 或 Ctrl-D 优雅停机退出</td></tr>
 </table>
-<ul class="note">
-  <li>隔离演示：<code>dbus-run-session -- cargo run --example minimal</code>——空总线验证启动与事件循环（无真实 Item，快照为空）；</li>
-  <li>真机演示提示：无 Watcher 的裸 Wayland 会话中运行，库会接管登记中心——存量 Item（如残留的托盘应用）经反向发现进入快照，等待 Watcher 出现的应用随后以增量事件报到；停掉任一托盘应用可观察 <code>Removed</code>，操作托盘图标可观察 <code>Changed</code> / <code>InteractionResult</code>。</li>
-</ul>
 <pre><code>list                          列出在册 Item（编号 / id / 标题 / 状态 / 存活）
 info     &lt;item&gt;               查看 Item 全部属性（现场读取，零缓存）
 menu     &lt;item&gt;               读取根层菜单（条目 / 可用性 / 勾选态 / 子菜单标记）
@@ -74,6 +70,11 @@ mclick   &lt;item&gt; &lt;条目id&gt;      菜单条目点击提交（回执经
 alive    &lt;item&gt;               存活探测结论（零 DBus 流量）
 quit                          优雅停机退出</code></pre>
 
+
+<ul class="note">
+  <li>隔离演示：<code>dbus-run-session -- cargo run --example minimal</code>——空总线验证启动与事件循环（无真实 Item，快照为空）；</li>
+  <li>真机演示提示：无 Watcher 的裸 Wayland 会话中运行，库会接管登记中心——存量 Item（如残留的托盘应用）经反向发现进入快照，等待 Watcher 出现的应用随后以增量事件报到；停掉任一托盘应用可观察 <code>Removed</code>，操作托盘图标可观察 <code>Changed</code> / <code>InteractionResult</code>。</li>
+</ul>
 <footer>
   文档：<a href="ABOUT.html">ABOUT</a> ·
   <a href="USER.html">USER</a> ·
