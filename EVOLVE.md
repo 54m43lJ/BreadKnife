@@ -110,3 +110,26 @@
 | `BUILD.html` | 运行前提 / 排查 | 不动 | 无新增依赖或用户配置；`hyprctl` 已是既有查询路径 |
 | `bnote/PROVIDER.html` | 4.5 标准能力清单 | 不动 | 当前显示器判定属于宿主 UI，不改变通知协议与能力清单 |
 | `TODO.md` | 第四项「通知弹窗当前显示器判定…」 | 改 | 追加 `[已解决]` 标记 |
+
+## 九色色板迁移（TODO 第 5 项）
+
+- 需求：按权威九色色板迁移实现分支的 `src/assets/bread.css` 与 `src/`，清除旧 token 名、托盘动态垫高、`success` 等遗留，完成整体色板迁移；文档侧的色板定义已经定稿，本次让代码与契约对齐。
+- 实现思路：
+  - 以 `bg / surface / fg / muted / purple / purple-light / gold / cream / red` 九色替换旧 token：`bg_primary→bg`；`bg_secondary` / `bg_hover→surface`；`bg_active→fg`（滑轨）；`fg_primary→fg`；`fg_secondary→fg`（文字）或 `muted`（图标）；`fg_muted→muted`（通知应用名改 `gold`）；`accent` / `accent_hover→purple` / `purple-light`；`warning→gold`；`danger→red`；`border` / `border_strong→gold`；`success` 删除且不设替代。
+  - 工作区条紧急态改为两色互换：基底 `purple→fg`、叠加点 `fg→purple`；Rust 的 `on-warning` 类改名为 `on-urgent`，与 USER §5.2.2 对齐。
+  - 托盘取消按图标亮度动态垫高：删除 `apply_pad_class` / `icon_is_dark` / `texture_luminance` / `luminance_of_samples` 与 `tray-pad-*` 样式；图标按钮直接以 `fg` 为底色渲染。托盘菜单随色板改为 `fg` 底、`bg` 字，Hover `purple` 底 `cream` 字；注意态用 `gold` 微高亮。
+  - 控制中心入口改透明底；滑轨取 `fg`、滑块取 `purple`、Hover/已填充取 `purple-light`；日历选中项取 `purple` 底 `cream` 字。
+  - 代码分支 `refactor/palette-migration`，提交 `f2f06a2`；`cargo check` 通过，`cargo test` 21 项全部通过。
+  - 文档契约不变：USER §5.1 已定义九色，CORE 的依赖与 SBOM 不因删除亮度采样而变化。
+- 文档操作：
+
+| 文档 | 章节 | 操作 | 内容 |
+|------|------|------|------|
+| `src/assets/bread.css` | 全文件 | 改 | 九色 token 替换旧色板；工作区紧急态两色互换；托盘/菜单/控制中心/滑块按契约取色；删除 `tray-pad-*`、`success`、`warning`、`danger` 等旧项 |
+| `src/bar/modules/tray.rs` | 托盘渲染 | 改 | 删除亮度采样与动态垫高调用及全部辅助函数；图标直出 |
+| `src/bar/modules/workspace.rs` | 工作区渲染 | 改 | 紧急叠加点 CSS 类由 `on-warning` 改为 `on-urgent` |
+| `USER.html` | 5.1 样式基础变量 | 不动 | 九色色板已是权威定义；本次是代码对齐，不改契约 |
+| `CORE.html` | SBOM / 内部结构 | 不动 | 无新增依赖；删除亮度采样不改变对外接口与构建方式 |
+| `style.css` | 文档原型 | 不动 | 原型已使用九色，不需随代码迁移修改 |
+| `BUILD.html` | 构建与排查 | 不动 | 构建命令与运行前提不变 |
+| `TODO.md` | 第五项「实现分支重构任务…」 | 改 | 追加 `[已解决]` 标记 |

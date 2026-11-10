@@ -13,7 +13,7 @@
   - 中键点击关闭
   - 暂时不实现右键菜单
 - 通知弹窗当前显示器判定：测试 Hyprland IPC socket 与 `hyprctl` 命令两种方式，确定 daemon 获取当前显示器的实现 [已解决]
-- 实现分支重构任务：按 ARCH §3.9 九色色板迁移 `bread.css` 与 `src/`（旧 token 名、托盘动态垫高、`success` 等），完成整体色板迁移
+- 实现分支重构任务：按 ARCH §3.9 九色色板迁移 `bread.css` 与 `src/`（旧 token 名、托盘动态垫高、`success` 等），完成整体色板迁移 [已解决]
 - 通知能力实现（目标见 bnote/PROVIDER §4.5）
   - action：渲染动作按钮（默认文字，`action-icons` 时图标）并执行；bnote 需暴露 `action-icons` hint
   - 外观：`body-markup` / `body-hyperlinks` / `body-images`；`icon-multi`（bnote 需多帧图标支持）
