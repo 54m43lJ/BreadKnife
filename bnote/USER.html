@@ -74,7 +74,7 @@ impl NoticeReceiver {
   <li><code>NoticeReceiver::recv</code> 是异步的：无事件时挂起，不轮询、不靠超时循环；会话终止或 <code>Fatal</code> 之后返回 <code>None</code>。</li>
   <li><code>SessionHandle</code> 可克隆；最后一个实例 drop 时自动停机，并可能阻塞到内部线程退出。宿主也可显式调用 <code>shutdown</code>。</li>
   <li><code>NoticeReceiver</code> 是单消费者；本库只支持一个 Receiver。丢弃 Receiver 会立即终止整个会话（不会再收到 <code>Fatal</code>；接收端已不存在）；<code>SessionHandle</code> 后续命令返回 <code>Error::Stopped</code>，宿主应丢弃旧 handle 并重新调用 <code>Session::start</code>。</li>
-  <li>事件队列有硬上限；宿主消费过慢时 <code>Notify</code> / <code>CloseNotification</code> 会等待空位，形成背压，不会无限增长。<code>Fatal</code> 同样等待空位后投递，不丢失。</li>
+  <li>宿主消费过慢时 <code>Notify</code> / <code>CloseNotification</code> 会等待投递空位，形成背压，不会无限增长；<code>Fatal</code> 同样等待空位后投递，不丢失。</li>
   <li>同一 id 的 <code>Notify</code> / <code>CloseNotification</code> 与宿主命令由本库串行处理；事件按发生顺序交付，宿主无需自行去重或重排。</li>
   <li>同步命令超时后，本库会尽力中止尚未完成的异步任务；已经提交到总线的 D-Bus 信号无法撤回。每个命令使用独立响应通道和命令 id，迟到结果不会混入其它命令的返回。</li>
   <li><code>close</code> / <code>invoke_action</code> / <code>activation_token</code> 校验 id 是否在册；<code>invoke_action</code> 只校验 id，不校验 action key 是否属于原通知的 actions。</li>

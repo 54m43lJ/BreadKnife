@@ -402,10 +402,12 @@ fn repl();   // 查询与交互命令循环</code></pre>
 │         └── bootstrap(bus)
 │              ├── watcher::mount_interfaces(bus)
 │              ├── spawn_signal_tasks(bus)
-│              ├── bus.spawn(heartbeat::heartbeat_task(bus, HEARTBEAT_PERIOD))
+│              ├── bus.spawn(...)
+│              │    └── heartbeat::heartbeat_task(bus, HEARTBEAT_PERIOD)
 │              ├── discover_existing(bus)
 │              ├── queue_snapshot(bus)
-│              ├── bus.spawn(debounce_task(bus))
+│              ├── bus.spawn(...)
+│              │    └── debounce_task(bus)
 │              └── watcher::WatcherService::start(bus)
 │                   ├── bus.conn.request_name_with_flags(WATCHER_NAME, RequestNameFlags::DoNotQueue.into())
 │                   └── 已被他人持有 → TrayError::NameTaken
@@ -449,7 +451,7 @@ fn repl();   // 查询与交互命令循环</code></pre>
 </ul>
 
 <h3 id="sec-5-2">5.2. 变更通告合并（固定窗口节流）</h3>
-<pre><code>信号任务共享处理路径
+<pre><code>pump_signal_stream(rule, bus, handler)
 ├── find_by_signal(发送者唯一名, 对象路径)
 ├── ItemTracker::update_routing(&amp;id, menu, menu_only)   // 仅 PropertiesChanged
 ├── pending.insert(id)

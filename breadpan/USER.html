@@ -148,7 +148,7 @@ impl TrayHandle {
     // ── 查询：现场读取（DBus 即时读取 → 原生结构；items() 为全量刷新操作）──
     pub fn items(&amp;self) -&gt; Vec&lt;TrayItem&gt;;
     pub fn item(&amp;self, id: &amp;TrayItemId) -&gt; Option&lt;TrayItem&gt;;
-    /// 登记簿记中的最近一次存活探测结论（零 DBus 流量；由库内周期探测维护；不在册 → false）
+    /// 在册记录中的最近一次存活探测结论（零 DBus 流量；由库内周期探测维护；不在册 → false）
     pub fn is_alive(&amp;self, id: &amp;TrayItemId) -&gt; bool;
 
     // ── 菜单：前置 AboutToShow + 现场拉取，逐层懒加载（interact 的 Menu 流程与 MenuChanged 重取共用）；Item 无菜单或未就绪 → Err ──
