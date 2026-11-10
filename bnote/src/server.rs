@@ -262,8 +262,14 @@ fn build_notice(params: NotifyParams, hints: HintSet, id: u32) -> Notice {
         summary: params.summary,
         body: params.body,
         actions,
+        action_icons: hints.action_icons,
         urgency: hints.urgency,
         expire_timeout_ms: parse_expire_timeout(params.expire_timeout),
+        transient: hints.transient,
+        resident: hints.resident,
+        sound_file: hints.sound_file,
+        sound_name: hints.sound_name,
+        suppress_sound: hints.suppress_sound,
     }
 }
 
@@ -338,6 +344,12 @@ mod tests {
             HintSet {
                 urgency: Urgency::Critical,
                 icon: NoticeIcon::Name("icon".into()),
+                action_icons: true,
+                transient: true,
+                resident: true,
+                sound_file: Some("file.oga".into()),
+                sound_name: Some("message-new-instant".into()),
+                suppress_sound: true,
             },
             9,
         );
@@ -361,5 +373,11 @@ mod tests {
         );
         assert_eq!(notice.urgency, Urgency::Critical);
         assert_eq!(notice.expire_timeout_ms, Some(3000));
+        assert!(notice.action_icons);
+        assert!(notice.transient);
+        assert!(notice.resident);
+        assert_eq!(notice.sound_file.as_deref(), Some("file.oga"));
+        assert_eq!(notice.sound_name.as_deref(), Some("message-new-instant"));
+        assert!(notice.suppress_sound);
     }
 }

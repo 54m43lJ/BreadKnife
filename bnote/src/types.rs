@@ -14,11 +14,23 @@ pub struct Notice {
     pub summary: String,
     pub body: String,
     pub actions: Vec<Action>,
+    /// `action-icons` hint: render action keys as icon names.
+    pub action_icons: bool,
     pub urgency: Urgency,
     /// `None` means the host chooses the timeout, `Some(0)` means the
     /// notification never expires, and any other value is a duration in
     /// milliseconds.
     pub expire_timeout_ms: Option<u32>,
+    /// `transient` hint: bypass host persistence.
+    pub transient: bool,
+    /// `resident` hint: keep the notification after an action fires.
+    pub resident: bool,
+    /// `sound-file` hint: notification sound file path.
+    pub sound_file: Option<String>,
+    /// `sound-name` hint: notification sound theme name.
+    pub sound_name: Option<String>,
+    /// `suppress-sound` hint: suppress notification sound.
+    pub suppress_sound: bool,
 }
 
 /// An event delivered asynchronously to the host.

@@ -14,6 +14,12 @@ use crate::types::{NoticeIcon, Urgency};
 pub(crate) struct HintSet {
     pub(crate) urgency: Urgency,
     pub(crate) icon: NoticeIcon,
+    pub(crate) action_icons: bool,
+    pub(crate) transient: bool,
+    pub(crate) resident: bool,
+    pub(crate) sound_file: Option<String>,
+    pub(crate) sound_name: Option<String>,
+    pub(crate) suppress_sound: bool,
 }
 
 /// Normalize the hints dictionary and the `app_icon` method argument.
@@ -28,7 +34,28 @@ pub(crate) fn parse(hints: &HashMap<String, OwnedValue>, app_icon: &str) -> Hint
             .map(Urgency::from_byte)
             .unwrap_or_default(),
         icon: parse_icon(hints, app_icon),
+        action_icons: flag(hints, "action-icons"),
+        transient: flag(hints, "transient"),
+        resident: flag(hints, "resident"),
+        sound_file: text_hint(hints, "sound-file"),
+        sound_name: text_hint(hints, "sound-name"),
+        suppress_sound: flag(hints, "suppress-sound"),
     }
+}
+
+fn flag(hints: &HashMap<String, OwnedValue>, key: &str) -> bool {
+    hints
+        .get(key)
+        .and_then(|value| bool::try_from(value).ok())
+        .unwrap_or(false)
+}
+
+fn text_hint(hints: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
+    hints
+        .get(key)
+        .and_then(as_text)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
 }
 
 fn parse_icon(hints: &HashMap<String, OwnedValue>, app_icon: &str) -> NoticeIcon {
@@ -149,6 +176,10 @@ mod tests {
 
     fn text(value: &str) -> OwnedValue {
         OwnedValue::try_from(Value::from(value.to_owned())).unwrap()
+    }
+
+    fn boolean(value: bool) -> OwnedValue {
+        OwnedValue::try_from(Value::from(value)).unwrap()
     }
 
     fn image(
@@ -330,5 +361,40 @@ mod tests {
             parse(&set, "").icon,
             NoticeIcon::Name("fallback-icon".into())
         );
+    }
+
+    #[test]
+    fn capability_hints_are_normalized_with_safe_fallbacks() {
+        let set = hints([
+            ("action-icons", boolean(true)),
+            ("transient", boolean(true)),
+            ("resident", boolean(true)),
+            ("suppress-sound", boolean(true)),
+            ("sound-file", text("/tmp/notice.oga")),
+            ("sound-name", text("message-new-instant")),
+        ]);
+        let parsed = parse(&set, "");
+        assert!(parsed.action_icons);
+        assert!(parsed.transient);
+        assert!(parsed.resident);
+        assert!(parsed.suppress_sound);
+        assert_eq!(parsed.sound_file.as_deref(), Some("/tmp/notice.oga"));
+        assert_eq!(parsed.sound_name.as_deref(), Some("message-new-instant"));
+
+        let wrong = hints([
+            ("action-icons", OwnedValue::from(1u32)),
+            ("transient", OwnedValue::from(1u32)),
+            ("resident", OwnedValue::from(1u32)),
+            ("suppress-sound", OwnedValue::from(1u32)),
+            ("sound-file", OwnedValue::from(1u32)),
+            ("sound-name", text("")),
+        ]);
+        let parsed = parse(&wrong, "");
+        assert!(!parsed.action_icons);
+        assert!(!parsed.transient);
+        assert!(!parsed.resident);
+        assert!(!parsed.suppress_sound);
+        assert_eq!(parsed.sound_file, None);
+        assert_eq!(parsed.sound_name, None);
     }
 }
