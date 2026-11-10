@@ -143,13 +143,15 @@ org.freedesktop.DBus.Error.Failed(message)</code></pre>
   <tr><td><code>body-markup</code></td><td>解析规范允许的标记文本；不支持的标记按纯文本降级。</td></tr>
   <tr><td><code>icon-static</code></td><td>单帧图标；与 <code>icon-multi</code> 互斥。</td></tr>
   <tr><td><code>persistence</code></td><td>内存保留至 daemon / 桌面会话结束；<code>transient</code> 绕过，<code>resident</code> 动作后保留；不落盘、不跨重启。</td></tr>
-  <tr><td><code>sound</code></td><td>播放 <code>sound-file</code> / <code>sound-name</code>；<code>suppress-sound</code> 抑制。</td></tr>
+  <tr><td><code>sound</code></td><td>播放 <code>sound-file</code> / <code>sound-name</code>；<code>suppress-sound</code> 抑制；宿主后端为 <code>canberra-gtk-play</code>，缺席时不声明该能力。</td></tr>
 </table>
 <ul class="note">
   <li>bnote 只校验能力串格式与互斥，不解释能力语义；本表约束的是 bread 宿主的声明，不是库的强制白名单。</li>
   <li><code>SessionConfig.capabilities</code> 返回本表声明的能力；未列出的能力（含 <code>icon-multi</code>）与 <code>x-vendor-*</code> 扩展不声明。</li>
   <li><code>icon-static</code> / <code>icon-multi</code> 互斥，不得同时声明；本契约声明 <code>icon-static</code>。</li>
-  <li><code>action-icons</code> 依赖 bnote 暴露同名 hint 并完成解析。</li>
+  <li><code>icon-multi</code> 本期不实现：<code>NoticeIcon</code> 只承载单帧；多帧需要协议参数、模型与渲染链路扩展，留待后续版本。</li>
+  <li><code>action-icons</code> 依赖 bnote 暴露同名 hint 并完成解析；<code>action_icons</code> / <code>transient</code> / <code>resident</code> / <code>sound_file</code> / <code>sound_name</code> / <code>suppress_sound</code> 已由 bnote 投影到 <code>Notice</code>。</li>
+  <li><code>body-markup</code> / <code>body-hyperlinks</code> / <code>body-images</code> 均声明；渲染细节与降级见 <a href="../USER.html#sec-5-2-5">USER §5.2.5</a>。</li>
   <li><code>persistence</code> 的保留语义与 <code>transient</code> / <code>resident</code> 见 <a href="USER.html#sec-4-3">USER §4.3</a>。</li>
   <li>能力名称、语义与互斥规则以 <a href="reference/9.dbus-protocol.html#command-get-capabilities">规范 §9.1.1</a> 为准。</li>
 </ul>

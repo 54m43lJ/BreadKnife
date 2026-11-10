@@ -133,3 +133,32 @@
 | `style.css` | 文档原型 | 不动 | 原型已使用九色，不需随代码迁移修改 |
 | `BUILD.html` | 构建与排查 | 不动 | 构建命令与运行前提不变 |
 | `TODO.md` | 第五项「实现分支重构任务…」 | 改 | 追加 `[已解决]` 标记 |
+
+## 通知能力实现（TODO 第 6 项）
+
+- 需求：按 `bnote/PROVIDER §4.5` 的目标实现通知能力：动作按钮与 `action-icons`、正文 markup／超链接／图片、提示音、内存持久化与 `transient`／`resident`；`bnote` 需暴露对应 hint；`x-vendor-*` 不实现。
+- 实现思路：
+  - `bnote` 侧补齐 `Notice` 的 `action_icons` / `transient` / `resident` / `sound_file` / `sound_name` / `suppress_sound` 字段，`hints.rs` 解析同名 hint：布尔缺失或类型不符→`false`，文本缺失、类型不符或空串→`None`；`build_notice` 原样投影。
+  - `bnote` 实现分支 `feat/notification-hints`，提交 `c42e22b`；`cargo test --manifest-path bnote/Cargo.toml` 通过（单元 28 项、协议集成 8 项）。
+  - 提示音后端定为 `canberra-gtk-play`：`suppress_sound` 优先跳过；`sound_file` 用 `-f`，`sound_name` 用 `-i`；命令异步 spawn、不阻塞通知展示，失败只记日志。启动时检测 PATH，后端缺席则宿主不声明 `sound` 能力。
+  - 正文按 `body-markup` 解析规范允许的标记，不支持标记降级纯文本；`body-hyperlinks` 仅 `http` / `https` / `mailto` 可点击，经 `xdg-open`，其余协议按纯文本；`body-images` 仅本地 `file://` 与图标主题名，不访问网络，按比例缩放，失败降级替代文本。
+  - 动作为既有契约：默认文字，`action-icons` 时以 key 为图标名、label 为 tooltip，未命中回退文字；左键触发 default / 唯一动作后关闭，`resident` 保留。
+  - 持久化沿用既有契约：条目内存保留至 daemon / 会话结束；`transient` 绕过，超时即删除；`resident` 动作后保留。
+  - `icon-multi` 本期不实现：`NoticeIcon` 只承载单帧，多帧需要协议参数、模型与渲染链路扩展；宿主继续声明 `icon-static`。`x-vendor-*` 扩展不声明。
+  - 宿主通知 UI 的渲染与生命周期按 USER §5.2.5／§5.2.6 与 CORE §4.13 的既有契约执行；本项闭合 bnote 暴露面与提示音后端等剩余契约缺口。
+- 文档操作：
+
+| 文档 | 章节 | 操作 | 内容 |
+|------|------|------|------|
+| `bnote/src/types.rs` | `Notice` | 改 | 增加 `action_icons` / `transient` / `resident` / `sound_file` / `sound_name` / `suppress_sound` 字段 |
+| `bnote/src/hints.rs` | hints 解析 | 改 | 解析布尔与文本 hint，补齐缺省回退与能力 hint 测试 |
+| `bnote/src/server.rs` | `build_notice` | 改 | 将 hints 派生字段投影到 `Notice`，同步测试 |
+| `bnote/PROVIDER.html` | 4.5 标准能力清单 | 改 | `sound` 登记 canberra-gtk-play 后端；明确 `icon-multi` 本期不实现；链接正文渲染契约 |
+| `USER.html` | 5.2.5 通知弹窗 | 改 | 补充 body-markup／hyperlinks／images 渲染与降级；提示音后端与能力缺席行为 |
+| `CORE.html` | 4.6 daemon/notify.rs、5.5 通知到达 | 改 | 新增 `SOUND_BACKEND` / `sound_available` / `play_sound` 签名与到达时播放调用 |
+| `PROVIDER.html` | 4.3 外部调节工具 | 改 | 增加 `canberra-gtk-play` 与 `xdg-open` 的消费项与缺席行为 |
+| `BUILD.html` | 1. 开发者准备 | 改 | 可选系统工具补充提示音与链接处理后端 |
+| `bnote/USER.html` | 4.3 数据模型与转换 | 不动 | `Notice` 字段与 hint 语义已在此定义，本次只补代码与外围契约 |
+| `bnote/CORE.html` | 4.4 hints.rs | 不动 | 解析职责与字段归属已定义，本次代码按此实现 |
+| `USER.html` | 5.2.6 通知中心 | 不动 | 动作/消息交互与弹窗共用同一契约，通知能力项不重复修改 |
+| `TODO.md` | 第六项「通知能力实现…」 | 改 | 追加 `[已解决]` 标记 |
