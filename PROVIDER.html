@@ -53,7 +53,7 @@
 <table>
   <tr><th>接口</th><th>消费内容</th></tr>
   <tr><td><code>hyprctl clients -j</code></td><td><code>address</code> / <code>class</code> / <code>title</code> / <code>workspace.name</code> / <code>monitor</code>；过滤 <code>special:minimized</code> 并确定归属显示器</td></tr>
-  <tr><td><code>hyprctl monitors -j</code></td><td>各显示器当前活动工作区（恢复目标）与宽度（托盘宽度上限）</td></tr>
+  <tr><td><code>hyprctl monitors -j</code></td><td><code>focused</code>（当前显示器判定）、当前活动工作区（恢复目标）、宽度（托盘宽度上限）</td></tr>
   <tr><td><code>hl.dsp.window.move({ workspace, window, follow = false })</code></td><td>移入最小化工作区或恢复到活动工作区</td></tr>
   <tr><td><code>hl.dsp.focus({ window })</code></td><td>恢复后聚焦窗口</td></tr>
   <tr><td><code>hl.dsp.window.close({ window })</code></td><td>关闭最小化窗口</td></tr>
@@ -62,6 +62,7 @@
   <li>查询类数据（显示器、工作区、客户端、workspace 规则）经 <code>hyprctl -j</code> 获取；字段口径以 <a href="reference/hyprland-ipc.html">reference/hyprland-ipc.html</a>、<a href="reference/hyprland-hyprctl.html">hyprctl</a>、<a href="reference/hyprland-dispatcher.html">dispatcher</a> 为准。</li>
   <li>工作区切换与最小化窗口操作经 dispatcher 执行；窗口选择器统一用 <code>address:</code>，Lua dispatch 失败时回退经典语法，见 <a href="CORE.html#sec-4-hyprland">CORE §4.3</a>。</li>
   <li><code>minimized</code> 事件仅由外部 taskbar 通过 wlr-foreign-toplevel 请求触发；普通 CSD 最小化不保证产生。bread 以 <code>special:minimized</code> 工作区为准，事件只作为辅助触发。</li>
+  <li>通知弹窗的当前显示器使用 <code>hyprctl -j monitors</code> 的 <code>focused</code> 字段；不启用 <code>.socket.sock</code> 查询，保持 socket2 只读与单一查询路径。</li>
 </ul>
 
 <h3 id="sec-4-2">4.2. 系统 DBus 服务</h3>

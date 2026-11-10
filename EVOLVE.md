@@ -87,3 +87,26 @@
 | `USER.html` | 5.2.5 通知弹窗、5.2.6 通知中心 | 不动 | 前两项已完成，最小化托盘不改通知的几何、生命周期与交互 |
 | `bnote/PROVIDER.html` | 4.5 标准能力清单 | 不动 | 托盘是窗口管理 UI，不改变通知协议与服务能力；与通知能力项重叠 |
 | `TODO.md` | 第三项「加入一个类macOS的底部托盘…」 | 改 | 追加 `[已解决]` 标记 |
+
+## 当前显示器判定（TODO 第 4 项）
+
+- 需求：确定通知弹窗如何获取当前显示器；比较 Hyprland `.socket.sock` 原始 IPC 查询与 `hyprctl` 命令两条路径，选定 daemon 的实现并写入契约。
+- 实现思路：
+  - 在 Hyprland 0.57.1 会话实测：`.socket.sock` 的 `j/monitors` 与 `j/activeworkspace` 返回与 `hyprctl -j` 完全一致的 JSON；本机单显示器环境均正确。
+  - 性能实测（中位数）：原始 IPC `j/monitors` 约 0.03ms、`j/activeworkspace` 约 0.01ms；`hyprctl -j monitors` 约 1.97ms、`hyprctl -j activeworkspace` 约 1.91ms。原始 IPC 更快，但 `hyprctl` 的 2ms 对通知级频率可忽略。
+  - 选定 `hyprctl -j monitors` 的 `focused` 字段：复用 daemon 既有的 `hyprctl -j` 查询路径，不引入第二个 Hyprland socket 客户端，也避免一次性连接未关闭导致 Hyprland 最长 5s 阻塞的风险；socket2 继续保持只读。
+  - `current_monitor()` 每次通知到达时查询，保持“当前显示器”精确；查询失败或无 focused 显示器时回退首个显示器，无显示器时返回 `None` 并跳过贴栏弹窗，通知中心仍正常缓存。
+  - 不缓存 `focusedmonv2` 事件作为弹窗目标，避免跨线程事件顺序导致焦点切换与通知到达竞争；事件流只负责既有状态推送。
+  - `MonitorInfo` 增加 `focused` 字段；PROVIDER 的查询表登记 `focused` 的消费。单显示器环境无法实测多屏焦点切换，多屏语义以 Hyprland `focused` 字段为准。
+- 文档操作：
+
+| 文档 | 章节 | 操作 | 内容 |
+|------|------|------|------|
+| `CORE.html` | 4.3 daemon/hyprland.rs | 改 | `MonitorInfo` 增加 `focused`；`current_monitor` 注明取 focused、查询失败回退首个 |
+| `CORE.html` | 5.5 通知到达 | 改 | 调用栈补 `hyprctl -j monitors` 查询与回退；注明无显示器时跳过贴栏弹窗、中心缓存不受影响 |
+| `USER.html` | 5.2.5 通知弹窗 | 改 | 明确当前显示器取 Hyprland 焦点显示器，查询失败回退首个显示器 |
+| `PROVIDER.html` | 4.1 Hyprland IPC（查询表与注记） | 改 | 登记 `monitors -j` 的 `focused` 字段；说明不启用 `.socket.sock` 查询，socket2 保持只读 |
+| `ABOUT.html` | 用户交互 · 界面交互（通知弹窗行） | 不动 | 用户可见行为仍是「仅当前显示器弹出」，本次只落实现判定与失败回退 |
+| `BUILD.html` | 运行前提 / 排查 | 不动 | 无新增依赖或用户配置；`hyprctl` 已是既有查询路径 |
+| `bnote/PROVIDER.html` | 4.5 标准能力清单 | 不动 | 当前显示器判定属于宿主 UI，不改变通知协议与能力清单 |
+| `TODO.md` | 第四项「通知弹窗当前显示器判定…」 | 改 | 追加 `[已解决]` 标记 |

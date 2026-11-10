@@ -225,7 +225,7 @@
   <li>持久化：通知条目在 bread 运行期间保留，不落盘、不跨重启；只有用户关闭/清理、发送方撤回或同 id 替换、动作触发（<code>resident</code> 除外）、退出 bread 才彻底移除。保留语义与能力声明见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>。</li>
   <li><code>transient</code> 绕过持久化，超时即删除条目；<code>resident</code> 使动作触发后保留条目。</li>
   <li>提示音：<code>suppress-sound</code> 为真时不播放；否则优先 <code>sound-file</code>，其次 <code>sound-name</code>。</li>
-  <li>仅当前显示器弹出。</li>
+  <li>仅当前显示器弹出；当前显示器取 Hyprland 焦点显示器，查询失败时回退首个显示器。</li>
   <li>通知中心打开期间贴栏通知隐藏但不关闭，计时照常；隐藏期间超时的贴栏卡片消失，通知中心条目保留（<code>transient</code> 除外），关闭通知中心后不再重新显示该贴栏卡片。</li>
   <li>弹出位置、标题居中、关闭按钮与按键、超时行为见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>。</li>
 </ul>
