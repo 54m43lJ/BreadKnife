@@ -1,0 +1,14 @@
+- dbusmenu渲染时每一项都带有下边框很丑
+- workspace点击方式切换时快速连续点击不同workspace会吞事件
+- 调色和样式不行
+  - tooltip需要统一配色，参考工作区悬停浮层，但是与工作区浮层分开定义，因为浮层不属于tooltip（不需要记录这条规则，写样式定义即可）
+  - workspace基底色改成purple-light
+  - 紧急/活跃对比色用fg
+  - 托盘组件背景需要一点点上下margin
+  - 托盘Item的hover背景色没定义导致实现的很丑。托盘组件背景改为cream,hover色用fg
+- blueman的右键菜单不行。参考报错：[tray] interaction ContextMenu on :1.144 failed: dbus call failed: ContextMenu failed on both prefixes: org.kde: dbus call failed: org.freedesktop.DBus.Error.UnknownMethod: No such method “ContextMenu”; org.freedesktop: dbus call failed: org.freedesktop.DBus.Error.UnknownMethod: No such interface “org.freedesktop.StatusNotifierItem” on object at path /org/blueman/sni
+- 音量和亮度拿不到数据
+- 通知样式有问题
+  - 通知弹出离顶部太远。我只要5px左右的空白
+  - 通知中心里的分组收起后没有自动调整高度，打开/收起时左端的三角形也没有改变方向
+- 改变措辞：现在所说的关闭通知都改为dismiss。通知dismiss后应该保留在通知中心等待清理
