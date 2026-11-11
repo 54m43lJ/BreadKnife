@@ -21,7 +21,7 @@ use zbus::fdo::{DBusProxy, RequestNameFlags, RequestNameReply};
 use crate::events::EventQueue;
 use crate::server::{self, Server};
 use crate::types::SessionConfig;
-use crate::{BUS_NAME, Error, PATH};
+use crate::{BUS_NAME, Error, PATH, from_zbus};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -45,12 +45,12 @@ pub(crate) struct Bus {
     pub(crate) rt: Handle,
     pub(crate) events: Arc<EventQueue>,
     pub(crate) state: Arc<Mutex<server::State>>,
-    cmds: mpsc::UnboundedSender<Command>,
-    stop: watch::Sender<bool>,
-    stopped: Arc<AtomicBool>,
+    cmd_tx: mpsc::UnboundedSender<Command>,
+    cmd_seq: Arc<AtomicU64>,
+    stopping: Arc<AtomicBool>,
     fatal: Arc<AtomicBool>,
-    command_timeout_ms: u64,
-    next_command_id: Arc<AtomicU64>,
+    command_timeout: Duration,
+    stop: watch::Sender<bool>,
 }
 
 impl Bus {
@@ -78,11 +78,11 @@ impl Bus {
                 runtime.block_on(async move {
                     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
                     let (stop_tx, stop_rx) = watch::channel(false);
-                    let stopped = Arc::new(AtomicBool::new(false));
+                    let stopping = Arc::new(AtomicBool::new(false));
                     let fatal = Arc::new(AtomicBool::new(false));
                     let state = Arc::new(Mutex::new(server::State::default()));
 
-                    let bus = match connect(config, events, cmd_tx, stop_tx, stopped, fatal, state)
+                    let bus = match connect(config, events, cmd_tx, stop_tx, stopping, fatal, state)
                         .await
                     {
                         Ok(bus) => bus,
@@ -122,8 +122,8 @@ impl Bus {
         }
 
         let started = Instant::now();
-        let timeout = Duration::from_millis(self.command_timeout_ms);
-        let id = self.next_command_id.fetch_add(1, Ordering::Relaxed);
+        let timeout = self.command_timeout;
+        let id = self.cmd_seq.fetch_add(1, Ordering::Relaxed);
         let (reply_tx, reply_rx) = std_mpsc::sync_channel(1);
         let (abort_tx, abort_rx) = std_mpsc::sync_channel(1);
         let run = Box::new(move |bus: Bus| -> BoxFuture {
@@ -134,7 +134,7 @@ impl Bus {
         });
 
         if self
-            .cmds
+            .cmd_tx
             .send(Command {
                 id,
                 run,
@@ -153,7 +153,7 @@ impl Bus {
             Ok(abort) => abort,
             Err(std_mpsc::RecvTimeoutError::Timeout) => {
                 return Err(Error::Timeout {
-                    ms: self.command_timeout_ms,
+                    ms: timeout_ms(timeout),
                 });
             }
             Err(std_mpsc::RecvTimeoutError::Disconnected) => return Err(Error::Stopped),
@@ -176,7 +176,7 @@ impl Bus {
             Err(std_mpsc::RecvTimeoutError::Timeout) => {
                 abort.abort();
                 Err(Error::Timeout {
-                    ms: self.command_timeout_ms,
+                    ms: timeout_ms(timeout),
                 })
             }
             Err(std_mpsc::RecvTimeoutError::Disconnected) => Err(Error::Stopped),
@@ -200,12 +200,12 @@ impl Bus {
     }
 
     fn is_stopped(&self) -> bool {
-        self.stopped.load(Ordering::SeqCst)
+        self.stopping.load(Ordering::SeqCst)
     }
 
-    fn claim_stop(&self) -> bool {
+    pub(crate) fn claim_stop(&self) -> bool {
         let first = self
-            .stopped
+            .stopping
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok();
         if first {
@@ -214,17 +214,20 @@ impl Bus {
         first
     }
 
-    async fn report_fatal(&self, message: String) {
+    pub(crate) fn report_fatal(&self, message: String) {
         if self.fatal.swap(true, Ordering::SeqCst) || self.is_stopped() {
             return;
         }
 
         // Deliver the terminal event before stopping the runtime, so a full
         // queue never swallows it.
-        self.events.send_fatal(message).await;
-        if self.claim_stop() {
-            self.events.close();
-        }
+        let bus = self.clone();
+        self.rt.spawn(async move {
+            bus.events.send_fatal(message).await;
+            if bus.claim_stop() {
+                bus.events.close();
+            }
+        });
     }
 }
 
@@ -232,12 +235,16 @@ fn remaining(start: Instant, timeout: Duration) -> Duration {
     timeout.saturating_sub(start.elapsed())
 }
 
+fn timeout_ms(timeout: Duration) -> u64 {
+    u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX)
+}
+
 async fn connect(
     config: SessionConfig,
     events: Arc<EventQueue>,
-    cmds: mpsc::UnboundedSender<Command>,
+    cmd_tx: mpsc::UnboundedSender<Command>,
     stop: watch::Sender<bool>,
-    stopped: Arc<AtomicBool>,
+    stopping: Arc<AtomicBool>,
     fatal: Arc<AtomicBool>,
     state: Arc<Mutex<server::State>>,
 ) -> Result<Bus, Error> {
@@ -247,29 +254,29 @@ async fn connect(
         command_timeout_ms,
     } = config;
 
-    let conn = zbus::Connection::session().await.map_err(Error::from)?;
+    let conn = zbus::Connection::session().await.map_err(from_zbus)?;
 
     let bus = Bus {
         conn,
         rt: Handle::current(),
         events: Arc::clone(&events),
         state: Arc::clone(&state),
-        cmds,
-        stop,
-        stopped: Arc::clone(&stopped),
+        cmd_tx,
+        cmd_seq: Arc::new(AtomicU64::new(0)),
+        stopping: Arc::clone(&stopping),
         fatal,
-        command_timeout_ms,
-        next_command_id: Arc::new(AtomicU64::new(0)),
+        command_timeout: Duration::from_millis(command_timeout_ms),
+        stop,
     };
 
-    let server = Server::new(capabilities, server_info, events, state, stopped);
+    let server = Server::new(capabilities, server_info, events, state, stopping);
 
     if !bus
         .conn
         .object_server()
         .at(PATH, server)
         .await
-        .map_err(Error::from)?
+        .map_err(from_zbus)?
     {
         return Err(Error::Bus(format!(
             "interface is already registered at {PATH}"
@@ -280,7 +287,7 @@ async fn connect(
         .conn
         .request_name_with_flags(BUS_NAME, RequestNameFlags::DoNotQueue.into())
         .await
-        .map_err(Error::from)?
+        .map_err(from_zbus)?
     {
         RequestNameReply::PrimaryOwner | RequestNameReply::AlreadyOwner => Ok(bus),
         RequestNameReply::InQueue | RequestNameReply::Exists => {
@@ -336,15 +343,14 @@ async fn run_loop(
 
 async fn watch_receiver(bus: Bus) {
     bus.events.closed().await;
-    bus.report_fatal("notice receiver dropped".to_owned()).await;
+    bus.report_fatal("notice receiver dropped".to_owned());
 }
 
 async fn monitor(bus: Bus) {
     let proxy = match DBusProxy::new(&bus.conn).await {
         Ok(proxy) => proxy,
         Err(error) => {
-            bus.report_fatal(format!("cannot create a bus proxy: {error}"))
-                .await;
+            bus.report_fatal(format!("cannot create a bus proxy: {error}"));
             return;
         }
     };
@@ -356,7 +362,7 @@ async fn monitor(bus: Bus) {
     loop {
         tokio::select! {
             _ = bus.conn.closed() => {
-                bus.report_fatal("session bus connection closed".to_owned()).await;
+                bus.report_fatal("session bus connection closed".to_owned());
                 break;
             }
             _ = heartbeat.tick() => {
@@ -367,11 +373,11 @@ async fn monitor(bus: Bus) {
                 match timeout(HEARTBEAT_TIMEOUT, proxy.get_id()).await {
                     Ok(Ok(_)) => {}
                     Ok(Err(error)) => {
-                        bus.report_fatal(format!("session bus heartbeat failed: {error}")).await;
+                        bus.report_fatal(format!("session bus heartbeat failed: {error}"));
                         break;
                     }
                     Err(_) => {
-                        bus.report_fatal("session bus heartbeat timed out".to_owned()).await;
+                        bus.report_fatal("session bus heartbeat timed out".to_owned());
                         break;
                     }
                 }

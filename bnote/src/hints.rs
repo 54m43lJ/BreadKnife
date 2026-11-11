@@ -78,10 +78,8 @@ fn parse_icon(hints: &HashMap<String, OwnedValue>, app_icon: &str) -> NoticeIcon
         return NoticeIcon::Name(app_icon.to_owned());
     }
 
-    for key in ["icon_data", "icon-data"] {
-        if let Some(icon) = hints.get(key).and_then(parse_image_data) {
-            return icon;
-        }
+    if let Some(icon) = hints.get("icon_data").and_then(parse_image_data) {
+        return icon;
     }
 
     NoticeIcon::None
@@ -92,7 +90,7 @@ fn parse_image_data(value: &OwnedValue) -> Option<NoticeIcon> {
     let value = Value::try_from(value).ok()?;
     let structure = value.downcast::<Structure<'_>>().ok()?;
     let fields = structure.fields();
-    if fields.len() < 7 {
+    if fields.len() != 7 {
         return None;
     }
 
@@ -361,6 +359,35 @@ mod tests {
             parse(&set, "").icon,
             NoticeIcon::Name("fallback-icon".into())
         );
+    }
+
+    #[test]
+    fn image_data_with_extra_fields_is_rejected() {
+        let structure = StructureBuilder::new()
+            .add_field(1i32)
+            .add_field(1i32)
+            .add_field(3i32)
+            .add_field(false)
+            .add_field(8i32)
+            .add_field(3i32)
+            .add_field(Array::from(vec![1u8, 2, 3]))
+            .add_field(0u32)
+            .build()
+            .unwrap();
+        let set = hints([
+            ("image-data", OwnedValue::try_from(structure).unwrap()),
+            ("image_path", text("fallback-icon")),
+        ]);
+        assert_eq!(
+            parse(&set, "").icon,
+            NoticeIcon::Name("fallback-icon".into())
+        );
+    }
+
+    #[test]
+    fn hyphenated_icon_data_is_not_a_known_hint() {
+        let set = hints([("icon-data", image(1, 1, 3, false, 3, vec![1, 2, 3]))]);
+        assert_eq!(parse(&set, "").icon, NoticeIcon::None);
     }
 
     #[test]

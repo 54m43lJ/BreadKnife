@@ -71,11 +71,9 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<zbus::Error> for Error {
-    fn from(error: zbus::Error) -> Self {
-        match error {
-            zbus::Error::NameTaken => Self::NameTaken(BUS_NAME.to_owned()),
-            other => Self::Bus(other.to_string()),
-        }
+pub(crate) fn from_zbus(error: zbus::Error) -> Error {
+    match error {
+        zbus::Error::NameTaken => Error::NameTaken(BUS_NAME.to_owned()),
+        other => Error::Bus(other.to_string()),
     }
 }

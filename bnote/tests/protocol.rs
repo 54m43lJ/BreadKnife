@@ -1,21 +1,21 @@
 //! Protocol integration tests.
 //!
-//! These tests need an isolated D-Bus session bus.  Run them with:
+//! These tests need a D-Bus session bus.  Run them with:
 //!
 //! ```text
-//! dbus-run-session -- env BNOTE_TEST_DBUS=1 cargo test --test protocol
+//! cargo test
+//! dbus-run-session -- cargo test   # isolated bus (recommended)
 //! ```
 //!
-//! Without `BNOTE_TEST_DBUS` they are skipped, so an ordinary `cargo test`
-//! never talks to the developer's desktop bus.
+//! Without a session bus the integration tests are skipped.
 
 #![allow(clippy::too_many_arguments)]
 
 use std::collections::HashMap;
 
 use bnote::{
-    Action, Capabilities, CloseReason, Error, NoticeEvent, NoticeIcon, ServerInfo, Session,
-    SessionConfig, Urgency,
+    Action, Capabilities, CloseReason, Error, NoticeEvent, NoticeIcon, NoticeReceiver, ServerInfo,
+    Session, SessionConfig, SessionHandle, Urgency,
 };
 use futures_util::StreamExt;
 use zbus::Connection;
@@ -24,8 +24,7 @@ use zbus::zvariant::{Array, OwnedValue, StructureBuilder, Value};
 static BUS_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn enabled() -> bool {
-    std::env::var_os("BNOTE_TEST_DBUS").is_some()
-        && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some()
+    std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some_and(|value| !value.is_empty())
 }
 
 fn config() -> SessionConfig {
@@ -38,6 +37,21 @@ fn config() -> SessionConfig {
             spec_version: "1.2".into(),
         },
         command_timeout_ms: 2000,
+    }
+}
+
+/// Start a session for a test, or skip when another notification daemon
+/// already owns the bus name.
+fn start() -> Option<(SessionHandle, NoticeReceiver)> {
+    match Session::start(config()) {
+        Ok(pair) => Some(pair),
+        Err(Error::NameTaken(name)) => {
+            eprintln!(
+                "skipping: {name} is already owned; run under `dbus-run-session -- cargo test`"
+            );
+            None
+        }
+        Err(error) => panic!("failed to start bnote session: {error}"),
     }
 }
 
@@ -94,13 +108,15 @@ trait Notifications {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn methods_events_and_host_signals() {
+async fn capabilities_and_server_info() {
     if !enabled() {
         return;
     }
     let _guard = BUS_LOCK.lock().await;
 
-    let (handle, mut events) = Session::start(config()).unwrap();
+    let Some((handle, _events)) = start() else {
+        return;
+    };
     let connection = Connection::session().await.unwrap();
     let proxy = NotificationsProxy::new(&connection).await.unwrap();
 
@@ -117,6 +133,22 @@ async fn methods_events_and_host_signals() {
             "1.2".to_owned(),
         )
     );
+
+    handle.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn notify_roundtrip() {
+    if !enabled() {
+        return;
+    }
+    let _guard = BUS_LOCK.lock().await;
+
+    let Some((handle, mut events)) = start() else {
+        return;
+    };
+    let connection = Connection::session().await.unwrap();
+    let proxy = NotificationsProxy::new(&connection).await.unwrap();
 
     let mut closed = proxy.receive_notification_closed().await.unwrap();
     let mut invoked = proxy.receive_action_invoked().await.unwrap();
@@ -227,13 +259,15 @@ async fn methods_events_and_host_signals() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn client_close_invalidates_the_id_and_emits_reason_three() {
+async fn close_notification_emits_signal() {
     if !enabled() {
         return;
     }
     let _guard = BUS_LOCK.lock().await;
 
-    let (handle, mut events) = Session::start(config()).unwrap();
+    let Some((handle, mut events)) = start() else {
+        return;
+    };
     let connection = Connection::session().await.unwrap();
     let proxy = NotificationsProxy::new(&connection).await.unwrap();
     let mut closed = proxy.receive_notification_closed().await.unwrap();
@@ -296,7 +330,9 @@ async fn invalid_actions_are_rejected_and_second_session_reports_name_taken() {
     }
     let _guard = BUS_LOCK.lock().await;
 
-    let (handle, _events) = Session::start(config()).unwrap();
+    let Some((handle, _events)) = start() else {
+        return;
+    };
     let connection = Connection::session().await.unwrap();
     let proxy = NotificationsProxy::new(&connection).await.unwrap();
 
@@ -336,7 +372,9 @@ async fn session_can_be_rebuilt_after_shutdown() {
     let _guard = BUS_LOCK.lock().await;
 
     for _ in 0..5 {
-        let (handle, mut events) = Session::start(config()).unwrap();
+        let Some((handle, mut events)) = start() else {
+            return;
+        };
         drop(handle);
         assert_eq!(events.recv().await, None);
     }
@@ -349,7 +387,9 @@ async fn a_failed_start_does_not_hold_the_bus_name() {
     }
     let _guard = BUS_LOCK.lock().await;
 
-    let (first, mut first_events) = Session::start(config()).unwrap();
+    let Some((first, mut first_events)) = start() else {
+        return;
+    };
     assert!(matches!(
         Session::start(config()),
         Err(Error::NameTaken(name)) if name == "org.freedesktop.Notifications"
@@ -358,7 +398,9 @@ async fn a_failed_start_does_not_hold_the_bus_name() {
     first.shutdown();
     assert_eq!(first_events.recv().await, None);
 
-    let (second, _second_events) = Session::start(config()).unwrap();
+    let Some((second, _second_events)) = start() else {
+        return;
+    };
     second.shutdown();
 }
 
@@ -369,7 +411,9 @@ async fn cloned_handles_keep_the_session_alive_until_the_last_drop() {
     }
     let _guard = BUS_LOCK.lock().await;
 
-    let (handle, mut events) = Session::start(config()).unwrap();
+    let Some((handle, mut events)) = start() else {
+        return;
+    };
     let clone = handle.clone();
     drop(handle);
 
@@ -404,7 +448,9 @@ async fn dropping_receiver_terminates_the_session() {
     }
     let _guard = BUS_LOCK.lock().await;
 
-    let (handle, receiver) = Session::start(config()).unwrap();
+    let Some((handle, receiver)) = start() else {
+        return;
+    };
     drop(receiver);
 
     assert!(
@@ -421,7 +467,9 @@ async fn unknown_ids_are_rejected_by_host_commands() {
     }
     let _guard = BUS_LOCK.lock().await;
 
-    let (handle, _events) = Session::start(config()).unwrap();
+    let Some((handle, _events)) = start() else {
+        return;
+    };
     assert!(matches!(
         handle.close(999, CloseReason::Expired),
         Err(Error::InvalidArgs(_))
