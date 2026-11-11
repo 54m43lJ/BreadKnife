@@ -2,10 +2,10 @@
 participant "Hyprland" as hypr
 participant "breadknife（bread）" as bread
 participant "系统 DBus 服务" as svc
-participant "调节工具" as tools
+participant "外部工具" as tools
 
 hypr -> bread: monitoradded / monitorremoved / workspace>> / activewindow / urgent>>
 bread -> hypr: hyprctl -j 查询 / dispatch workspace
 bread -> svc: Get / PropertiesChanged / MPRIS 方法
-bread -> tools: pamixer / brightnessctl / ddcutil
+bread -> tools: pamixer / brightnessctl / ddcutil / canberra-gtk-play / xdg-open
 @enduml

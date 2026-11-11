@@ -10,6 +10,9 @@ app -> bus: CloseNotification
 bus -> bread: 关闭请求
 bread -> bus: NotificationClosed
 bus -> app: NotificationClosed
+== 动作回发 ==
+bread -> bus: ActivationToken
+bus -> app: ActivationToken
 bread -> bus: ActionInvoked
 bus -> app: ActionInvoked
 @enduml
