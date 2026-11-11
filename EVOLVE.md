@@ -156,10 +156,10 @@
 | `bnote/PROVIDER.html` | 4.5 标准能力清单 | 改 | `sound` 登记 canberra-gtk-play 后端；明确 `icon-multi` 本期不实现；链接正文渲染契约 |
 | `USER.html` | 5.2.5 通知弹窗 | 改 | 补充 body-markup／hyperlinks／images 渲染与降级；提示音后端与能力缺席行为 |
 | `CORE.html` | 4.6 daemon/notify.rs、5.5 通知到达 | 改 | 新增 `SOUND_BACKEND` / `sound_available` / `play_sound` 签名与到达时播放调用 |
-| `PROVIDER.html` | 4.3 外部调节工具 | 改 | 增加 `canberra-gtk-play` 与 `xdg-open` 的消费项与缺席行为 |
+| `PROVIDER.html` | 4.3 外部工具 | 改 | 增加 `canberra-gtk-play` 与 `xdg-open` 的消费项与缺席行为 |
 | `BUILD.html` | 1. 开发者准备 | 改 | 可选系统工具补充提示音与链接处理后端 |
 | `bnote/USER.html` | 4.3 数据模型与转换 | 不动 | `Notice` 字段与 hint 语义已在此定义，本次只补代码与外围契约 |
-| `bnote/CORE.html` | 4.4 hints.rs | 不动 | 解析职责与字段归属已定义，本次代码按此实现 |
+| `bnote/CORE.html` | 4.9 hints.rs | 不动 | 解析职责与字段归属已定义，本次代码按此实现 |
 | `USER.html` | 5.2.6 通知中心 | 不动 | 动作/消息交互与弹窗共用同一契约，通知能力项不重复修改 |
 | `TODO.md` | 第六项「通知能力实现…」 | 改 | 追加 `[已解决]` 标记 |
 

@@ -32,7 +32,7 @@
     │   ├── <a href="#sec-4-style">style.rs</a>      # 按 daemon 跟踪的路径加载 CSS；reload 重读
     │   └── modules/
     │       ├── <a href="#sec-4-workspace">workspace.rs</a>    # 工作区条（渲染 + 手势捕获 + 悬停窗口列表）
-    │       ├── <a href="#sec-4-info">info.rs</a>        # 活动窗口图标 / 标题 + 通知中心 popover + 贴栏通知窗口（独立 layer-shell，无 grab）
+    │       ├── <a href="#sec-4-info">info.rs</a>        # 活动窗口图标 / 标题 + 通知中心 popover + 贴栏通知窗口 + 动作激活令牌
     │       ├── <a href="#sec-4-dock">dock.rs</a>        # 最小化托盘：底部触发条 + 窗口条目（独立 layer-shell，无 grab）
     │       ├── <a href="#sec-4-popup">popup.rs</a>        # 弹窗会话：grab 弹窗统一托管（含通知中心 · 根窗口 / 上级弹窗定位 · 任务栏内捕获关闭 · Escape / toggle）
     │       ├── <a href="#sec-4-tray">tray.rs</a>         # 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）
@@ -90,7 +90,6 @@ scripts/
 <h3 id="sec-4-daemon-mod">4.2. daemon/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub fn run(control_path: &amp;str) -&gt; Result&lt;(), String&gt;;
 
-pub const NOTIFICATION_CACHE_CAPACITY: usize;   // 推荐值 512
 pub const MINIMIZED_WORKSPACE: &amp;str;            // 推荐值 "special:minimized"
 
 pub struct Daemon {
@@ -146,8 +145,8 @@ impl Daemon {
     fn close_notification(&amp;mut self, id: u32, reason: NotificationCloseReason);
     fn close_notification_group(&amp;mut self, app_name: &amp;str);
     fn clear_notifications(&amp;mut self);
-    fn discard_notifications(&amp;mut self);
-    fn activate_notification(&amp;mut self, id: u32, action_key: Option&lt;&amp;str&gt;);
+    fn activate_notification(&amp;mut self, id: u32, action_key: Option&lt;&amp;str&gt;,
+                             activation_token: Option&lt;&amp;str&gt;);
     fn retry_notification(&amp;mut self);
     fn resync_minimized(&amp;mut self);
     fn minimize_window(&amp;mut self, address: &amp;str);
@@ -254,7 +253,7 @@ pub struct NotificationService {
 
 pub enum NotificationCommand {
     Close { id: u32, reason: bnote::CloseReason },
-    InvokeAction { id: u32, key: String },
+    InvokeAction { id: u32, key: String, activation_token: Option&lt;String&gt; },
     Shutdown,
 }
 
@@ -262,7 +261,8 @@ pub fn start(tx: Sender&lt;DaemonEvent&gt;) -&gt; Result&lt;NotificationService,
 
 impl NotificationService {
     pub fn close(&amp;self, id: u32, reason: bnote::CloseReason);
-    pub fn invoke_action(&amp;self, id: u32, key: &amp;str);
+    pub fn invoke_action(&amp;self, id: u32, key: &amp;str,
+                        activation_token: Option&lt;&amp;str&gt;);
     pub fn shutdown(&amp;self);
 }
 
@@ -278,8 +278,9 @@ pub fn play_sound(record: &amp;NotificationRecord);</code></pre>
   <li><code>unavailable_message</code> 对 <code>NameTaken</code> 返回固定文案，其它错误返回 <code>Error</code> 的文本。</li>
   <li>能力清单与语义见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>；<code>SessionConfig.capabilities</code> 返回 §4.5 声明的能力。</li>
   <li>服务器信息：name <code>bread</code>、vendor <code>BreadKnife</code>、version 取 <code>env!("CARGO_PKG_VERSION")</code>、spec_version <code>1.2</code>；<code>command_timeout_ms</code> 取 <code>NOTIFICATION_COMMAND_TIMEOUT_MS</code>（推荐值 5_000）。</li>
-  <li>手动重试由通知中心的刷新按钮触发 <code>Request::NotificationRetry</code>；daemon 先停机现有服务，再重新调用 <code>NotificationService::start</code>，不排队、不替换已有通知服务。</li>
-  <li>命令线程失败只记日志；窗口 UI 乐观更新，重连快照时校正。</li>
+  <li>手动重试由通知中心的刷新按钮触发 <code>Request::NotificationRetry</code>；daemon 若已有服务则先停机，再重新调用 <code>NotificationService::start</code>，不排队、不替换已有通知服务。</li>
+  <li>命令线程失败记录日志，并按 bnote 的错误建议处置（<code>Timeout</code> 可重试或重建会话、<code>Stopped</code> 重建会话）；窗口 UI 乐观更新，重连快照时校正。</li>
+  <li><code>invoke_action</code> 在同一命令线程内按序调用 <code>SessionHandle::activation_token</code>（token 为 <code>Some</code> 时）与 <code>SessionHandle::invoke_action</code>。</li>
   <li>提示音：<code>suppress_sound</code> 为真跳过；<code>sound_file</code> 用 <code>SOUND_BACKEND -f</code>，<code>sound_name</code> 用 <code>SOUND_BACKEND -i</code>；命令异步 spawn、不等待，失败只记日志。启动时 <code>sound_available</code> 检测 PATH，缺席则能力清单不声明 <code>sound</code>。</li>
 </ul>
 
@@ -332,7 +333,7 @@ impl WindowApp {
 }</code></pre>
 <ul class="note">
   <li><code>Notification</code> → <code>InfoCenterWidget::upsert_center</code>；<code>NotificationPopup</code> → <code>push_popup</code>；<code>NotificationRemoved</code> / <code>NotificationCleared</code> → 同步通知中心与贴栏栈。</li>
-  <li><code>State</code> / <code>Snapshot</code> 携带 <code>NotificationStatus</code>，据此更新中心不可用态并清空贴栏栈；携带的 <code>minimized</code> 列表喂给 <code>DockWidget</code>。</li>
+  <li><code>State</code> / <code>Snapshot</code> 携带 <code>NotificationStatus</code>，据此更新中心不可用态并隐藏贴栏通知；携带的 <code>minimized</code> 列表喂给 <code>DockWidget</code>。</li>
 </ul>
 
 <h3 id="sec-4-bar-ipc">4.10. bar/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -395,6 +396,8 @@ impl InfoCenterWidget {
     pub fn set_notification_retry(&amp;self, retry: Rc&lt;dyn Fn()&gt;);
 }
 
+fn activation_token() -&gt; Option&lt;String&gt;;   // 动作点击时现场生成激活令牌
+
 struct NotificationWindow {
     window: gtk::Window,
     container: gtk::Box,
@@ -430,12 +433,13 @@ pub const POPUP_LOW_TIMEOUT_MS: u64;       // 推荐值 30_000；仅 Low 未指�
   <li>超时取 <code>NotificationRecord.expire_timeout_ms</code>：<code>Some(0)</code> 常驻，<code>Some(ms)</code> 按 ms；<code>None</code> 时低优先级取 <code>POPUP_LOW_TIMEOUT_MS</code>，普通与紧急常驻。常驻条目不创建计时器。</li>
   <li>通知中心打开时 <code>NotificationWindow::set_center_open(true)</code>：窗口隐藏，记录与计时器保留；关闭时重新显示未过期记录。期间到达的通知只入栈，不显示。</li>
   <li><code>show</code> 仅在记录非空且窗口不可见时设置窗口可见；空栈不创建可见窗口；<code>hide</code> 仅隐藏，不清理记录。</li>
-  <li>动作按钮按 <code>actions</code> 顺序显示；默认文字，<code>action_icons</code> 为真且图标命中时用 action key 作为图标名、label 作为 tooltip，未命中回退文字。按钮发送 <code>NotificationActivate { id, action_key: Some(key) }</code>，左键点击卡片发送 <code>NotificationActivate { id, action_key: None }</code>。</li>
-  <li>daemon 触发动作后关闭该条（<code>resident</code> 保留）；无可用动作时左键仅关闭该条。中键/关闭按钮发送 <code>NotificationClose { id, reason: Dismissed }</code>；右键发送 <code>NotificationClear</code>。中心内消息与组按钮复用同一组请求。</li>
-  <li>通知中心的消息卡同样渲染动作按钮；默认文字，<code>action_icons</code> 为真且图标命中时用图标。点击发送 <code>NotificationActivate { id, action_key: Some(key) }</code>。</li>
+  <li>动作按钮按 <code>actions</code> 顺序显示；默认文字，<code>action_icons</code> 为真且图标命中时用 action key 作为图标名、label 作为 tooltip / 无障碍文本，未命中回退文字。按钮发送 <code>NotificationActivate { id, action_key: Some(key), activation_token }</code>，左键点击卡片发送 <code>NotificationActivate { id, action_key: None, activation_token }</code>。</li>
+  <li><code>activation_token()</code> 只由动作按钮与左键默认动作调用；中键、关闭按钮、清空、超时与通知中心开关不调用；令牌不缓存、不复用。</li>
+  <li>daemon 触发动作后关闭该条（<code>resident</code> 保留）；无可用动作时左键仅关闭该条。贴栏卡片的中键/关闭按钮发送 <code>NotificationClose { id, reason: Dismissed }</code>，右键发送 <code>NotificationClear</code>；中心内的消息与组按钮复用关闭 / 动作请求。</li>
+  <li>通知中心的消息卡同样渲染动作按钮；默认文字，<code>action_icons</code> 为真且图标命中时用图标。点击发送 <code>NotificationActivate { id, action_key: Some(key), activation_token }</code>。</li>
   <li><code>remove_notification</code> / <code>clear_notifications</code> 同时更新中心列表与贴栏通知窗口；快照只填充通知中心，贴栏通知窗口不重放历史。</li>
-  <li>服务不可用时中心显示失败说明与刷新按钮，贴栏通知窗口清空并隐藏。</li>
-  <li>图标三态：<code>None</code> 隐藏、<code>Name</code> 按图标主题查找、<code>Pixels</code> 转纹理；主题未命中按缺失降级隐藏。</li>
+  <li>服务不可用时中心显示失败说明与刷新按钮，贴栏通知窗口隐藏但保留记录。</li>
+  <li>图标三态：<code>None</code> 隐藏；<code>Name</code> 为主题名或 <code>file://</code> URI，主题名按图标主题递归查找、URI 直接加载本地文件；<code>Pixels</code> 转纹理。任一加载未命中按缺失降级隐藏。</li>
 </ul>
 
 <h3 id="sec-4-dock">4.14. bar/modules/dock.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -576,7 +580,11 @@ pub enum Request {
     NotificationClose { id: u32, reason: NotificationCloseReason },
     NotificationCloseGroup { app_name: String },
     NotificationClear,
-    NotificationActivate { id: u32, action_key: Option&lt;String&gt; },
+    NotificationActivate {
+        id: u32,
+        action_key: Option&lt;String&gt;,
+        activation_token: Option&lt;String&gt;,
+    },
 }
 
 pub enum Response {
@@ -619,7 +627,7 @@ pub fn parse_control_line(line: &amp;str) -&gt; Option&lt;ControlCommand&gt;;</c
 <ul class="note">
   <li>传输：Unix Socket（daemon 为服务端）；两类消息——窗口 → daemon 的请求（均有应答）与 daemon → 窗口的推送；首连握手后由 daemon 推送全量快照，此后增量衔接。</li>
   <li><code>hello</code>：窗口接入握手，显示器名 → 先推全量快照、后应答受理。</li>
-  <li>请求语义：<code>tray.menu_read</code> / <code>tray.menu_expand</code> 返回菜单快照；<code>tray.interact</code> 返回路由结果（<code>Dispatched</code> / <code>Menu</code> 快照）；<code>notification.activate</code> 的动作 key 缺省取 <code>default</code> / 唯一动作，触发动作后关闭该条（<code>resident</code> 除外），无可用动作则直接关闭。</li>
+  <li>请求语义：<code>tray.menu_read</code> / <code>tray.menu_expand</code> 返回菜单快照；<code>tray.interact</code> 返回路由结果（<code>Dispatched</code> / <code>Menu</code> 快照）；<code>notification.activate</code> 的动作 key 缺省取 <code>default</code> / 唯一动作，<code>activation_token</code> 缺省表示不生成；daemon 先回发令牌再触发动作，触发后关闭该条（<code>resident</code> 除外），无可用动作则直接关闭。</li>
   <li>请求语义：<code>minimized.restore</code> 把窗口移到其显示器当前活动工作区并聚焦；<code>minimized.close</code> 请求关闭窗口；地址不在最小化集合时无操作。</li>
   <li>推送语义：<code>notification</code> 推送全部窗口用于通知中心缓存；<code>notification_popup</code> 仅推当前显示器；<code>notification_removed</code> / <code>notification_cleared</code> 推送全部窗口；<code>state.minimized</code> 推送全部窗口，由各窗口按显示器过滤。</li>
   <li>大对象（如位图图标）可经 fd 传递升级（memfd + <code>SCM_RIGHTS</code>），协议骨架不变。</li>
@@ -706,7 +714,7 @@ pub struct NotificationAction { pub key: String, pub label: String }
 pub enum NotificationIcon {
     None,
     Name(String),
-    Pixels { width: u32, height: u32, rgba: Vec&lt;u8&gt; },
+    Pixels { width: i32, height: i32, rgba: Vec&lt;u8&gt; },
 }
 
 pub struct NotificationRecord {     // bnote::Notice 的共享投影
@@ -766,7 +774,7 @@ pub struct StateDelta {
   <li><code>StateDelta.minimized</code> 为完整列表快照；列表变化时广播全部窗口，各窗口按 <code>monitor</code> 过滤。</li>
   <li><code>NotificationRecord</code>：由 <code>bnote::Notice</code> 投影，保留 id、应用名、图标三态、标题、正文、动作、<code>action_icons</code>、紧急度、请求超时、<code>transient</code> / <code>resident</code>、<code>sound_file</code> / <code>sound_name</code> / <code>suppress_sound</code>；窗口只消费共享模型，不接触 bnote 类型。</li>
   <li><code>NotificationStatus</code>：<code>Ready</code> / <code>Unavailable { message }</code>；通知服务启动成功为 <code>Ready</code>，启动失败或运行中终止为 <code>Unavailable</code>，变化时推送全部窗口。</li>
-  <li>通知关闭原因：<code>Dismissed</code>（用户关闭 / 组清理 / 动作确认）/ <code>Expired</code>（<code>transient</code> 超时 / 缓存淘汰）；窗口请求映射为 bnote <code>CloseReason</code>；客户端 <code>CloseNotification</code> 由 bnote 自行回发 <code>CloseRequest</code>。</li>
+  <li>通知关闭原因：<code>Dismissed</code>（用户关闭 / 组清理 / 动作确认）/ <code>Expired</code>（<code>transient</code> 超时）；窗口请求映射为 bnote <code>CloseReason</code>；客户端 <code>CloseNotification</code> 由 bnote 自行回发 <code>CloseRequest</code>。</li>
 </ul>
 
 <h3 id="sec-4-tests">4.20. tests.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -887,10 +895,6 @@ popup::hover_switch(manager, anchor, switch)（悬停切换，世代校验）</c
                └── Daemon::on_notification(record)
                     ├── notifications.upsert(record)
                     ├── notify::play_sound(&amp;record)
-                    ├── 超过 NOTIFICATION_CACHE_CAPACITY
-                    │    ├── notifications.pop_back()
-                    │    ├── NotificationService::close(id, bnote::CloseReason::Expired)
-                    │    └── Daemon::broadcast(Push::NotificationRemoved(id))
                     ├── Daemon::broadcast(Push::Notification(record))
                     │    └── WindowApp::handle_push(push)
                     │         └── InfoCenterWidget::upsert_center(record)
@@ -936,17 +940,26 @@ popup::hover_switch(manager, anchor, switch)（悬停切换，世代校验）</c
      ├── notifications.clear()
      └── broadcast(Push::NotificationCleared(None))</code></pre>
 
-<h4 id="sec-5-6-3">5.6.3. 左键动作与关闭</h4>
-<pre><code>窗口左键/动作按钮 → Request::NotificationActivate { id, action_key }
-└── Daemon::activate_notification(id, action_key)
-     ├── 记录不存在 → 返回
-     ├── 有动作 → NotificationService::invoke_action(id, key)
-     ├── 有动作且 resident → 返回（保留条目）
-     └── 无动作或非 resident → Daemon::close_notification(id, Dismissed)</code></pre>
+<h4 id="sec-5-6-3">5.6.3. 左键动作、激活令牌与关闭</h4>
+<pre><code>窗口左键/动作按钮
+├── InfoCenterWidget::activation_token()
+│    └── gdk::Display::default()
+│         └── Display::app_launch_context()
+│              └── AppLaunchContext::startup_notify_id(None, &amp;[])
+└── IpcClient::request(Request::NotificationActivate { id, action_key, activation_token })
+     └── Daemon::activate_notification(id, action_key, activation_token)
+          ├── 记录不存在 → 返回
+          ├── 有动作 → NotificationService::invoke_action(id, key, activation_token)
+          │    ├── activation_token 存在 → SessionHandle::activation_token(id, token)
+          │    └── SessionHandle::invoke_action(id, key)
+          ├── 有动作且 resident → 返回（保留条目）
+          └── 无动作或非 resident → Daemon::close_notification(id, Dismissed)</code></pre>
 <ul class="note">
   <li>左键的 <code>action_key</code> 为 <code>None</code>，取 <code>default</code> 或唯一动作；动作按钮带对应 key。</li>
   <li>有动作时触发后关闭该条；<code>resident</code> 记录保留。无可用动作时左键仅关闭该条。</li>
-  <li>通知协议没有可映射到具体应用/窗口的字段，左键不做来源应用聚焦回退。</li>
+  <li>令牌在 bar 的点击回调中先生成、再随请求投递；缺失或回发失败时只记日志并跳过 <code>ActivationToken</code>，<code>ActionInvoked</code> 仍照常发出。</li>
+  <li><code>resident</code> 只影响动作后是否关闭，不改变令牌生成与回发顺序。</li>
+  <li>通知协议没有可映射到具体应用/窗口的字段；bread 不直接聚焦来源应用，只回发令牌，由发送方自行激活其窗口。</li>
 </ul>
 
 <h3 id="sec-5-7">5.7. 通知服务状态与重试</h3>
@@ -955,15 +968,13 @@ popup::hover_switch(manager, anchor, switch)（悬停切换，世代校验）</c
 └── Err(err) → Daemon::on_notification_status(Unavailable { message: unavailable_message(err) })
 
 Daemon::on_notification_status(status)
-├── status 为 Unavailable → Daemon::discard_notifications()（不调用 bnote 关闭）
-│    └── broadcast(Push::NotificationCleared(None))
 └── Daemon::broadcast(Push::State { notification: status })
      └── WindowApp::handle_push(push)
           └── InfoCenterWidget::set_notification_status(status)
 
 用户点击刷新 → Request::NotificationRetry
 └── Daemon::retry_notification()
-    ├── NotificationService::shutdown()
+    ├── notification.take() — Some(service) 时 service.shutdown()
     └── NotificationService::start(tx)
         ├── Ok → Daemon::on_notification_status(Ready)
         └── Err(err) → Daemon::on_notification_status(Unavailable { message: unavailable_message(err) })
@@ -974,7 +985,7 @@ NoticeEvent::Fatal { message }
 <ul class="note">
   <li>错误文案：标题「通知中心暂时不可用」；正文取 <code>NotificationStatus::Unavailable.message</code>（NameTaken 为「另一个通知服务正在运行，bread 无法接管 org.freedesktop.Notifications。」，Fatal 为 bnote 报告的原因）；刷新按钮位于正文下方。</li>
   <li>不自动重试、不排队、不替换已有通知服务；重试完全由用户点击刷新按钮触发。</li>
-  <li>运行中 Fatal 会清空通知缓存与贴栏通知；重试成功后从空列表恢复。</li>
+  <li>运行中 Fatal 只更新通知服务状态并隐藏贴栏通知，通知缓存保留；重试成功后恢复列表展示。</li>
 </ul>
 
 <h3 id="sec-5-8">5.8. 通知中心开关</h3>

@@ -81,7 +81,7 @@
   <a href="https://specifications.freedesktop.org/mpris-spec/latest/">MPRIS</a>。</li>
 </ul>
 
-<h3 id="sec-4-3">4.3. 外部调节工具</h3>
+<h3 id="sec-4-3">4.3. 外部工具</h3>
 <table>
   <tr><th>工具</th><th>用途</th><th>缺席行为</th></tr>
   <tr><td><code>pamixer</code></td><td>音量读取与设置</td><td>音量滑块灰置</td></tr>
@@ -90,6 +90,9 @@
   <tr><td><code>canberra-gtk-play</code></td><td>通知提示音（<code>sound-file</code> / <code>sound-name</code>）</td><td>不播放提示音，且不声明 <code>sound</code> 能力</td></tr>
   <tr><td><code>xdg-open</code></td><td>打开通知正文中的 <code>http</code> / <code>https</code> / <code>mailto</code> 链接</td><td>链接仅显示、不响应点击</td></tr>
 </table>
+<ul class="note">
+  <li><code>body-hyperlinks</code> 的能力声明见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>，不随 <code>xdg-open</code> 缺席改变；缺少该工具只影响链接的打开动作，属运行环境降级。</li>
+</ul>
 
 <h3 id="sec-4-4">4.4. 通知协议</h3>
 <p>通知守护消费 <code>org.freedesktop.Notifications</code>；协议子集、hints 归一与能力契约见

@@ -16,8 +16,8 @@
 - 实现分支重构任务：按 ARCH §3.9 九色色板迁移 `bread.css` 与 `src/`（旧 token 名、托盘动态垫高、`success` 等），完成整体色板迁移 [已解决]
 - 通知能力实现（目标见 bnote/PROVIDER §4.5） [已解决]
   - action：渲染动作按钮（默认文字，`action-icons` 时图标）并执行；bnote 需暴露 `action-icons` hint
-  - 外观：`body-markup` / `body-hyperlinks` / `body-images`；`icon-multi`（bnote 需多帧图标支持）
-  - 提示音：`sound`（bnote 需暴露 `sound-file` / `sound-name` / `suppress-sound`；播放后端待定）
+  - 外观：`body-markup` / `body-hyperlinks` / `body-images`；`icon-multi` 本期不实现（保留单帧 `icon-static`）
+  - 提示音：`sound`（bnote 需暴露 `sound-file` / `sound-name` / `suppress-sound`；播放后端 `canberra-gtk-play`，缺席时不声明能力）
   - 持久化：内存保留至 daemon / 桌面会话结束，弹窗 timeout 只移除卡片；bnote 需暴露 `transient` / `resident`
   - 扩展能力 `x-vendor-*`：不实现
 - 搭建一些资源占用和能耗相关的测试手段 [已解决]
