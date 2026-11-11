@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -31,6 +31,7 @@ pub(crate) struct BusParts {
     pub(crate) stopping: Arc<AtomicBool>,
     pub(crate) stopped: Arc<AtomicBool>,
     pub(crate) snapshot_done: Arc<AtomicBool>,
+    pub(crate) arrival_seq: Arc<AtomicU64>,
     pub(crate) stop_tx: watch::Sender<bool>,
     pub(crate) fatal_tx: watch::Sender<String>,
     pub(crate) displaced_tx: watch::Sender<bool>,
@@ -51,6 +52,7 @@ impl BusParts {
             stopping: Arc::new(AtomicBool::new(false)),
             stopped: Arc::new(AtomicBool::new(false)),
             snapshot_done: Arc::new(AtomicBool::new(false)),
+            arrival_seq: Arc::new(AtomicU64::new(0)),
             stop_tx,
             fatal_tx,
             displaced_tx,
@@ -77,6 +79,8 @@ pub(crate) struct BusCenter {
     /// 快照栅栏：置位前入册的 Item 由快照承载（静默入册），其后走增量事件——
     /// 保证首事件即快照、无重叠无缺口。
     snapshot_done: Arc<AtomicBool>,
+    /// 报到到达顺序（并发报到时固定首见序）。
+    pub(crate) arrival_seq: Arc<AtomicU64>,
     /// 启动期（快照前）的死亡清理缓冲：快照投递后按快照内容冲刷。
     deferred_removed: Arc<Mutex<Vec<TrayItemId>>>,
     stop_tx: watch::Sender<bool>,
@@ -99,6 +103,7 @@ impl BusCenter {
             stopping: parts.stopping,
             stopped: parts.stopped,
             snapshot_done: parts.snapshot_done,
+            arrival_seq: parts.arrival_seq,
             deferred_removed: Arc::new(Mutex::new(Vec::new())),
             stop_tx: parts.stop_tx,
             fatal_tx: parts.fatal_tx,

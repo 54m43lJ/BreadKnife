@@ -6,7 +6,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::mpsc::Sender;
 
 use crate::daemon::DaemonEvent;
-use crate::shared::protocol::{parse_control_line, read_frame, write_frame, Frame};
+use crate::shared::protocol::{Frame, parse_control_line, read_frame, write_frame};
 
 /// 控制接口：一行一条指令；客户端断开即收线。
 pub fn serve_control(path: &str, tx: Sender<DaemonEvent>) -> std::io::Result<()> {
@@ -77,8 +77,12 @@ pub fn serve_windows(path: &str, tx: Sender<DaemonEvent>) -> std::io::Result<()>
 
 fn handle_window_conn(stream: UnixStream, tx: Sender<DaemonEvent>) {
     let _ = stream.set_nonblocking(false);
-    let Ok(read_half) = stream.try_clone() else { return };
-    let Ok(write_half) = stream.try_clone() else { return };
+    let Ok(read_half) = stream.try_clone() else {
+        return;
+    };
+    let Ok(write_half) = stream.try_clone() else {
+        return;
+    };
 
     let (out_tx, out_rx) = std::sync::mpsc::channel::<Frame>();
 
@@ -104,7 +108,11 @@ fn handle_window_conn(stream: UnixStream, tx: Sender<DaemonEvent>) {
                 match frame {
                     Frame::Request { id, request } => {
                         if tx
-                            .send(DaemonEvent::WindowMessage { id, request, out: out_tx.clone() })
+                            .send(DaemonEvent::WindowMessage {
+                                id,
+                                request,
+                                out: out_tx.clone(),
+                            })
                             .is_err()
                         {
                             return;

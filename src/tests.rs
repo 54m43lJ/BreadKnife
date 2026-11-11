@@ -70,7 +70,10 @@ fn sample_snapshot() -> WindowSnapshot {
             has_windows: true,
             windows: Vec::new(),
         }],
-        active: ActiveWindow { class: "firefox".into(), title: "Test".into() },
+        active: ActiveWindow {
+            class: "firefox".into(),
+            title: "Test".into(),
+        },
         tray: vec![TrayItemView {
             id: "org.example.Item".into(),
             title: Some("Example".into()),
@@ -78,7 +81,10 @@ fn sample_snapshot() -> WindowSnapshot {
             icon: IconView::Pixmap {
                 width: 2,
                 height: 2,
-                argb: vec![0xFF, 0x11, 0x22, 0x33, 0xFF, 0x44, 0x55, 0x66, 0xFF, 0x77, 0x88, 0x99, 0xFF, 0xAA, 0xBB, 0xCC],
+                argb: vec![
+                    0xFF, 0x11, 0x22, 0x33, 0xFF, 0x44, 0x55, 0x66, 0xFF, 0x77, 0x88, 0x99, 0xFF,
+                    0xAA, 0xBB, 0xCC,
+                ],
             },
             attention: false,
             alive: true,
@@ -87,10 +93,21 @@ fn sample_snapshot() -> WindowSnapshot {
         notifications: vec![NotificationRecord {
             id: 1,
             app_name: "app".into(),
-            icon: "icon".into(),
+            icon: NotificationIcon::Name("icon".into()),
             summary: "s".into(),
             body: "b".into(),
+            actions: Vec::new(),
+            action_icons: false,
+            urgency: NotificationUrgency::Normal,
+            expire_timeout_ms: None,
+            transient: false,
+            resident: false,
+            sound_file: None,
+            sound_name: None,
+            suppress_sound: false,
         }],
+        notification: NotificationStatus::Ready,
+        minimized: Vec::new(),
         system: SystemState::default(),
         css_path: "/tmp/bread.css".into(),
     }
@@ -98,15 +115,20 @@ fn sample_snapshot() -> WindowSnapshot {
 
 #[test]
 fn frame_push_snapshot_roundtrip() {
-    let frame = Frame::Push { push: Push::Snapshot(sample_snapshot()) };
-    let Frame::Push { push: Push::Snapshot(got) } = frame_roundtrip(frame) else {
+    let frame = Frame::Push {
+        push: Push::Snapshot(sample_snapshot()),
+    };
+    let Frame::Push {
+        push: Push::Snapshot(got),
+    } = frame_roundtrip(frame)
+    else {
         panic!("wrong frame");
     };
     assert_eq!(got, sample_snapshot());
 }
 
 #[test]
-fn frame_request_response_roundtrip() {
+fn protocol_roundtrip() {
     let req = Frame::Request {
         id: 42,
         request: Request::TrayInteract {
@@ -133,15 +155,21 @@ fn frame_length_guard() {
 }
 
 #[test]
-fn control_line_parsing() {
+fn parse_control_line_accepts_commands() {
     use ControlCommand::*;
     assert_eq!(
         parse_control_line("open bar"),
-        Some(Open { name: "bar".into(), monitor: None })
+        Some(Open {
+            name: "bar".into(),
+            monitor: None
+        })
     );
     assert_eq!(
         parse_control_line("open bar -m DP-1"),
-        Some(Open { name: "bar".into(), monitor: Some("DP-1".into()) })
+        Some(Open {
+            name: "bar".into(),
+            monitor: Some("DP-1".into())
+        })
     );
     assert_eq!(parse_control_line("close-all"), Some(CloseAll));
     assert_eq!(parse_control_line("reload"), Some(Reload));
@@ -151,7 +179,7 @@ fn control_line_parsing() {
 }
 
 #[test]
-fn daemon_alive_without_pid_file() {
+fn daemon_alive_reads_pid() {
     // 测试环境不落盘：仅当默认 PID 路径恰好缺失时成立
     if !crate::shared::protocol::pid_file().exists() {
         assert!(!daemon_alive());

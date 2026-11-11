@@ -2,9 +2,9 @@
 //! 按钮形态为三条件分层（README「界面交互」）；色彩映射见 ARCHITECTURE §3.10。
 
 use std::cell::RefCell;
-use std::sync::Arc;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gtk::prelude::*;
 
@@ -31,7 +31,9 @@ impl WorkspaceWidget {
             let target = if dy > 0.0 || dx > 0.0 { "m+1" } else { "m-1" };
             let ipc = ipc_scroll.clone();
             std::thread::spawn(move || {
-                if let Err(e) = ipc.request(Request::WorkspaceSwitch { target: target.into() }) {
+                if let Err(e) = ipc.request(Request::WorkspaceSwitch {
+                    target: target.into(),
+                }) {
                     eprintln!("[workspace] scroll switch failed: {e}");
                 }
             });
@@ -39,7 +41,11 @@ impl WorkspaceWidget {
         });
         container.add_controller(scroll);
 
-        Self { container, ipc, buttons: Rc::new(RefCell::new(BTreeMap::new())) }
+        Self {
+            container,
+            ipc,
+            buttons: Rc::new(RefCell::new(BTreeMap::new())),
+        }
     }
 
     pub fn rebuild(&self, states: &[WorkspaceState]) {
@@ -73,7 +79,7 @@ impl WorkspaceWidget {
         base.add_css_class(if ws.has_windows { "square" } else { "dot" });
         base.set_halign(gtk::Align::Center);
         base.set_valign(gtk::Align::Center);
-        if ws.urgent {
+        if ws.urgent && ws.has_windows {
             base.add_css_class("urgent");
         }
 
@@ -81,7 +87,7 @@ impl WorkspaceWidget {
         indicator.add_css_class("ws-ind");
         indicator.set_halign(gtk::Align::Center);
         indicator.set_valign(gtk::Align::Center);
-        if ws.urgent {
+        if ws.urgent && ws.has_windows {
             indicator.add_css_class("on-urgent");
         }
         indicator.set_visible(ws.active);

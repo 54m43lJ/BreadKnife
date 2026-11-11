@@ -48,6 +48,7 @@ fn tracker_upsert_merge_and_rename() {
         alive: true,
         menu: menu.map(str::to_string),
         menu_only: false,
+        seq: 0,
     };
     let mut t = ItemTracker::default();
 
@@ -271,6 +272,7 @@ fn tray_item_from_props_mapping() {
         alive,
         menu: None,
         menu_only: false,
+        seq: 0,
     };
     let sv = |s: &str| OwnedValue::try_from(Value::from(s)).unwrap();
 

@@ -52,7 +52,12 @@ pub fn spawn(tx: &Sender<DaemonEvent>, monitor: &str, window_socket: &str) -> Op
         })
         .ok()?;
     eprintln!("[windows] spawned window for {monitor} (pid {pid})");
-    Some(WindowProc { child, out: None, killing: false, started: Instant::now() })
+    Some(WindowProc {
+        child,
+        out: None,
+        killing: false,
+        started: Instant::now(),
+    })
 }
 
 /// 进程仍在运行（或为僵尸——僵尸视为已退出，返回 false）。
@@ -61,7 +66,9 @@ fn process_alive(pid: u32) -> bool {
         return false;
     };
     // stat: pid (comm) state ...——comm 可含空格，取末括号后首字符
-    let Some(after) = stat.rsplit(')').next() else { return false };
+    let Some(after) = stat.rsplit(')').next() else {
+        return false;
+    };
     let state = after.trim().chars().next();
     !matches!(state, Some('Z') | Some('X'))
 }

@@ -3,7 +3,7 @@
 //! 只存唯一名 + 对象路径 + 存活字段（alive）+ DBusMenu 支持/路径 + 整项即菜单标记；
 //! SNI 详情不经手、不落册，由消费方现场读取（零详情缓存）。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::TrayItemId;
 
@@ -22,11 +22,16 @@ pub(crate) struct ItemEntry {
     pub menu: Option<String>,
     /// 整项即菜单（左键路由依据；注册时探测，随变更信号就地更新）。
     pub menu_only: bool,
+    /// 首见序：首次入册分配；Refreshed / Renamed 保持。
+    pub seq: u64,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct ItemTracker {
     items: HashMap<TrayItemId, ItemEntry>,
+    /// 下一个首见序号；仅新条目递增。
+    #[allow(dead_code)]
+    next_seq: u64,
 }
 
 /// upsert 结果：新条目 / 原地刷新 / id 升级（CODE §4.3.1）。
@@ -42,7 +47,15 @@ impl ItemTracker {
     /// （同一对象/连接不允许双条目）：①注册名 == service ②发送者唯一名 == unique；
     /// 命中 → 原地刷新（path/menu/menu_only/alive 以最新报到为准），两轮未命中 → 新建。
     /// 临时唯一名 id 被知名名报到命中且属主唯一名不变 → id 升级（重键）。
+    #[allow(dead_code)]
     pub(crate) fn upsert(&mut self, entry: ItemEntry) -> Upsert {
+        let seq = self.next_seq;
+        self.next_seq = self.next_seq.wrapping_add(1);
+        self.upsert_at(entry, seq)
+    }
+
+    /// 按给定到达序号入册：Inserted 使用 `seq`，Refreshed / Renamed 保留原值。
+    pub(crate) fn upsert_at(&mut self, entry: ItemEntry, seq: u64) -> Upsert {
         // ① 注册名 == service（知名名同名重启竞态；唯一名形态 == 临时条目）
         if let Some(existing) = self.items.get_mut(&entry.service) {
             existing.unique = entry.unique;
@@ -60,9 +73,15 @@ impl ItemTracker {
             .map(|(id, _)| id.clone());
         if let Some(old_id) = via_unique {
             if old_id.starts_with(':') && !entry.service.starts_with(':') {
-                // 临时唯一名 → 知名名：id 升级（重键，属主唯一名不变）
-                self.items.remove(&old_id);
-                self.items.insert(entry.service.clone(), entry.clone());
+                // 临时唯一名 → 知名名：id 升级（重键，首见序保持）
+                let old = self.items.remove(&old_id).expect("tracked id");
+                self.items.insert(
+                    entry.service.clone(),
+                    ItemEntry {
+                        seq: old.seq,
+                        ..entry.clone()
+                    },
+                );
                 return Upsert::Renamed {
                     old: old_id,
                     new: entry.service,
@@ -77,7 +96,8 @@ impl ItemTracker {
             existing.menu_only = entry.menu_only;
             return Upsert::Refreshed;
         }
-        self.items.insert(entry.service.clone(), entry);
+        self.items
+            .insert(entry.service.clone(), ItemEntry { seq, ..entry });
         Upsert::Inserted
     }
 
@@ -115,12 +135,16 @@ impl ItemTracker {
         self.items.get(id).cloned()
     }
 
+    /// 全量条目快照（按首见序）。
     pub(crate) fn all(&self) -> Vec<ItemEntry> {
-        self.items.values().cloned().collect()
+        let mut items: Vec<ItemEntry> = self.items.values().cloned().collect();
+        items.sort_by_key(|entry| entry.seq);
+        items
     }
 
-    pub(crate) fn ids(&self) -> HashSet<TrayItemId> {
-        self.items.keys().cloned().collect()
+    /// 在册 id 清单（按首见序）。
+    pub(crate) fn ordered_ids(&self) -> Vec<TrayItemId> {
+        self.all().into_iter().map(|entry| entry.service).collect()
     }
 
     /// 存活结论（登记簿记的 alive 字段，零 DBus 流量）；不在册 → None。

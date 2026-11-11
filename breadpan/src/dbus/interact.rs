@@ -104,7 +104,7 @@ pub(crate) async fn route(
 
 /// 延续方法：提交 Outcome::Menu 弹出中的条目点击（dbusmenu Event("clicked")）。
 /// VOID 受理即返回 InteractionOutcome::Dispatched；调用结果经 InteractionResult 事件交付。
-pub(crate) fn menu_activate(
+pub(crate) async fn menu_activate(
     bus: &BusCenter,
     id: &str,
     menu_item_id: i32,

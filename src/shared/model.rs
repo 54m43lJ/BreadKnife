@@ -1,9 +1,9 @@
 //! daemon / 窗口共用数据模型（窗口切片、状态增量）。
-//! 类型契约见 ARCHITECTURE.html §4.5；IPC 消息壳见 protocol.rs。
+//! 类型契约见 CORE.html §4.19；IPC 消息壳见 protocol.rs。
 
 use serde::{Deserialize, Serialize};
 
-// ── 工作区（形态见 README「界面交互」；色彩映射见 ARCHITECTURE §3.10）──
+// ── 工作区（形态见 ABOUT「界面交互」；色彩映射见 USER §5.2.2）──
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkspaceWindow {
@@ -65,6 +65,11 @@ pub enum TrayUpdate {
     Added(TrayItemView),
     Removed(String),
     Changed(TrayItemView),
+    /// 同一 Item id 重键：原位换键，不增删。
+    Renamed {
+        old: String,
+        new: String,
+    },
 }
 
 // ── 菜单快照（懒加载，每次一层）──
@@ -158,15 +163,68 @@ pub struct VolumeState {
     pub muted: bool,
 }
 
-// ── 通知记录（应用名、图标、摘要、正文、通知 ID）──
+// ── 通知记录（bnote::Notice 的共享投影）──
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NotificationUrgency {
+    Low,
+    Normal,
+    Critical,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NotificationAction {
+    pub key: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum NotificationIcon {
+    None,
+    Name(String),
+    Pixels {
+        width: i32,
+        height: i32,
+        #[serde(with = "b64_vec")]
+        rgba: Vec<u8>,
+    },
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NotificationRecord {
     pub id: u32,
     pub app_name: String,
-    pub icon: String,
+    pub icon: NotificationIcon,
     pub summary: String,
     pub body: String,
+    pub actions: Vec<NotificationAction>,
+    pub action_icons: bool,
+    pub urgency: NotificationUrgency,
+    pub expire_timeout_ms: Option<u32>,
+    pub transient: bool,
+    pub resident: bool,
+    pub sound_file: Option<String>,
+    pub sound_name: Option<String>,
+    pub suppress_sound: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub enum NotificationStatus {
+    #[default]
+    Ready,
+    Unavailable {
+        message: String,
+    },
+}
+
+// ── 最小化托盘 ──
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MinimizedWindow {
+    pub address: String,
+    pub class: String,
+    pub title: String,
+    pub monitor: String,
 }
 
 // ── 窗口切片与状态增量 ──
@@ -178,6 +236,8 @@ pub struct WindowSnapshot {
     pub active: ActiveWindow,
     pub tray: Vec<TrayItemView>,
     pub notifications: Vec<NotificationRecord>,
+    pub notification: NotificationStatus,
+    pub minimized: Vec<MinimizedWindow>,
     pub system: SystemState,
     pub css_path: String,
 }
@@ -188,6 +248,8 @@ pub struct StateDelta {
     pub workspaces: Option<Vec<WorkspaceState>>,
     pub active: Option<ActiveWindow>,
     pub system: Option<SystemState>,
+    pub notification: Option<NotificationStatus>,
+    pub minimized: Option<Vec<MinimizedWindow>>,
 }
 
 // ── base64 编解码（位图 / PNG 跨 JSON 线格式；fd 传递为文档留出的升级路径）──
@@ -214,7 +276,9 @@ mod b64_opt {
 
     pub fn serialize<S: Serializer>(v: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
         match v {
-            Some(bytes) => s.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes)),
+            Some(bytes) => {
+                s.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
+            }
             None => s.serialize_none(),
         }
     }

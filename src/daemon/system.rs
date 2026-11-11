@@ -8,7 +8,6 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use crate::daemon::notify;
 use crate::daemon::DaemonEvent;
 use crate::shared::model::{BatteryState, BluetoothState, NetworkState, SystemState, VolumeState};
 use crate::shared::protocol::MediaOp;
@@ -17,7 +16,9 @@ const FAST_POLL: Duration = Duration::from_secs(5); // 音量 / 亮度
 const SLOW_POLL: Duration = Duration::from_secs(30); // 电池 / 网络 / 蓝牙
 
 /// 媒体控制下发通道：请求线程 → system 运行时（zbus 连接绑定其创建的运行时）。
-static MEDIA_TX: OnceLock<tokio::sync::mpsc::UnboundedSender<MediaOp>> = OnceLock::new();
+type MediaReply = std::sync::mpsc::Sender<Result<(), String>>;
+static MEDIA_TX: OnceLock<tokio::sync::mpsc::UnboundedSender<(MediaOp, MediaReply)>> =
+    OnceLock::new();
 
 pub fn start(tx: Sender<DaemonEvent>) {
     std::thread::Builder::new()
@@ -45,9 +46,6 @@ pub fn start(tx: Sender<DaemonEvent>) {
                     }
                 };
                 if let Some(conn) = &session {
-                    if let Err(e) = notify::serve(conn, tx.clone()).await {
-                        eprintln!("[system] notification daemon degraded: {e}");
-                    }
                     spawn_media_worker(conn);
                 }
                 let state = Arc::new(Mutex::new(SystemState::default()));
@@ -83,33 +81,36 @@ pub fn start(tx: Sender<DaemonEvent>) {
         .expect("spawn system");
 }
 
-/// 通知记录缓存的窗口侧上限之外的守护侧留存上限。
-pub const NOTIFICATION_KEEP: usize = 50;
-
 // ── 媒体（MPRIS，session bus）──
 
 fn spawn_media_worker(conn: &zbus::Connection) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<MediaOp>();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(MediaOp, MediaReply)>();
     if MEDIA_TX.set(tx).is_err() {
         return; // 已就位（理论不达：start 单次）
     }
     let conn = conn.clone();
     tokio::spawn(async move {
-        while let Some(op) = rx.recv().await {
-            if let Err(e) = media_dispatch(&conn, op).await {
-                eprintln!("[system] media control failed: {e}");
-            }
+        while let Some((op, reply)) = rx.recv().await {
+            let result = media_dispatch(&conn, op).await;
+            let _ = reply.send(result);
         }
     });
 }
 
-/// 请求线程入口：投递到 system 运行时执行（连接不跨运行时使用）。
+/// 请求线程入口：投递到 system 运行时执行并阻塞等待结果（调用方在专用线程）。
 pub fn media_control(op: MediaOp) {
-    match MEDIA_TX.get() {
-        Some(tx) => {
-            let _ = tx.send(op);
-        }
-        None => eprintln!("[system] media control unavailable: no session bus"),
+    let Some(tx) = MEDIA_TX.get() else {
+        eprintln!("[system] media control unavailable: no session bus");
+        return;
+    };
+    let (reply, rx) = std::sync::mpsc::channel();
+    if tx.send((op, reply)).is_err() {
+        return;
+    }
+    match rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => eprintln!("[system] media control failed: {error}"),
+        Err(_) => eprintln!("[system] media control timed out"),
     }
 }
 
@@ -194,7 +195,10 @@ async fn battery_read(conn: &zbus::Connection) -> Option<BatteryState> {
     .ok()?;
     let percent: f64 = proxy.get_property("Percentage").await.ok()?;
     let state: u32 = proxy.get_property("State").await.unwrap_or(0);
-    Some(BatteryState { percent: percent.round() as u32, charging: state == 1 })
+    Some(BatteryState {
+        percent: percent.round() as u32,
+        charging: state == 1,
+    })
 }
 
 // ── 网络（NetworkManager，system bus）──
@@ -239,7 +243,10 @@ async fn network_read(conn: &zbus::Connection) -> Option<NetworkState> {
         "802-11-wireless" | "wifi" => "wifi",
         _ => "other",
     };
-    Some(NetworkState { kind: kind.into(), connected: !ctype.is_empty() })
+    Some(NetworkState {
+        kind: kind.into(),
+        connected: !ctype.is_empty(),
+    })
 }
 
 // ── 蓝牙（BlueZ，system bus）──
@@ -274,7 +281,10 @@ async fn bluetooth_read(conn: &zbus::Connection) -> Option<BluetoothState> {
         .ok()?;
     let tree: std::collections::HashMap<
         zbus::zvariant::OwnedObjectPath,
-        std::collections::HashMap<String, std::collections::HashMap<String, zbus::zvariant::OwnedValue>>,
+        std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+        >,
     > = om.call("GetManagedObjects", &()).await.ok()?;
     let mut powered = false;
     let mut connected = 0u32;
@@ -287,14 +297,13 @@ async fn bluetooth_read(conn: &zbus::Connection) -> Option<BluetoothState> {
                         .and_then(|v| v.downcast_ref::<bool>().ok())
                         .unwrap_or(false);
                 }
-                "org.bluez.Device1" => {
+                "org.bluez.Device1"
                     if props
                         .get("Connected")
                         .and_then(|v| v.downcast_ref::<bool>().ok())
-                        .unwrap_or(false)
-                    {
-                        connected += 1;
-                    }
+                        .unwrap_or(false) =>
+                {
+                    connected += 1;
                 }
                 _ => {}
             }
@@ -313,13 +322,12 @@ async fn poll_blocking(
 ) {
     loop {
         let s = state.clone();
-        let changed =
-            tokio::task::spawn_blocking(move || {
-                let mut g = s.lock().unwrap();
-                read(&mut g)
-            })
-            .await
-            .unwrap_or(false);
+        let changed = tokio::task::spawn_blocking(move || {
+            let mut g = s.lock().unwrap();
+            read(&mut g)
+        })
+        .await
+        .unwrap_or(false);
         if changed {
             let _ = tx.send(DaemonEvent::System(state.lock().unwrap().clone()));
         }
@@ -330,12 +338,17 @@ async fn poll_blocking(
 fn read_volume_brightness(g: &mut SystemState) -> bool {
     let mut changed = false;
 
-    let percent = run_capture(&["pamixer", "--get-volume"], |s| s.trim().parse::<u32>().ok());
+    let percent = run_capture(&["pamixer", "--get-volume"], |s| {
+        s.trim().parse::<u32>().ok()
+    });
     if let Some(pct) = percent {
         // 音量可读才更新（pamixer 缺席 → 保持 None，入口隐藏）
-        let muted = run_capture(&["pamixer", "--get-mute"], |s| Some(s.trim() == "true"))
-            .unwrap_or(false);
-        let volume = VolumeState { percent: pct, muted };
+        let muted =
+            run_capture(&["pamixer", "--get-mute"], |s| Some(s.trim() == "true")).unwrap_or(false);
+        let volume = VolumeState {
+            percent: pct,
+            muted,
+        };
         if g.volume.as_ref() != Some(&volume) {
             g.volume = Some(volume);
             changed = true;
@@ -344,7 +357,26 @@ fn read_volume_brightness(g: &mut SystemState) -> bool {
 
     // brightnessctl -m: "device,api,level,max,percent%"（内置面板）
     let brightness = run_capture(&["brightnessctl", "-m"], |s| {
-        s.lines().next()?.rsplit(',').next()?.trim().trim_end_matches('%').parse::<u32>().ok()
+        s.lines()
+            .next()?
+            .rsplit(',')
+            .next()?
+            .trim()
+            .trim_end_matches('%')
+            .parse::<u32>()
+            .ok()
+    })
+    .or_else(|| {
+        // ddcutil getvcp 10 --brief → "VCP 10 C <current> <max>"：换算为百分比。
+        run_capture(&["ddcutil", "getvcp", "10", "--brief"], |s| {
+            let numbers: Vec<u32> = s
+                .split_whitespace()
+                .filter_map(|token| token.parse::<u32>().ok())
+                .collect();
+            let current = *numbers.get(numbers.len().checked_sub(2)?)?;
+            let max = *numbers.last()?;
+            (max > 0).then(|| current * 100 / max)
+        })
     });
     if g.brightness != brightness {
         g.brightness = brightness;
@@ -368,7 +400,10 @@ pub fn set_brightness(value: u32) {
 // ── 子进程工具 ──
 
 fn run_quiet(argv: &[&str]) {
-    match std::process::Command::new(argv[0]).args(&argv[1..]).output() {
+    match std::process::Command::new(argv[0])
+        .args(&argv[1..])
+        .output()
+    {
         Ok(o) if o.status.success() => {}
         Ok(o) => {
             eprintln!(
@@ -382,7 +417,10 @@ fn run_quiet(argv: &[&str]) {
 }
 
 fn run_capture<T>(argv: &[&str], f: impl FnOnce(&str) -> Option<T>) -> Option<T> {
-    let out = std::process::Command::new(argv[0]).args(&argv[1..]).output().ok()?;
+    let out = std::process::Command::new(argv[0])
+        .args(&argv[1..])
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }

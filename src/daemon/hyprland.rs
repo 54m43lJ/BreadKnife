@@ -13,7 +13,11 @@ use crate::daemon::DaemonEvent;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct MonitorInfo {
+    #[serde(default)]
+    pub id: i64,
     pub name: String,
+    #[serde(default)]
+    pub focused: bool,
     /// 该显示器上的活动工作区（新版本 focusedWorkspace / 旧版本 activeWorkspace）。
     #[serde(default, alias = "focusedWorkspace", alias = "activeWorkspace")]
     pub active_ws: Option<WorkspaceRef>,
@@ -22,6 +26,8 @@ pub struct MonitorInfo {
 #[derive(Debug, Deserialize, Clone)]
 pub struct WorkspaceRef {
     pub id: i64,
+    #[serde(default)]
+    pub name: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -49,8 +55,20 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct ClientInfo {
+    pub address: String,
+    pub class: String,
+    pub title: String,
+    /// focusHistoryID：0 = 最近聚焦。
+    pub focus_history_id: i32,
+    /// 已由 monitor id 解析为显示器名；无效时回退当前聚焦显示器。
+    pub monitor: String,
+    pub workspace: WorkspaceRef,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawClient {
     pub address: String,
     #[serde(default)]
     pub title: String,
@@ -58,6 +76,8 @@ pub struct ClientInfo {
     pub class: String,
     #[serde(default, rename = "focusHistoryID")]
     pub focus_history_id: i32,
+    #[serde(default)]
+    pub monitor: i64,
     pub workspace: WorkspaceRef,
 }
 
@@ -108,7 +128,57 @@ pub fn workspaces() -> Vec<WorkspaceInfo> {
 }
 
 pub fn clients() -> Vec<ClientInfo> {
-    hyprctl_json(&["-j", "clients"])
+    let raw: Vec<RawClient> = hyprctl_json(&["-j", "clients"]);
+    let monitors = monitors();
+    let fallback = monitors
+        .iter()
+        .find(|m| m.focused)
+        .or_else(|| monitors.first())
+        .map(|m| m.name.clone())
+        .unwrap_or_default();
+    raw.into_iter()
+        .map(|client| {
+            let monitor = monitors
+                .iter()
+                .find(|m| m.id == client.monitor)
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| fallback.clone());
+            ClientInfo {
+                address: client.address,
+                class: client.class,
+                title: client.title,
+                focus_history_id: client.focus_history_id,
+                monitor,
+                workspace: client.workspace,
+            }
+        })
+        .collect()
+}
+
+/// 当前显示器：`monitors -j` 的 focused；失败或无 focused 时回退首个。
+pub fn current_monitor() -> Option<String> {
+    let monitors = monitors();
+    monitors
+        .iter()
+        .find(|m| m.focused)
+        .or_else(|| monitors.first())
+        .map(|m| m.name.clone())
+}
+
+/// 显示器当前活动工作区名；特殊工作区显示时取底层普通工作区。
+pub fn active_workspace_name(monitor: &str) -> Option<String> {
+    let active = monitors()
+        .into_iter()
+        .find(|m| m.name == monitor)?
+        .active_ws?
+        .name;
+    if !active.starts_with("special:") {
+        return Some(active);
+    }
+    workspaces()
+        .into_iter()
+        .find(|ws| ws.monitor == monitor && !ws.name.starts_with("special:"))
+        .map(|ws| ws.name)
 }
 
 /// 工作区规则（`hyprctl -j workspacerules`）：工作区与显示器的绑定声明。
@@ -157,6 +227,58 @@ fn lua_focus_expr(target: &str) -> String {
     format!("hl.dsp.focus({{ workspace = {} }})", lua_string(target))
 }
 
+/// 窗口选择器：统一使用 address: 形式（归一化后补 0x）。
+fn window_selector(address: &str) -> String {
+    format!("address:0x{}", normalize_addr(address))
+}
+
+/// 把窗口移到目标工作区（Lua dispatch；失败回退经典语法）。
+pub fn move_to_workspace(address: &str, target: &str) {
+    let selector = window_selector(address);
+    let expr = format!(
+        "hl.dsp.window.move({{ workspace = {}, window = {}, follow = false }})",
+        lua_string(target),
+        lua_string(&selector)
+    );
+    if hyprctl(&["dispatch", &expr]).is_ok() {
+        return;
+    }
+    if let Err(e) = hyprctl(&[
+        "dispatch",
+        "movetoworkspacesilent",
+        &format!("{target},{selector}"),
+    ]) {
+        eprintln!("[hyprland] move {selector} to {target:?} failed: {e}");
+    }
+}
+
+/// 聚焦窗口（Lua dispatch；失败回退经典语法）。
+pub fn focus_window(address: &str) {
+    let selector = window_selector(address);
+    let expr = format!("hl.dsp.focus({{ window = {} }})", lua_string(&selector));
+    if hyprctl(&["dispatch", &expr]).is_ok() {
+        return;
+    }
+    if let Err(e) = hyprctl(&["dispatch", "focuswindow", &selector]) {
+        eprintln!("[hyprland] focus {selector} failed: {e}");
+    }
+}
+
+/// 关闭窗口（Lua dispatch；失败回退经典语法）。
+pub fn close_window(address: &str) {
+    let selector = window_selector(address);
+    let expr = format!(
+        "hl.dsp.window.close({{ window = {} }})",
+        lua_string(&selector)
+    );
+    if hyprctl(&["dispatch", &expr]).is_ok() {
+        return;
+    }
+    if let Err(e) = hyprctl(&["dispatch", "closewindow", &selector]) {
+        eprintln!("[hyprland] close {selector} failed: {e}");
+    }
+}
+
 /// Lua 字符串字面量（转义反斜杠与双引号）。
 fn lua_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -180,12 +302,41 @@ pub enum HyprlandEvent {
     MonitorAdded(String),
     MonitorRemoved(String),
     /// activewindow（v1 载荷：class,title）
-    ActiveWindow { class: String, title: String },
+    ActiveWindow {
+        class: String,
+        title: String,
+    },
     /// activewindowv2（0.56 载荷：仅窗口地址，可空——焦点清空）
     ActiveWindowAddr(String),
-    WindowTitle { addr: String, title: String },
-    Urgent { addr: String },
+    WindowTitle {
+        addr: String,
+        title: String,
+    },
+    Urgent {
+        addr: String,
+    },
+    MoveWindow {
+        addr: String,
+        workspace: String,
+    },
+    OpenWindow {
+        addr: String,
+        workspace: String,
+        class: String,
+        title: String,
+    },
+    CloseWindow(String),
+    Minimized {
+        addr: String,
+        minimized: bool,
+    },
     Resync,
+}
+
+fn connect_socket2(path: &str) -> std::io::Result<std::os::unix::net::UnixStream> {
+    let socket = socket2::Socket::new(socket2::Domain::UNIX, socket2::Type::STREAM, None)?;
+    socket.connect(&socket2::SockAddr::unix(path)?)?;
+    Ok(socket.into())
 }
 
 fn event_socket_path() -> Option<String> {
@@ -204,7 +355,7 @@ pub fn watch(tx: Sender<DaemonEvent>) {
                 return;
             };
             let stream = loop {
-                match std::os::unix::net::UnixStream::connect(&path) {
+                match connect_socket2(&path) {
                     Ok(s) => break s,
                     Err(e) => {
                         eprintln!("[hyprland] socket2 connect error: {}", e);
@@ -221,10 +372,10 @@ pub fn watch(tx: Sender<DaemonEvent>) {
                 let Some((name, data)) = line.split_once(">>") else {
                     continue;
                 };
-                if let Some(ev) = parse_event(name, data) {
-                    if tx.send(DaemonEvent::Hyprland(ev)).is_err() {
-                        return; // daemon 已退出
-                    }
+                if let Some(ev) = parse_event(name, data)
+                    && tx.send(DaemonEvent::Hyprland(ev)).is_err()
+                {
+                    return; // daemon 已退出
                 }
             }
             eprintln!("[hyprland] socket2 disconnected");
@@ -242,12 +393,10 @@ fn retry_wait() -> bool {
 
 fn parse_event(name: &str, data: &str) -> Option<HyprlandEvent> {
     match name {
-        "monitoraddedv2" | "monitoradded" => {
-            Some(HyprlandEvent::MonitorAdded(first_token(data)))
-        }
-        "monitorremovedv2" | "monitorremoved" => {
-            Some(HyprlandEvent::MonitorRemoved(first_token(data)))
-        }
+        "monitoraddedv2" => Some(HyprlandEvent::MonitorAdded(second_token(data))),
+        "monitoradded" => Some(HyprlandEvent::MonitorAdded(first_token(data))),
+        "monitorremovedv2" => Some(HyprlandEvent::MonitorRemoved(second_token(data))),
+        "monitorremoved" => Some(HyprlandEvent::MonitorRemoved(first_token(data))),
         "activewindowv2" => {
             // 0.56 载荷：仅窗口地址（`{:x}`，可空）；class/title 由 v1 事件给出
             Some(HyprlandEvent::ActiveWindowAddr(first_token(data)))
@@ -261,22 +410,70 @@ fn parse_event(name: &str, data: &str) -> Option<HyprlandEvent> {
         }
         "windowtitlev2" => {
             let (addr, title) = data.split_once(',')?;
-            Some(HyprlandEvent::WindowTitle { addr: addr.to_string(), title: title.to_string() })
+            Some(HyprlandEvent::WindowTitle {
+                addr: addr.to_string(),
+                title: title.to_string(),
+            })
         }
-        "urgent" | "urgentdecode" => {
-            Some(HyprlandEvent::Urgent { addr: first_token(data) })
+        "urgent" | "urgentdecode" => Some(HyprlandEvent::Urgent {
+            addr: first_token(data),
+        }),
+        // movewindowv2：address,workspaceID,workspaceName；旧 movewindow：address,workspaceName
+        "movewindowv2" => {
+            let parts: Vec<&str> = data.splitn(3, ',').collect();
+            Some(HyprlandEvent::MoveWindow {
+                addr: parts.first().copied().unwrap_or_default().to_string(),
+                workspace: parts
+                    .get(2)
+                    .or_else(|| parts.get(1))
+                    .copied()
+                    .unwrap_or_default()
+                    .to_string(),
+            })
         }
-        // 触发全量重同步的事件（显示器 / 工作区 / 窗口归属 / 配置重载）
-        "workspacev2" | "workspace" | "focusedmonv2" | "focusedmon" | "openwindow"
-        | "closewindow" | "movewindow" | "movewindowv2" | "createworkspace" | "createworkspacev2"
-        | "destroyworkspace" | "destroyworkspacev2" | "changefloatingmode" | "configreloaded"
-        | "activespecialworkspace" => Some(HyprlandEvent::Resync),
+        "movewindow" => {
+            let (addr, workspace) = data.split_once(',')?;
+            Some(HyprlandEvent::MoveWindow {
+                addr: addr.to_string(),
+                workspace: workspace.to_string(),
+            })
+        }
+        // openwindow：address,workspaceName,class,title
+        "openwindow" => {
+            let parts: Vec<&str> = data.splitn(4, ',').collect();
+            if parts.len() < 4 {
+                return Some(HyprlandEvent::Resync);
+            }
+            Some(HyprlandEvent::OpenWindow {
+                addr: parts[0].to_string(),
+                workspace: parts[1].to_string(),
+                class: parts[2].to_string(),
+                title: parts[3].to_string(),
+            })
+        }
+        "closewindow" => Some(HyprlandEvent::CloseWindow(first_token(data))),
+        "minimized" => {
+            let (addr, flag) = data.split_once(',')?;
+            Some(HyprlandEvent::Minimized {
+                addr: addr.to_string(),
+                minimized: flag.trim() == "1",
+            })
+        }
+        // 触发全量重同步的事件（工作区 / 焦点 / 配置重载）
+        "workspacev2" | "workspace" | "focusedmonv2" | "focusedmon" | "createworkspace"
+        | "createworkspacev2" | "destroyworkspace" | "destroyworkspacev2" | "moveworkspace"
+        | "moveworkspacev2" | "renameworkspace" | "changefloatingmode" | "configreloaded"
+        | "activespecial" | "activespecialv2" => Some(HyprlandEvent::Resync),
         _ => None, // 未消费的事件静默忽略
     }
 }
 
 fn first_token(data: &str) -> String {
     data.split(',').next().unwrap_or_default().to_string()
+}
+
+fn second_token(data: &str) -> String {
+    data.split(',').nth(1).unwrap_or_default().to_string()
 }
 
 #[cfg(test)]
@@ -288,7 +485,7 @@ mod tests {
     #[test]
     fn parse_event_monitor_lifecycle() {
         assert!(matches!(
-            parse_event("monitoraddedv2", "DP-1,Some Monitor,0"),
+            parse_event("monitoraddedv2", "0,DP-1,Some Monitor"),
             Some(HyprlandEvent::MonitorAdded(n)) if n == "DP-1"
         ));
         assert!(matches!(
@@ -296,7 +493,7 @@ mod tests {
             Some(HyprlandEvent::MonitorAdded(n)) if n == "DP-1"
         ));
         assert!(matches!(
-            parse_event("monitorremovedv2", "DP-1,Some Monitor,0"),
+            parse_event("monitorremovedv2", "0,DP-1,Some Monitor"),
             Some(HyprlandEvent::MonitorRemoved(n)) if n == "DP-1"
         ));
     }
@@ -343,7 +540,10 @@ mod tests {
             monitor: "DP-2".into(),
         };
         assert_eq!(rule_workspace(&r("3")), Some(("3".to_string(), Some(3))));
-        assert_eq!(rule_workspace(&r("name:web")), Some(("web".to_string(), None)));
+        assert_eq!(
+            rule_workspace(&r("name:web")),
+            Some(("web".to_string(), None))
+        );
         // 动态/特殊选择器不产生常驻条目
         assert_eq!(rule_workspace(&r("special:magic")), None);
         assert_eq!(rule_workspace(&r("empty m1")), None);
@@ -386,17 +586,17 @@ mod tests {
             ("workspace", "2"),
             ("focusedmonv2", "DP-1,2"),
             ("focusedmon", "DP-1,2"),
-            ("openwindow", "0xa,1,kitty,zsh"),
-            ("closewindow", "0xa"),
-            ("movewindow", "0xa,2"),
-            ("movewindowv2", "0xa,2,1"),
             ("createworkspace", "3"),
             ("createworkspacev2", "3"),
             ("destroyworkspace", "3"),
             ("destroyworkspacev2", "3"),
             ("changefloatingmode", "0xa,1"),
             ("configreloaded", ""),
-            ("activespecialworkspace", ""),
+            ("activespecial", ""),
+            ("activespecialv2", "DP-1,magic"),
+            ("moveworkspace", "0x1,2"),
+            ("moveworkspacev2", "0x1,2,web"),
+            ("renameworkspace", "2,web"),
         ];
         for (name, data) in cases {
             assert!(
@@ -404,6 +604,35 @@ mod tests {
                 "{name}>>{data} 应触发 Resync"
             );
         }
+    }
+
+    #[test]
+    fn parse_event_window_and_minimized() {
+        assert!(matches!(
+            parse_event("openwindow", "0xa,1,kitty,zsh, with commas"),
+            Some(HyprlandEvent::OpenWindow { ref addr, ref workspace, ref class, ref title })
+                if addr == "0xa" && workspace == "1" && class == "kitty" && title == "zsh, with commas"
+        ));
+        assert!(matches!(
+            parse_event("closewindow", "0xa"),
+            Some(HyprlandEvent::CloseWindow(ref addr)) if addr == "0xa"
+        ));
+        assert!(matches!(
+            parse_event("movewindowv2", "0xa,2,web"),
+            Some(HyprlandEvent::MoveWindow { ref addr, ref workspace })
+                if addr == "0xa" && workspace == "web"
+        ));
+        assert!(matches!(
+            parse_event("minimized", "0xa,1"),
+            Some(HyprlandEvent::Minimized { ref addr, minimized: true }) if addr == "0xa"
+        ));
+        assert!(matches!(
+            parse_event("minimized", "0xa,0"),
+            Some(HyprlandEvent::Minimized {
+                minimized: false,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -417,7 +646,10 @@ mod tests {
     #[test]
     fn lua_focus_expr_shape() {
         assert_eq!(lua_focus_expr("2"), r#"hl.dsp.focus({ workspace = "2" })"#);
-        assert_eq!(lua_focus_expr("m+1"), r#"hl.dsp.focus({ workspace = "m+1" })"#);
+        assert_eq!(
+            lua_focus_expr("m+1"),
+            r#"hl.dsp.focus({ workspace = "m+1" })"#
+        );
     }
 
     #[test]
@@ -458,12 +690,12 @@ mod tests {
     fn clients_json_tolerates_unknown_fields() {
         // 0.56 的 clients 输出含大量字段；未声明字段（含历史 urgent 位）必须被忽略
         let full = r#"[{"address":"0x55f0aa","mapped":true,"at":[0,0],"size":[800,600],"workspace":{"id":2,"name":"2"},"class":"firefox","title":"F","urgent":true}]"#;
-        let parsed: Vec<ClientInfo> = serde_json::from_str(full).unwrap();
+        let parsed: Vec<RawClient> = serde_json::from_str(full).unwrap();
         assert_eq!(parsed[0].address, "0x55f0aa");
         assert_eq!(parsed[0].workspace.id, 2);
         // 精简输出：仅地址与工作区
         let minimal = r#"[{"address":"0x1","workspace":{"id":1,"name":"1"}}]"#;
-        let parsed: Vec<ClientInfo> = serde_json::from_str(minimal).unwrap();
+        let parsed: Vec<RawClient> = serde_json::from_str(minimal).unwrap();
         assert_eq!(parsed[0].workspace.id, 1);
     }
 }

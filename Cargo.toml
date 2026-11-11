@@ -9,11 +9,14 @@ path = "src/main.rs"
 
 [dependencies]
 breadpan = { path = "breadpan" }
+bnote = { path = "bnote" }
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
+futures = "0.3"
 gtk = { package = "gtk4", version = "0.10", features = ["v4_12"] }
 gtk4-layer-shell = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+socket2 = "0.6"
 tokio = { version = "1", default-features = false, features = ["rt", "sync", "time", "macros"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }

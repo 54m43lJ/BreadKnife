@@ -53,9 +53,11 @@ name = "breadpan"
 version = "0.1.0"
 dependencies = [
  "gtk4",
+ "serde",
  "thiserror",
  "tokio",
  "zbus",
+ "zvariant",
 ]
 
 [[package]]

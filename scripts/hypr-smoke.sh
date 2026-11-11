@@ -17,7 +17,7 @@ sock="$runtime/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
 if [ -S "$sock" ]; then ok "socket2 套接字可达 ($sock)"; else fail "socket2 套接字缺失: $sock"; fi
 
 # ── hyprctl JSON 数据源（daemon 的三个事实源）──
-for cmd in monitors workspaces clients activeworkspace activewindow; do
+for cmd in monitors workspaces workspacerules clients activeworkspace activewindow; do
     hyprctl -j "$cmd" >/dev/null 2>&1 && ok "hyprctl -j $cmd" || fail "hyprctl -j $cmd"
 done
 

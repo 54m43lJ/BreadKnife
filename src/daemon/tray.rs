@@ -65,9 +65,15 @@ fn icon_view_of(icon: IconSource) -> IconView {
     match icon {
         IconSource::Name(name) => IconView::Name(name),
         IconSource::Path(path) => IconView::Path(path),
-        IconSource::Pixmap(Pixmap { width, height, argb }) => {
-            IconView::Pixmap { width, height, argb }
-        }
+        IconSource::Pixmap(Pixmap {
+            width,
+            height,
+            argb,
+        }) => IconView::Pixmap {
+            width,
+            height,
+            argb,
+        },
     }
 }
 
@@ -150,5 +156,7 @@ pub fn menu_activate(
     item: &str,
     entry: i32,
 ) -> Result<InteractionOutcome, breadpan::TrayError> {
-    handle.menu_activate(&String::from(item), entry).map(outcome_of)
+    handle
+        .menu_activate(&String::from(item), entry)
+        .map(outcome_of)
 }

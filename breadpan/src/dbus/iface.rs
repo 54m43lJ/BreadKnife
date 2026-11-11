@@ -9,9 +9,19 @@ use crate::dbus::bus::BusCenter;
 use crate::dbus::{self, WATCHER_PATH};
 
 fn registered_list(bus: &BusCenter) -> Vec<String> {
-    let mut ids: Vec<String> = bus.tracker.read().unwrap().ids().into_iter().collect();
-    ids.sort();
-    ids
+    bus.tracker.read().unwrap().ordered_ids()
+}
+
+/// 报到错误映射：参数非法 → InvalidArgs，其余内部失败 → Failed。
+async fn register(bus: &BusCenter, service: &str, sender: Option<&str>) -> zbus::fdo::Result<()> {
+    if bus.is_stopped() {
+        return Err(zbus::fdo::Error::Failed("tray runtime stopped".into()));
+    }
+    match dbus::register_item(bus, service, sender, true).await {
+        Ok(_) => Ok(()),
+        Err(crate::TrayError::Protocol(message)) => Err(zbus::fdo::Error::InvalidArgs(message)),
+        Err(error) => Err(zbus::fdo::Error::Failed(error.to_string())),
+    }
 }
 
 /// org.kde 前缀（事实规范）协议面。
@@ -28,15 +38,9 @@ impl WatcherIface {
         &self,
         #[zbus(header)] header: zbus::message::Header<'_>,
         service: &str,
-    ) {
+    ) -> zbus::fdo::Result<()> {
         let sender = header.sender().map(|s| s.to_string());
-        if let Err(e) = dbus::register_item(&self.bus, service, sender.as_deref(), true).await {
-            self.bus
-                .events
-                .send(crate::events::TrayEvent::Narration(format!(
-                    "register {service} failed: {e}"
-                )));
-        }
+        register(&self.bus, service, sender.as_deref()).await
     }
 
     /// 查询：当前在册 Item 清单。
@@ -78,15 +82,9 @@ impl FreedesktopWatcherIface {
         &self,
         #[zbus(header)] header: zbus::message::Header<'_>,
         service: &str,
-    ) {
+    ) -> zbus::fdo::Result<()> {
         let sender = header.sender().map(|s| s.to_string());
-        if let Err(e) = dbus::register_item(&self.bus, service, sender.as_deref(), true).await {
-            self.bus
-                .events
-                .send(crate::events::TrayEvent::Narration(format!(
-                    "register {service} failed: {e}"
-                )));
-        }
+        register(&self.bus, service, sender.as_deref()).await
     }
 
     #[zbus(property)]

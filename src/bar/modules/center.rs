@@ -4,8 +4,8 @@
 //! 缺失降级见 ARCHITECTURE §2：入口隐藏，面板操作项灰置并提示。
 
 use std::cell::Cell;
-use std::sync::Arc;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gtk::glib;
@@ -252,19 +252,23 @@ impl CenterWidget {
             Some(_) => self.set_row_off(&self.volume_row, false, None),
             None => self.set_row_off(&self.volume_row, true, Some("pamixer 缺席，音量调节不可用")),
         }
-        if let Some(v) = &system.volume {
-            if (self.volume.value().round() as u32) != v.percent {
-                self.volume.set_value(v.percent as f64);
-            }
+        if let Some(v) = &system.volume
+            && (self.volume.value().round() as u32) != v.percent
+        {
+            self.volume.set_value(v.percent as f64);
         }
         match &system.brightness {
             Some(_) => self.set_row_off(&self.brightness_row, false, None),
-            None => self.set_row_off(&self.brightness_row, true, Some("brightnessctl 缺席，亮度调节不可用")),
+            None => self.set_row_off(
+                &self.brightness_row,
+                true,
+                Some("brightnessctl 缺席，亮度调节不可用"),
+            ),
         }
-        if let Some(b) = &system.brightness {
-            if (self.brightness.value().round() as u32) != *b {
-                self.brightness.set_value(*b as f64);
-            }
+        if let Some(b) = &system.brightness
+            && (self.brightness.value().round() as u32) != *b
+        {
+            self.brightness.set_value(*b as f64);
         }
 
         // 面板网络状态
