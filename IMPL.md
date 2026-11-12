@@ -654,7 +654,7 @@
    - `USER.html` §5.2.1 补充标题为空时回退显示应用 class，避免已聚焦窗口标题区空白。
    - 仅改文档；`src/daemon/hyprland.rs` / `src/daemon/mod.rs` 现有主动读取与重发实现未改动。
 
-### 22. daemon 在无显示器时随启动终端退出
+### 22. daemon 在无显示器时随启动终端退出 [已解决]
 
 1. 问题描述
    `bread daemon` 只做了简单的子进程派生，没有脱离启动终端会话；显示器断开导致终端会话结束时，daemon 会收到 SIGHUP 而退出。Hyprland 仍是显示器事件的唯一权威，daemon 只需保持存活并继续消费 `monitoradded` / `monitorremoved`。
@@ -675,6 +675,7 @@
    - `Cargo.toml` / `Cargo.lock` 增加 `libc` 依赖。
    - 未改动 `src/daemon/mod.rs` 与 `src/daemon/hyprland.rs`，显示器插拔继续以 Hyprland 事件为唯一来源。
    - 在隔离的 `XDG_RUNTIME_DIR` 下冒烟：无 Hyprland / 无显示器时 daemon 保持存活，`bread exit` 能正常清理退出。
+   - 文档动作已在同一实现提交中落地：`CORE.html` §1 运行形态注明后台化脱离终端会话、无显示器时 daemon 常驻；§3 SBOM 增加 `libc` / `setsid`；`BUILD.html` §3.1 注明 `bread daemon` 脱离终端会话；`ABOUT.html`「运行管理」注明无显示器时继续后台常驻。本次仅补记状态，无需再改上述文档。
 
 ### 23. 通知中心组关闭按钮被展开手势吞掉
 
