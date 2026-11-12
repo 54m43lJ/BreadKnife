@@ -5,7 +5,7 @@
 
 ## 一、开发中发现文档的错误
 
-### 1. bnote `report_fatal` 的同步签名与调用栈互相矛盾
+### 1. bnote `report_fatal` 的同步签名与调用栈互相矛盾 [已解决]
 
 1. 问题描述
    `bnote/CORE.html` §4.5 把 `Bus::report_fatal` 写成同步 `pub(crate) fn`，但 §5.8 的调用栈明确要求 `send_fatal(...).await` 之后再置停机标记。按 §4.5 实现无法等待 `Fatal` 入队；按 §5.8 实现又不符合 §4.5 的签名。
@@ -19,6 +19,10 @@
 |--------|------|------|------|
 | `bnote/CORE.html` | §4.5 `src/bus.rs` | 改 | `report_fatal` 改为 `async fn`，与 §5.8 的 `await` 序列一致；若坚持同步签名，则明确“内部派发任务投递 Fatal”。 |
 | `bnote/CORE.html` | §5.8 总线终止 | 不动 | 保留现有 `await` 序列，作为行为契约的权威描述。 |
+
+4. 实际操作
+   - 采用“坚持同步签名”的备选方案：`bnote/CORE.html` §4.5 保留 `pub(crate) fn report_fatal(&self, message: String);`，在签名注记中补充“内部派发运行时任务，按 §5.8 的 `send_fatal(...).await → claim_stop() → events.close()` 顺序执行，调用方不等待”。
+   - §5.8 未改动，继续作为终止序列的权威描述。
 
 ### 2. breadpan 报到事件顺序与“同一 Item 事件严格有序”冲突
 

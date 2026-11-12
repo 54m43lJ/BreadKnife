@@ -122,6 +122,7 @@ impl Bus {
     pub(crate) fn shutdown(&amp;self);
 }</code></pre>
 <ul class="note">
+  <li><code>report_fatal</code> 保持同步签名：内部派发运行时任务，按 §5.8 的终止序列执行（<code>send_fatal(...).await</code> → <code>claim_stop()</code> → <code>events.close()</code>）；调用方不等待。</li>
   <li><code>cmd</code> 为每个命令分配唯一 id 和独立响应通道；超时后尽力 abort 任务并丢弃响应通道，迟到结果无法进入其它命令。</li>
   <li>已提交到总线的 D-Bus 信号不可撤回；超时清理只能保证命令不再继续执行，不能收回已经发出的信号。</li>
 </ul>
