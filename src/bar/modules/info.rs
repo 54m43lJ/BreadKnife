@@ -24,6 +24,8 @@ pub const GROUP_PREVIEW_COUNT: usize = 3;
 pub const POPUP_LOW_TIMEOUT_MS: u64 = 30_000;
 
 const POPUP_WIDTH: i32 = 300;
+/// 贴栏通知与任务栏底边的空白（层壳 top margin，相对任务栏让出的可用区）。
+const POPUP_TOP_GAP: i32 = 5;
 
 type RetryCallback = Rc<dyn Fn()>;
 type RetrySlot = Rc<RefCell<Option<RetryCallback>>>;
@@ -36,6 +38,8 @@ pub struct InfoCenterWidget {
     #[allow(dead_code)]
     center: gtk::Popover,
     center_content: gtk::Box,
+    center_scroll: gtk::ScrolledWindow,
+    center_max_height: i32,
     records: Rc<RefCell<Vec<NotificationRecord>>>,
     status: Rc<RefCell<NotificationStatus>>,
     retry: RetrySlot,
@@ -78,9 +82,10 @@ impl InfoCenterWidget {
         // ── 通知中心 popover ──
         let center_content = gtk::Box::new(gtk::Orientation::Vertical, 4);
         center_content.add_css_class("nc-panel");
+        let center_max_height = screen_height(window).max(240);
         let scrolled = gtk::ScrolledWindow::new();
         scrolled.set_child(Some(&center_content));
-        scrolled.set_max_content_height(screen_height(window).max(240));
+        scrolled.set_max_content_height(center_max_height);
         scrolled.set_propagate_natural_height(true);
         scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
         let center = gtk::Popover::new();
@@ -132,6 +137,8 @@ impl InfoCenterWidget {
             title_label,
             center,
             center_content,
+            center_scroll: scrolled.clone(),
+            center_max_height,
             records,
             status,
             retry,
@@ -217,6 +224,9 @@ impl InfoCenterWidget {
     fn rebuild_center(&self) {
         CenterView {
             content: self.center_content.clone(),
+            popover: self.center.clone(),
+            scroll: self.center_scroll.clone(),
+            max_height: self.center_max_height,
             records: self.records.clone(),
             status: self.status.clone(),
             retry: self.retry.clone(),
@@ -232,6 +242,9 @@ impl InfoCenterWidget {
 #[derive(Clone)]
 struct CenterView {
     content: gtk::Box,
+    popover: gtk::Popover,
+    scroll: gtk::ScrolledWindow,
+    max_height: i32,
     records: Rc<RefCell<Vec<NotificationRecord>>>,
     status: Rc<RefCell<NotificationStatus>>,
     retry: RetrySlot,
@@ -248,6 +261,7 @@ impl CenterView {
 
         if let NotificationStatus::Unavailable { message } = &*self.status.borrow() {
             self.content.append(&self.unavailable_panel(message));
+            self.fit_height();
             return;
         }
 
@@ -270,6 +284,7 @@ impl CenterView {
             let empty = gtk::Label::new(Some("暂无通知"));
             empty.add_css_class("nc-empty");
             self.content.append(&empty);
+            self.fit_height();
             return;
         }
 
@@ -281,8 +296,9 @@ impl CenterView {
                 continue;
             }
             let is_expanded = expanded_now.as_deref() == Some(app.as_str());
-            self.content.append(&self.group_header(&app, is_expanded));
-            if self.collapsed.borrow().contains(&app) {
+            let open = !self.collapsed.borrow().contains(&app);
+            self.content.append(&self.group_header(&app, open));
+            if !open {
                 continue;
             }
             let limit = if is_expanded {
@@ -307,12 +323,25 @@ impl CenterView {
                 self.content.append(&more);
             }
         }
+
+        // 分组收起/展开会改变内容高度；显式测量并同步滚动区高度，让 popover 跟随收缩/增高。
+        self.fit_height();
     }
 
-    fn group_header(&self, app: &str, expanded: bool) -> gtk::Box {
+    /// 内容自然高度 → 滚动区最小高度（上限 100% 屏高）。
+    /// 仅靠 `propagate_natural_height` 时 popover 在可见状态下可能保持旧高度。
+    fn fit_height(&self) {
+        let (_, natural, _, _) = self.content.measure(gtk::Orientation::Vertical, -1);
+        self.scroll
+            .set_min_content_height(natural.min(self.max_height));
+        self.scroll.queue_resize();
+        self.popover.queue_resize();
+    }
+
+    fn group_header(&self, app: &str, open: bool) -> gtk::Box {
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         header.add_css_class("nc-group");
-        let arrow = gtk::Label::new(Some(if expanded { "▾" } else { "▸" }));
+        let arrow = gtk::Label::new(Some(if open { "▾" } else { "▸" }));
         arrow.add_css_class("nc-arrow");
         let name = gtk::Label::new(Some(app));
         name.add_css_class("nc-app");
@@ -419,7 +448,7 @@ impl NotificationWindow {
         window.set_keyboard_mode(KeyboardMode::None);
         window.set_exclusive_zone(0);
         window.set_default_size(POPUP_WIDTH, -1);
-        window.set_margin(Edge::Top, 30);
+        window.set_margin(Edge::Top, POPUP_TOP_GAP);
         window.set_resizable(false);
 
         if let Some(monitor) = find_monitor(monitor) {

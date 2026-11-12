@@ -414,3 +414,31 @@
 | `PROVIDER.html` | §4.3 外部工具 | 改 | 音量增加 `wpctl` / `pactl` 回退；`brightnessctl` 注明只读 `backlight` 类并取百分比字段。 |
 | `BUILD.html` | §1 依赖表“可选系统工具” | 改 | 补充 `wpctl`（PipeWire）/ `pactl`（PulseAudio）为音量后端回退。 |
 | `CORE.html` | §4.5 `daemon/system.rs` | 改 | `set_volume` 注释改为后端链；补充亮度读取的后端顺序与 `backlight` 过滤语义。 |
+
+### 17. 贴栏通知顶部空白过大
+
+1. 问题描述
+   `NotificationWindow` 用层壳 `Edge::Top` margin 30 定位贴栏通知；层壳 margin 相对任务栏让出的可用区，而不是屏幕顶边，因此实际形成“任务栏 31px + margin 30px”的 30px 空白，用户只想要约 5px。
+2. 解决方法
+   - 新增常量 `POPUP_TOP_GAP = 5`，`set_margin(Edge::Top, POPUP_TOP_GAP)`。
+   - 实测层壳几何：任务栏 h=31、通知窗 y=36，间距正好 5px。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.5 通知弹窗 | 改 | 明确“任务栏底边到通知窗顶部 5px”，并注明层壳 top margin 取 5（相对可用区）。 |
+| `CORE.html` | §4.13 `bar/modules/info.rs` | 改 | 记录 `POPUP_TOP_GAP` 常量及层壳 margin 语义，避免再次按屏幕顶边推算。 |
+
+### 18. 通知中心组标题箭头不随收缩状态变化、面板高度不回落
+
+1. 问题描述
+   组标题箭头用 `expanded`（“展开全部”状态）决定方向，普通预览态的展开/收缩不会改变箭头；组收起后内容虽被移除，但 popover 在可见状态下保持旧高度，不会自动回落。
+2. 解决方法
+   - 箭头方向改由 `!collapsed.contains(app)` 决定：收起 `▸`、展开 `▾`；`expanded` 仅用于“展开全部”隐藏其它组。
+   - `CenterView` 保存 popover、滚动区与最大高度；每次重建后测量内容自然高度，`set_min_content_height(min(natural, max_height))` 并 queue resize。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.6 通知中心 | 改 | 明确组标题箭头与展开/收缩一致（收起 `▸`、展开 `▾`），面板高度随组状态实时变化。 |
+| `CORE.html` | §4.13 `bar/modules/info.rs` | 改 | `CenterView` 保存 popover / scroll / max_height；`rebuild` 末尾以 `fit_height()` 同步滚动区与弹窗高度。 |

@@ -9,7 +9,7 @@
   - 托盘Item的hover背景色没定义导致实现的很丑。托盘组件背景改为fg,hover色用半透明muted叠加在fg上 [已解决]
 - blueman的右键菜单不行。参考报错：[tray] interaction ContextMenu on :1.144 failed: dbus call failed: ContextMenu failed on both prefixes: org.kde: dbus call failed: org.freedesktop.DBus.Error.UnknownMethod: No such method “ContextMenu”; org.freedesktop: dbus call failed: org.freedesktop.DBus.Error.UnknownMethod: No such interface “org.freedesktop.StatusNotifierItem” on object at path /org/blueman/sni [已解决]
 - 音量和亮度拿不到数据 [已解决]
-- 通知样式有问题
-  - 通知弹出离顶部太远。我只要5px左右的空白
-  - 通知中心里的分组收起后没有自动调整高度，打开/收起时左端的三角形也没有改变方向
+- 通知样式有问题 [已解决]
+  - 通知弹出离顶部太远。我只要5px左右的空白 [已解决]
+  - 通知中心里的分组收起后没有自动调整高度，打开/收起时左端的三角形也没有改变方向 [已解决]
 - 改变措辞：现在所说的关闭通知都改为dismiss。通知dismiss后应该保留在通知中心等待清理
