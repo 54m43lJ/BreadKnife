@@ -10,6 +10,7 @@ mod tests;
 
 use std::io::Write;
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -122,8 +123,18 @@ fn start_daemon(control: &str) {
         .arg("--socket")
         .arg(control)
         .arg("__daemon")
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null());
     // stderr 保持继承：日志仍可达启动终端
+    // 脱离启动终端 / 会话：显示器断开导致终端退出时，daemon 仍后台常驻。
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
     match command.spawn() {
         Ok(child) => {
             eprintln!("[breadknife] daemon started (pid {})", child.id());
