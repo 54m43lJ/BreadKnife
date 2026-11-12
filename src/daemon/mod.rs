@@ -303,6 +303,11 @@ impl Daemon {
                     self.resync_minimized();
                 }
             }
+            // 工作区事件直达：立即重同步，工作区条随事件更新；同时清掉已覆盖的去抖位。
+            WorkspaceChanged => {
+                self.pending_resync = false;
+                self.resync();
+            }
             Resync => self.pending_resync = true,
         }
     }

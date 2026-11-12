@@ -320,3 +320,20 @@
 |--------|------|------|------|
 | `CORE.html` | §4.12 `bar/modules/workspace.rs` | 改 | `buttons` 改为 `RefCell<BTreeMap<i64, WsButton>>`；`rebuild` 语义改为“按 id 增量对账（复用/更新/增删），集合与顺序未变时不重排”，并注明整条重建会在按下/松开之间销毁按钮而丢失 `clicked`。 |
 | `USER.html` | §5.2.2 Workspace 按钮 | 增 | 补一条可验收行为：快速连续点击不同工作区时每次点击都应生效，不因状态推送吞点击。 |
+
+### 11. 工作区事件被折叠成去抖 Resync，切换更新最多延迟一个滴答
+
+1. 问题描述
+   工作区状态本身不是轮询：`hyprland::watch` 持续读 `.socket2.sock`，工作区变化由事件驱动。但 `workspace*` / `focusedmon*` / `createworkspace*` / `destroyworkspace*` / `moveworkspace*` / `renameworkspace` / `activespecial*` 全部被折叠为 `Resync`，要等 `recv_timeout(TICK)` 超时（最长 200ms）才做全量重读；用户看到的高亮延迟像轮询。
+2. 解决方法
+   - `HyprlandEvent` 增加 `WorkspaceChanged`，工作区结构/焦点事件单独归类，其余配置重载与浮动模式仍走 `Resync`。
+   - `on_hyprland` 收到 `WorkspaceChanged` 立即 `resync()`，并清掉已被覆盖的 `pending_resync`，不再等待滴答去抖。
+   - 保留窗口打开/关闭/移动等高频事件的 200ms 合并，避免事件风暴反复全量读取。
+   - 事件解析测试拆分：工作区事件断言 `WorkspaceChanged`，配置重载与浮动模式断言 `Resync`。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.3 `hyprland.rs` | 改 | `HyprlandEvent` 增 `WorkspaceChanged`；注明工作区结构/焦点事件立即重同步，`Resync` 仅承载配置重载与浮动模式等需去抖的事件。 |
+| `CORE.html` | §5.1.1 daemon 启动 | 改 | `run_loop` 说明补“`WorkspaceChanged` 到达即 `resync()`；超时档只处理 `pending_resync`”，避免把滴答误读为轮询。 |
+| `PROVIDER.html` | §4.1 Hyprland IPC 事件表 | 改 | 把 `workspace>>X` 一行扩为 `workspace(v2)` / `focusedmon(v2)` / `*workspace*` / `activespecial(v2)`，明确这些事件触发工作区映射即时更新；窗口生命周期事件仍按去抖合并。 |
