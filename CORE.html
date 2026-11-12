@@ -377,8 +377,18 @@ pub fn reload(path: &amp;str) -&gt; Result&lt;(), String&gt;;</code></pre>
 <pre><code>pub struct WorkspaceWidget {
     pub container: gtk::Box,
     ipc: Arc&lt;IpcClient&gt;,
-    buttons: RefCell&lt;Vec&lt;gtk::Button&gt;&gt;,
+    buttons: Rc&lt;RefCell&lt;BTreeMap&lt;i64, WsButton&gt;&gt;&gt;,
 }
+
+/// 单个工作区按钮及其可原地更新的子部件；状态推送只改样式类与浮层数据。
+struct WsButton {
+    button: gtk::Button,
+    base: gtk::Box,
+    indicator: gtk::Box,
+    tip: Rc&lt;RefCell&lt;WsTip&gt;&gt;,
+}
+
+struct WsTip { name: String, windows: Vec&lt;WorkspaceWindow&gt; }
 
 impl WorkspaceWidget {
     pub fn new(ipc: Arc&lt;IpcClient&gt;) -&gt; Self;
@@ -389,6 +399,9 @@ fn build_ws_tooltip(name: &amp;str, windows: &amp;[WorkspaceWindow]) -&gt; gtk::
 <ul class="note">
   <li><code>make_button</code> 以 <code>query_tooltip</code> 设置自定义浮层：工作区名加粗，窗口标题按焦点历史排序，最多 4 列；超出时第五条固定为「...」，空工作区显示「无窗口」。首期不加载截图。</li>
   <li>浮层宽 220px，样式类 <code>ws-tip*</code>；窗口标题单行省略；点击与滚轮切换行为不变。</li>
+  <li><code>rebuild</code> 按 id 增量对账：删除消失的工作区，复用仍存在的按钮并原地更新样式类 / 可见性与浮层数据，只新建新增项。不得整条清空重建——状态推送可能落在按下与松开之间销毁按钮，使 <code>GtkButton::clicked</code> 不再配对，快速连点被吞掉。</li>
+  <li>仅在工作区集合或顺序变化时重排（<code>order_matches</code> 比较容器子节点顺序）；活跃态、紧急态的推送不移动按钮，避免打断进行中的按下。</li>
+  <li>点击回调从浮层数据单元格读取当前工作区名，不固化创建时的名字。</li>
 </ul>
 
 <h3 id="sec-4-info">4.13. bar/modules/info.rs <a href="#sec-1">↑ 文件树</a></h3>
