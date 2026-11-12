@@ -677,7 +677,7 @@
    - 在隔离的 `XDG_RUNTIME_DIR` 下冒烟：无 Hyprland / 无显示器时 daemon 保持存活，`bread exit` 能正常清理退出。
    - 文档动作已在同一实现提交中落地：`CORE.html` §1 运行形态注明后台化脱离终端会话、无显示器时 daemon 常驻；§3 SBOM 增加 `libc` / `setsid`；`BUILD.html` §3.1 注明 `bread daemon` 脱离终端会话；`ABOUT.html`「运行管理」注明无显示器时继续后台常驻。本次仅补记状态，无需再改上述文档。
 
-### 23. 通知中心组关闭按钮被展开手势吞掉
+### 23. 通知中心组关闭按钮被展开手势吞掉 [已解决]
 
 1. 问题描述
    通知中心的组标题同时承载展开/收起 `GestureClick` 与右侧关闭按钮。点击 `✕` 时，按下事件冒泡到组标题的 `pressed` 处理并触发 `rebuild()`；关闭按钮在 `released` 之前被销毁，`clicked` 不再派发，于是只看到分组展开/收起，`NotificationClearGroup` 请求没有发出。
@@ -696,3 +696,4 @@
    - `src/bar/modules/info.rs` 的 `group_header` 新增 `toggle` 容器（箭头 + 应用名），把展开/收起 `GestureClick` 从整个 `header` 移到 `toggle`；`✕` 保持独立 `clicked` 发送 `NotificationClearGroup`。
    - `cargo check` 通过。
    - `USER.html` / `CORE.html` 未改动；组关闭仍由 daemon 清理该应用全部通知并广播 `NotificationCleared(Some(app_name))`。
+   - 该条两项文档动作均为“不动”，本次只补记状态：`USER.html` §5.2.6 的组清理语义与 `CORE.html` §4.13 的实现注记保持现状。
