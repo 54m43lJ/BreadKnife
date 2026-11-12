@@ -568,7 +568,7 @@
    - `CORE.html` §4.13 增加 `POPUP_TOP_GAP` 常量（推荐值 5），并在注记中说明 `set_margin(Edge::Top, POPUP_TOP_GAP)` 的可用区语义，附实测任务栏 h=31 / 通知窗 y=36，避免再按屏幕顶边累加。
    - 仅改文档；`src/bar/modules/info.rs` 已使用 `POPUP_TOP_GAP = 5`，未改代码。
 
-### 18. 通知中心组标题箭头不随收缩状态变化、面板高度不回落
+### 18. 通知中心组标题箭头不随收缩状态变化、面板高度不回落 [已解决]
 
 1. 问题描述
    组标题箭头用 `expanded`（“展开全部”状态）决定方向，普通预览态的展开/收缩不会改变箭头；组收起后内容虽被移除，但 popover 在可见状态下保持旧高度，不会自动回落。仅 queue resize 不足以更新已可见的 xdg_popup，必须重新 present。
@@ -582,6 +582,12 @@
 |--------|------|------|------|
 | `USER.html` | §5.2.6 通知中心 | 改 | 明确组标题箭头与展开/收缩一致（收起 `▸`、展开 `▾`），面板高度随组状态实时变化。 |
 | `CORE.html` | §4.13 `bar/modules/info.rs` | 改 | `CenterView` 保存 popover / scroll / max_height；`rebuild` 末尾以 `fit_height()` 同步滚动区与弹窗高度。 |
+
+4. 实际操作
+   - `USER.html` §5.2.6 的聚合标题条款补充：组标题箭头与展开/收缩一致（收起 `▸`、展开 `▾`），面板高度随组状态实时变化。
+   - `CORE.html` §4.13 增加 `CenterView` 结构（保存 `content` / `popover` / `scroll` / `max_height`）与 `rebuild` / `fit_height` 方法签名。
+   - `CORE.html` §4.13 注记明确箭头方向由 `!collapsed.contains(app)` 决定，`expanded` 只用于“展开全部”；`fit_height()` 测量自然高度、设置滚动区最小高度并对可见 popover 重新 `present()`，避免已可见 xdg_popup 保持旧高度。
+   - 仅改文档；`src/bar/modules/info.rs` 现有箭头与 `fit_height` 实现未改动。
 
 ### 19. 堆叠通知之间多出一条分隔线
 
