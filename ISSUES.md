@@ -1,9 +1,9 @@
 - dbusmenu渲染时每一项都带有下边框很丑 [已解决]
-- workspace点击方式切换时快速连续点击不同workspace会吞事件
+- workspace点击切换时快速连续点击不同workspace会吞事件
 - 调色和样式不行
   - tooltip需要统一配色，参考工作区悬停浮层，但是与工作区浮层分开定义，因为浮层不属于tooltip（不需要记录这条规则，写样式定义即可）
-  - workspace基底色改成purple-light
-  - 紧急/活跃对比色用fg
+  - workspace基底色改成cream
+  - 紧急/活跃对比色用purple
   - 托盘组件背景需要一点点上下margin
   - 托盘Item的hover背景色没定义导致实现的很丑。托盘组件背景改为cream,hover色用fg
 - blueman的右键菜单不行。参考报错：[tray] interaction ContextMenu on :1.144 failed: dbus call failed: ContextMenu failed on both prefixes: org.kde: dbus call failed: org.freedesktop.DBus.Error.UnknownMethod: No such method “ContextMenu”; org.freedesktop: dbus call failed: org.freedesktop.DBus.Error.UnknownMethod: No such interface “org.freedesktop.StatusNotifierItem” on object at path /org/blueman/sni
