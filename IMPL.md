@@ -24,7 +24,7 @@
    - 采用“坚持同步签名”的备选方案：`bnote/CORE.html` §4.5 保留 `pub(crate) fn report_fatal(&self, message: String);`，在签名注记中补充“内部派发运行时任务，按 §5.8 的 `send_fatal(...).await → claim_stop() → events.close()` 顺序执行，调用方不等待”。
    - §5.8 未改动，继续作为终止序列的权威描述。
 
-### 2. breadpan 报到事件顺序与“同一 Item 事件严格有序”冲突
+### 2. breadpan 报到事件顺序与“同一 Item 事件严格有序”冲突 [已解决]
 
 1. 问题描述
    `breadpan/CORE.html` §5.3.1 的报到调用栈是 `iface::emit_registered(service)` 之后再 `events.send(Added(id))`。`emit_registered` 是异步广播，等待期间并发的 `NameChanged` / `Removed` 可能先进入事件队列，导致消费者先看到重键或移除、后看到 `Added`，违反 `USER.html` §4.2 的同一 Item 严格有序。
@@ -38,6 +38,10 @@
 |--------|------|------|------|
 | `breadpan/CORE.html` | §5.3.1 报到 | 改 | 调整顺序为 `upsert → events.send(Added) → 异步 emit_registered`，并注明“事件先入队，广播不得阻塞 Added”。 |
 | `breadpan/USER.html` | §4.2 消息与错误 | 不动 | 保留“同一 Item 事件严格有序”的要求，作为上述顺序调整的依据。 |
+
+4. 实际操作
+   - `breadpan/CORE.html` §5.3.1 调用栈改为 `upsert → events.send(Added(id)) → iface::emit_registered(service)`，并注明 `emit_registered` 由独立运行时任务执行、广播不得阻塞 `Added`。
+   - `breadpan/USER.html` §4.2 未改动，继续以“同一 Item 事件严格有序”作为契约依据。
 
 ### 3. 根 `shutdown_files()` 没有覆盖自定义控制套接字
 

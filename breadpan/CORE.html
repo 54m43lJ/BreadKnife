@@ -490,9 +490,10 @@ debounce_task(bus)
      └── ItemTracker::upsert(ItemEntry)
           ├── service 升级？ → events.send(NameChanged{old, new})
           └── 新建且 announce 且栅栏已置位？
-               ├── iface::emit_registered(service)
-               └── events.send(Added(id))</code></pre>
+               ├── events.send(Added(id))
+               └── iface::emit_registered(service)   // 独立运行时任务，不阻塞 Added</code></pre>
 <ul class="note">
+  <li>事件先入队，广播不得阻塞 <code>Added</code>：<code>upsert</code> 成功插入后先 <code>events.send(Added(id))</code>，再由独立运行时任务执行 <code>iface::emit_registered(service)</code>，避免等待广播期间并发的 <code>NameChanged</code> / <code>Removed</code> 抢先入队。</li>
   <li>两前缀接口挂同一路径（见 <a href="#sec-4-dbus-iface">§4.6.4</a>）；前缀策略见 <a href="PROVIDER.html#sec-2">PROVIDER §2</a>。</li>
   <li>报到参数三形态：<code>"name"</code> → 默认路径；<code>"name/path"</code> → 就地切分；<code>"/path"</code> → 服务名取注册方唯一名。解析失败以 <code>TrayError::Protocol</code> 拒绝受理。</li>
   <li><code>GetNameOwner</code> 失败回退 service 本身，不阻塞报到。</li>
