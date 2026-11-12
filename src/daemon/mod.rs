@@ -320,7 +320,6 @@ impl Daemon {
         self.workspaces = hyprland::workspaces();
         self.ws_rules = hyprland::workspace_rules();
         // 启动 / 重同步主动读取焦点窗口：仅靠 activewindow 事件会漏掉启动前的焦点。
-        let previous_active = self.active_window.clone();
         if let Some(active) = hyprland::active_window() {
             self.active_addr = hyprland::normalize_addr(&active.address);
             self.active_window = crate::shared::model::ActiveWindow {
@@ -328,12 +327,12 @@ impl Daemon {
                 title: active.title,
             };
         }
-        if previous_active != self.active_window {
-            self.broadcast(Push::State(StateDelta {
-                active: Some(self.active_window.clone()),
-                ..Default::default()
-            }));
-        }
+        // 重同步是无状态刷新：即使内容未变也重发 active，修复窗口侧漏推/空白后
+        // 仅靠事件永远等不到下一次更新的问题（如移动窗口到别的工作区）。
+        self.broadcast(Push::State(StateDelta {
+            active: Some(self.active_window.clone()),
+            ..Default::default()
+        }));
         if !self.seeded {
             self.seeded = true;
             for m in &self.monitors {

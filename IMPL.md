@@ -479,10 +479,10 @@
 ### 21. 启动时不主动读取焦点窗口，标题区可能空白
 
 1. 问题描述
-   daemon 只在 `activewindow` / `activewindowv2` / `windowtitlev2` 事件到达时更新活动窗口；如果启动时已有焦点窗口，事件早已发生，`resync` 又不查询 `hyprctl activewindow`，窗口快照里的 `active` 就是默认空值，标题区空白直到下一次焦点事件。标题本身为空时也会直接显示空白。
+   daemon 只在 `activewindow` / `activewindowv2` / `windowtitlev2` 事件到达时更新活动窗口；如果启动时已有焦点窗口，事件早已发生，`resync` 又不查询 `hyprctl activewindow`，窗口快照里的 `active` 就是默认空值，标题区空白直到下一次焦点事件。标题本身为空时也会直接显示空白。另一些拓扑变化（如把窗口移到别的工作区）不产生标题事件，窗口侧一旦漏推或显示为空，仅重同步且内容未变时也不会补发，标题永远不恢复。
 2. 解决方法
    - 新增 `hyprland::active_window()`：读取 `hyprctl -j activewindow`（address / class / title，允许空字段）。
-   - `resync` 主动刷新 `active_window` / `active_addr`，变化时广播 `StateDelta.active`；启动时的窗口快照因此带当前标题。
+   - `resync` 主动刷新 `active_window` / `active_addr`，并**无条件重发** `StateDelta.active`；启动快照、移动窗口等触发重同步的场景都能恢复标题。
    - 标题标签在 `title` 为空时回退显示 `class`，避免已聚焦但标题空白。
 3. 修订建议
 
