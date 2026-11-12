@@ -75,7 +75,7 @@ bread daemon              # 自动后台化；随显示器创建任务栏</code>
   <tr><td>DBus（session + system bus）</td><td>session bus：托盘组装（<code>org.kde.StatusNotifierWatcher</code>）、通知守护（<code>org.freedesktop.Notifications</code>）、媒体（MPRIS）；system bus：电池（UPower）、网络（NetworkManager）、蓝牙（BlueZ）。服务缺席按项降级，不阻断其余部分</td></tr>
 </table>
 <pre><code>bread                     # 前台启动 daemon（阻塞当前终端；Ctrl-C / bread exit 结束）
-bread daemon              # 自动后台化：spawn 后台 daemon 后返回（日志仍写启动终端 stderr）
+bread daemon              # 自动后台化：脱离终端会话，spawn 后返回（日志仍写启动终端 stderr）
 bread open-all            # 每台显示器开一条任务栏
 bread reload              # 热重载 CSS（改色即见）
 bread exit                # 优雅退出（终止全部窗口、释放托盘 Watcher 名）</code></pre>

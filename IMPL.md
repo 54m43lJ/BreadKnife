@@ -499,3 +499,25 @@
 | `CORE.html` | §4.3 `daemon/hyprland.rs` | 改 | 增加 `active_window()` 签名与 `hyprctl -j activewindow` 字段说明。 |
 | `CORE.html` | §5.1.1 启动调用栈 | 改 | `resync()` 补“读取当前焦点窗口并广播 active”。 |
 | `USER.html` | §5.2.1 任务栏窗口与按钮 | 增 | 标题为空时回退显示应用 class，避免已聚焦窗口标题区空白。 |
+
+### 22. daemon 在无显示器时随启动终端退出
+
+1. 问题描述
+   `bread daemon` 只做了简单的子进程派生，没有脱离启动终端会话；显示器断开导致终端会话结束时，daemon 会收到 SIGHUP 而退出。Hyprland 仍是显示器事件的唯一权威，daemon 只需保持存活并继续消费 `monitoradded` / `monitorremoved`。
+2. 解决方法
+   - `bread daemon` 后台化时用 `setsid` 脱离终端会话，并关闭子进程 stdin；stderr 仍继承启动终端用于日志。
+   - 不增加显示器轮询或第二次显示器对账：插拔仍完全由 Hyprland 事件驱动。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §1 运行形态 | 改 | 注明后台化脱离终端会话，无显示器时 daemon 常驻。 |
+| `CORE.html` | §3 SBOM | 改 | 增加 `libc`：`setsid` 脱离启动终端会话。 |
+| `BUILD.html` | §3.1 运行命令 | 改 | 注明 `bread daemon` 脱离终端会话。 |
+| `ABOUT.html` | 运行管理 | 改 | 注明无显示器时 daemon 继续后台常驻。 |
+
+4. 实际操作
+   - `src/main.rs` 的后台派生增加 `libc::setsid()` 与 `Stdio::null()` 作为 stdin。
+   - `Cargo.toml` / `Cargo.lock` 增加 `libc` 依赖。
+   - 未改动 `src/daemon/mod.rs` 与 `src/daemon/hyprland.rs`，显示器插拔继续以 Hyprland 事件为唯一来源。
+   - 在隔离的 `XDG_RUNTIME_DIR` 下冒烟：无 Hyprland / 无显示器时 daemon 保持存活，`bread exit` 能正常清理退出。

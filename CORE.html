@@ -47,7 +47,7 @@ scripts/
 ├── hypr-smoke.sh         # Hyprland 接口冒烟脚本
 └── resource-smoke.py     # 资源采样：CPU / 内存 / 唤醒 / RAPL 能耗</code></pre>
 <ul class="note">
-  <li>运行形态：<code>bread</code> 前台启动，<code>bread daemon</code> 自动后台化；daemon 维护 显示器 → 窗口进程 映射，随插拔 spawn / kill，窗口崩溃延时重启（有上限）。</li>
+  <li>运行形态：<code>bread</code> 前台启动，<code>bread daemon</code> 自动后台化并脱离终端会话（<code>setsid</code>）；daemon 维护 显示器 → 窗口进程 映射，随插拔 spawn / kill，无显示器时继续后台常驻，显示器事件到达后自动拉起任务栏；窗口崩溃延时重启（有上限）。</li>
   <li>退出：控制指令 <code>exit</code> → 终止全部窗口进程 → daemon 退出；窗口另有周期性存活检查（PID 文件 + <code>/proc</code>），确认 daemon 已退出后自主退出。</li>
   <li><code>scripts/resource-smoke.py</code> 为开发期采样工具，不进入 daemon / 窗口运行时；指标与用法见 <a href="BUILD.html">BUILD.html</a>。</li>
 </ul>
@@ -74,6 +74,7 @@ scripts/
   <tr><td><code>serde</code> / <code>serde_json</code></td><td>Hyprland 状态与事件数据解析</td></tr>
   <tr><td><code>base64</code></td><td>图标位图数据解码</td></tr>
   <tr><td><code>clap</code></td><td>命令行参数解析</td></tr>
+  <tr><td><code>libc</code></td><td>daemon 后台化：<code>setsid</code> 脱离启动终端会话</td></tr>
 </table>
 <ul class="note">
   <li>GTK4 仅窗口进程链接；daemon 无 GTK。Wayland 层壳由 <code>gtk4-layer-shell</code> 提供。</li>
