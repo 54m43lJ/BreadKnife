@@ -361,6 +361,13 @@ impl CenterView {
         name.add_css_class("nc-app");
         name.set_hexpand(true);
         name.set_xalign(0.0);
+        // 展开/收起手势只覆盖箭头与标题，不覆盖关闭按钮：
+        // 关闭按钮若也被 pressed 重建命中，会在 release 前被销毁，clicked 不会派发。
+        let toggle = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        toggle.set_hexpand(true);
+        toggle.append(&arrow);
+        toggle.append(&name);
+
         let close = gtk::Button::with_label("✕");
         close.add_css_class("nc-group-close");
         close.set_focusable(false);
@@ -391,10 +398,9 @@ impl CenterView {
             }
             view.rebuild();
         });
-        header.add_controller(click);
+        toggle.add_controller(click);
 
-        header.append(&arrow);
-        header.append(&name);
+        header.append(&toggle);
         header.append(&close);
         header
     }

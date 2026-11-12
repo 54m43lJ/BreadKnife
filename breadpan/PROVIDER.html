@@ -73,6 +73,13 @@ org.freedesktop.DBus.Error.Failed(message)</code></pre>
   <tr><td><code>org.freedesktop.DBus.Error.InvalidArgs</code></td><td>报到参数不合法（服务名为空、对象路径非法等）；修正后重试</td></tr>
   <tr><td><code>org.freedesktop.DBus.Error.Failed</code></td><td>服务端内部失败或已停机；记录并重试或降级</td></tr>
 </table>
+<h4>报到结果映射</h4>
+<table>
+  <tr><th>情形</th><th>应答 / 副作用</th></tr>
+  <tr><td>参数解析失败（非法服务名、非法对象路径、空串）</td><td><code>org.freedesktop.DBus.Error.InvalidArgs</code>；不写登记簿</td></tr>
+  <tr><td>运行时已停机或其它内部失败</td><td><code>org.freedesktop.DBus.Error.Failed</code></td></tr>
+  <tr><td>首次报到成功，或同名 / 同一对象重复报到</td><td>成功空应答；重复报到幂等，仅首次插入且快照栅栏已置位时广播 <code>StatusNotifierItemRegistered</code> 并入队 <code>Added</code></td></tr>
+</table>
 <ul class="note">
   <li>名持有不可被替换；自身停机 → 释放名字，等同角色下线；所有权丢失 → <code>Displaced</code>（终局语义见 <a href="USER.html#sec-3-7">USER §3.7</a>）。</li>
   <li>登记簿记只在内存，不落盘。</li>

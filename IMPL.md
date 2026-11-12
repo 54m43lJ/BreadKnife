@@ -43,7 +43,7 @@
    - `breadpan/CORE.html` §5.3.1 调用栈改为 `upsert → events.send(Added(id)) → iface::emit_registered(service)`，并注明 `emit_registered` 由独立运行时任务执行、广播不得阻塞 `Added`。
    - `breadpan/USER.html` §4.2 未改动，继续以“同一 Item 事件严格有序”作为契约依据。
 
-### 3. 根 `shutdown_files()` 没有覆盖自定义控制套接字
+### 3. 根 `shutdown_files()` 没有覆盖自定义控制套接字 [已解决]
 
 1. 问题描述
    根 `CORE.html` §4.18 只声明 `pub fn shutdown_files();`，而 `BUILD.html` §4 允许 `-s/--socket` 覆盖控制套接字并派生窗口套接字。无参函数只能清理默认路径，自定义路径会残留。
@@ -58,7 +58,12 @@
 | `CORE.html` | §4.18 `shared/protocol.rs` | 改 | 改为 `pub fn shutdown_files(control: &Path);`，按传入控制套接字派生窗口套接字并清理。 |
 | `BUILD.html` | §4 补充说明 | 不动 | 保留 `-s/--socket` 的运行时文件说明，作为函数签名调整的依据。 |
 
-### 4. `MonitorInfo` 缺少显示器 id，无法完成 `clients().monitor` 的名称解析
+4. 实际操作
+   - 采用与 `src/shared/protocol.rs` / `Daemon::shutdown_files` 现有实现一致的方案，未把 `protocol::shutdown_files` 改成接收 `control: &Path`：根 `CORE.html` §4.18 保留无参签名，并在代码注释与注记中补充“仅清理默认 PID / 控制 / 派生窗口套接字；自定义路径由 `Daemon::shutdown_files()` 追加清理”。
+   - 根 `CORE.html` §5.3 Exit 调用栈由直接调用 `protocol::shutdown_files()` 改为 `Daemon::shutdown_files()`，并展开为“默认文件清理 + 按跟踪的 `control_path` / `window_path` 清理自定义控制套接字及派生窗口套接字”。
+   - `BUILD.html` §4 未改动，`-s/--socket` 的运行时文件说明继续作为依据。
+
+### 4. `MonitorInfo` 缺少显示器 id，无法完成 `clients().monitor` 的名称解析 [已解决]
 
 1. 问题描述
    根 `CORE.html` §4.3 要求 `ClientInfo.monitor` 由 monitor id 解析为显示器名，但同节的 `MonitorInfo` 只有 `name` / `focused` / `active_ws`，没有数字 id；`hyprctl clients` 的 `monitor` 字段是显示器索引，缺少映射源就无法实现文档承诺。
@@ -73,9 +78,15 @@
 | `CORE.html` | §4.3 `daemon/hyprland.rs` | 改 | `MonitorInfo` 增加 `pub id: i64`，并注明 `clients().monitor` 的 id → name 解析。 |
 | `PROVIDER.html` | §4.1 Hyprland IPC | 增 | 在 `clients -j` 消费行标注：`monitor` 为显示器 id，需与 `monitors -j` 的 `id` 对齐。 |
 
+4. 实际操作
+   - `CORE.html` §4.3 的 `MonitorInfo` 展开为多行结构并增加 `pub id: i64`，注明 `monitors -j` 的 `id` 与 `clients -j` 的 `monitor` 对齐；`ClientInfo.monitor` 注释补充“`RawClient.monitor`（显示器 id）对齐 `MonitorInfo.id` 后解析为显示器名”。
+   - `CORE.html` §4.3 注记补充 `clients()` 的 id → name 解析与回退链：按 `MonitorInfo.id` 匹配，无效时回退当前聚焦显示器。
+   - `PROVIDER.html` §4.1 的 `hyprctl clients -j` 消费行标注 `monitor` 为显示器 id，需与 `monitors -j` 的 `id` 对齐。
+   - 仅改文档；`src/daemon/hyprland.rs` 现有的 `MonitorInfo.id`、`clients()` 映射与回退实现未改动。
+
 ## 二、开发中发现文档没写明的细节
 
-### 1. `RegisterStatusNotifierItem` 的错误分层没有具体映射
+### 1. `RegisterStatusNotifierItem` 的错误分层没有具体映射 [已解决]
 
 1. 问题描述
    `breadpan/PROVIDER.html` §4.1 只列出 `InvalidArgs` 与 `Failed` 两种线上错误，`CORE.html` §5.3.1 只说参数解析失败要拒绝；但没有说明“哪些失败归 InvalidArgs、哪些归 Failed”，也没有说明重复报到是否仍算成功。
@@ -90,6 +101,11 @@
 |--------|------|------|------|
 | `breadpan/PROVIDER.html` | §4.1 方法应答 / 错误应答 | 增 | 补一张映射表：解析失败 → InvalidArgs；停机 / 内部失败 → Failed；重复报到幂等成功。 |
 | `breadpan/CORE.html` | §5.3.1 报到 | 不动 | 保留参数解析与 upsert 流程，错误映射在上表补充。 |
+
+4. 实际操作
+   - `breadpan/PROVIDER.html` §4.1 在“错误应答”后新增“报到结果映射”表：参数解析失败 → `InvalidArgs` 且不写登记簿；运行时已停机或其它内部失败 → `Failed`；首次报到与同名 / 同一对象重复报到均为成功空应答，重复报到幂等，只有首次插入且快照栅栏已置位时才广播 `StatusNotifierItemRegistered` 并入队 `Added`。
+   - `breadpan/CORE.html` §5.3.1 未改动，继续保留参数解析与 `upsert` 流程。
+   - 仅改文档；错误映射与 `breadpan/src/dbus/iface.rs`、幂等入册与首次插入广播逻辑与 `breadpan/src/dbus/mod.rs` 现有实现一致。
 
 ### 2. 通知命令失败后的状态迁移没有具体接口
 
@@ -521,3 +537,23 @@
    - `Cargo.toml` / `Cargo.lock` 增加 `libc` 依赖。
    - 未改动 `src/daemon/mod.rs` 与 `src/daemon/hyprland.rs`，显示器插拔继续以 Hyprland 事件为唯一来源。
    - 在隔离的 `XDG_RUNTIME_DIR` 下冒烟：无 Hyprland / 无显示器时 daemon 保持存活，`bread exit` 能正常清理退出。
+
+### 23. 通知中心组关闭按钮被展开手势吞掉
+
+1. 问题描述
+   通知中心的组标题同时承载展开/收起 `GestureClick` 与右侧关闭按钮。点击 `✕` 时，按下事件冒泡到组标题的 `pressed` 处理并触发 `rebuild()`；关闭按钮在 `released` 之前被销毁，`clicked` 不再派发，于是只看到分组展开/收起，`NotificationClearGroup` 请求没有发出。
+2. 解决方法
+   - 把组标题拆成“箭头 + 应用名”的展开区与独立的关闭按钮，`GestureClick` 只挂展开区。
+   - 关闭按钮不再经过展开手势，继续发送 `Request::NotificationClearGroup { app_name }`；daemon 清理该组并广播 `NotificationCleared(Some(app_name))`。
+   - 不改协议与 daemon 清理逻辑。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.6 通知中心 | 不动 | 组标题关闭按钮“清空本组全部消息”的语义已定义，本次只修实现。 |
+| `CORE.html` | §4.13 `bar/modules/info.rs` | 不动 | 组标题结构属于实现细节，契约仍由 USER 描述。 |
+
+4. 实际操作
+   - `src/bar/modules/info.rs` 的 `group_header` 新增 `toggle` 容器（箭头 + 应用名），把展开/收起 `GestureClick` 从整个 `header` 移到 `toggle`；`✕` 保持独立 `clicked` 发送 `NotificationClearGroup`。
+   - `cargo check` 通过。
+   - `USER.html` / `CORE.html` 未改动；组关闭仍由 daemon 清理该应用全部通知并广播 `NotificationCleared(Some(app_name))`。

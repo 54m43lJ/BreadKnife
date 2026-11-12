@@ -164,7 +164,12 @@ impl Daemon {
 pub enum ControlCommand;     //见 USER §4.2</code></pre>
 
 <h3 id="sec-4-hyprland">4.3. daemon/hyprland.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct MonitorInfo { pub name: String, pub focused: bool, pub active_ws: Option&lt;WorkspaceRef&gt; }
+<pre><code>pub struct MonitorInfo {
+    pub id: i64,                    // monitors -j 的 id；clients -j 的 monitor 按此对齐
+    pub name: String,
+    pub focused: bool,
+    pub active_ws: Option&lt;WorkspaceRef&gt;,
+}
 pub struct WorkspaceRef { pub id: i64, pub name: String }
 pub struct WorkspaceInfo { pub id: i64, pub name: String, pub monitor: String, pub windows: u64 }
 pub struct WorkspaceRuleInfo { pub workspace_string: String, pub enabled: bool, pub monitor: String }
@@ -173,7 +178,7 @@ pub struct ClientInfo {
     pub class: String,
     pub title: String,
     pub focus_history_id: i32,      // focusHistoryID：0 = 最近聚焦
-    pub monitor: String,            // 已由 monitor id 解析为显示器名；无效时回退当前聚焦显示器
+    pub monitor: String,            // RawClient.monitor（显示器 id）对齐 MonitorInfo.id 后解析为显示器名；无效时回退当前聚焦显示器
     pub workspace: WorkspaceRef,
 }
 
@@ -208,7 +213,7 @@ pub enum HyprlandEvent {
 <ul class="note">
   <li><code>move_to_workspace</code> / <code>focus_window</code> / <code>close_window</code> 均以窗口 <code>address:</code> 选择器执行 Lua dispatch，失败时回退经典语法；窗口地址统一经 <code>normalize_addr</code> 归一。</li>
   <li><code>minimized</code> 事件由外部 taskbar 通过 wlr-foreign-toplevel 请求触发；Hyprland 不因普通 CSD 最小化请求产生该事件。</li>
-  <li><code>clients()</code> 过滤最小化集合时消费 <code>workspace.name == MINIMIZED_WORKSPACE</code>；<code>monitor</code> 无效时回退当前聚焦显示器。工作区悬停列表同时消费 <code>title</code> / <code>class</code> / <code>focusHistoryID</code>，按焦点历史升序排列。</li>
+  <li><code>clients()</code> 过滤最小化集合时消费 <code>workspace.name == MINIMIZED_WORKSPACE</code>；<code>monitor</code>（显示器 id）按 <code>MonitorInfo.id</code> 解析为显示器名，无效时回退当前聚焦显示器。工作区悬停列表同时消费 <code>title</code> / <code>class</code> / <code>focusHistoryID</code>，按焦点历史升序排列。</li>
   <li><code>active_workspace_name</code> 返回普通工作区名；特殊工作区显示时取底层普通工作区，避免恢复目标仍是 <code>special:minimized</code>。</li>
   <li><code>current_monitor</code> 经 <code>hyprctl -j monitors</code> 取 <code>focused</code> 显示器；查询失败或无 focused 时回退首个显示器，无显示器时返回 <code>None</code>。不启用 <code>.socket.sock</code> 查询，保持 socket2 只读与单一查询路径。</li>
 </ul>
@@ -623,7 +628,7 @@ pub fn default_control_socket() -&gt; PathBuf;
 pub fn window_socket_for(control: &amp;Path) -&gt; PathBuf;
 pub fn pid_file() -&gt; PathBuf;
 pub fn daemon_alive() -&gt; bool;
-pub fn shutdown_files();
+pub fn shutdown_files();     // 仅清理默认运行时文件；自定义路径由 Daemon::shutdown_files() 追加清理
 pub fn parse_control_line(line: &amp;str) -&gt; Option&lt;ControlCommand&gt;;</code></pre>
 <ul class="note">
   <li>传输：Unix Socket（daemon 为服务端）；两类消息——窗口 → daemon 的请求（均有应答）与 daemon → 窗口的推送；首连握手后由 daemon 推送全量快照，此后增量衔接。</li>
@@ -633,6 +638,7 @@ pub fn parse_control_line(line: &amp;str) -&gt; Option&lt;ControlCommand&gt;;</c
   <li>推送语义：<code>notification</code> 推送全部窗口用于通知中心缓存；<code>notification_popup</code> 仅推当前显示器；<code>notification_removed</code> / <code>notification_cleared</code> 推送全部窗口；<code>state.minimized</code> 推送全部窗口，由各窗口按显示器过滤。</li>
   <li>大对象（如位图图标）可经 fd 传递升级（memfd + <code>SCM_RIGHTS</code>），协议骨架不变。</li>
   <li>断开处理：互动失败时窗口重连一次（按首连流程再取全量快照）；周期性存活检查（PID 文件）确认 daemon 已退出则自主退出。</li>
+  <li><code>shutdown_files()</code> 只清理默认运行时文件（PID 文件、默认控制套接字及其派生窗口套接字）；daemon 停机时由 <code>Daemon::shutdown_files()</code> 在默认清理后，再按自身跟踪的 <code>control_path</code> / <code>window_path</code> 清理 <code>-s/--socket</code> 指定的自定义路径（见 §5.3）。</li>
 </ul>
 
 <h3 id="sec-4-model">4.19. shared/model.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -870,7 +876,9 @@ pub struct StateDelta {
      ├── Daemon::kill_window(monitor)
      ├── TrayHandle::shutdown()
      ├── NotificationService::shutdown()
-     ├── protocol::shutdown_files()
+     ├── Daemon::shutdown_files()
+     │    ├── protocol::shutdown_files()（默认 PID / 控制 / 窗口套接字）
+     │    └── 删除跟踪的 control_path / window_path（自定义控制套接字及派生窗口套接字）
      └── std::process::exit(0)</code></pre>
 
 <h3 id="sec-5-4">5.4. 托盘交互与菜单（窗口 ↔ daemon）</h3>
