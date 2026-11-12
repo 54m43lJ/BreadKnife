@@ -43,7 +43,7 @@
    - `breadpan/CORE.html` §5.3.1 调用栈改为 `upsert → events.send(Added(id)) → iface::emit_registered(service)`，并注明 `emit_registered` 由独立运行时任务执行、广播不得阻塞 `Added`。
    - `breadpan/USER.html` §4.2 未改动，继续以“同一 Item 事件严格有序”作为契约依据。
 
-### 3. 根 `shutdown_files()` 没有覆盖自定义控制套接字
+### 3. 根 `shutdown_files()` 没有覆盖自定义控制套接字 [已解决]
 
 1. 问题描述
    根 `CORE.html` §4.18 只声明 `pub fn shutdown_files();`，而 `BUILD.html` §4 允许 `-s/--socket` 覆盖控制套接字并派生窗口套接字。无参函数只能清理默认路径，自定义路径会残留。
@@ -57,6 +57,11 @@
 |--------|------|------|------|
 | `CORE.html` | §4.18 `shared/protocol.rs` | 改 | 改为 `pub fn shutdown_files(control: &Path);`，按传入控制套接字派生窗口套接字并清理。 |
 | `BUILD.html` | §4 补充说明 | 不动 | 保留 `-s/--socket` 的运行时文件说明，作为函数签名调整的依据。 |
+
+4. 实际操作
+   - 采用与 `src/shared/protocol.rs` / `Daemon::shutdown_files` 现有实现一致的方案，未把 `protocol::shutdown_files` 改成接收 `control: &Path`：根 `CORE.html` §4.18 保留无参签名，并在代码注释与注记中补充“仅清理默认 PID / 控制 / 派生窗口套接字；自定义路径由 `Daemon::shutdown_files()` 追加清理”。
+   - 根 `CORE.html` §5.3 Exit 调用栈由直接调用 `protocol::shutdown_files()` 改为 `Daemon::shutdown_files()`，并展开为“默认文件清理 + 按跟踪的 `control_path` / `window_path` 清理自定义控制套接字及派生窗口套接字”。
+   - `BUILD.html` §4 未改动，`-s/--socket` 的运行时文件说明继续作为依据。
 
 ### 4. `MonitorInfo` 缺少显示器 id，无法完成 `clients().monitor` 的名称解析
 
