@@ -238,6 +238,10 @@ async fn properties_changed_task(bus: BusCenter, iface: &amp;'static str);
 async fn dbusmenu_signals_task(bus: BusCenter);
 /// 固定窗口节流冲刷（§5.2）
 async fn debounce_task(bus: BusCenter);</code></pre>
+<ul class="note">
+  <li>SNI 信号白名单：只接受 <code>NewStatus</code> / <code>NewIcon</code> / <code>NewTitle</code> / <code>NewToolTip</code> / <code>NewOverlayIcon</code> / <code>NewAttentionIcon</code>；同接口的厂商自定义信号一律忽略。</li>
+  <li>成员名从 <code>msg.header().member()</code> 读取，先把 header 绑定到局部变量以避免临时值生命周期问题；未命中的成员直接返回，不修改 <code>pending</code>。</li>
+</ul>
 
 <h4 id="sec-4-dbus-bus">4.6.2. bus.rs（库内总线域句柄：连接 + 运行时入口 + 共享簿记；Clone 廉价）</h4>
 <pre><code>pub(crate) struct BusParts {   // 组装件：簿记/通道/配置在连接建立前先行构造
@@ -551,6 +555,7 @@ debounce_task(bus)
 └── 快照栅栏已置位？ → pending_menu.insert(id)   // §5.2 窗口合并</code></pre>
 <ul class="note">
   <li>未命中直接丢弃；不代为重拉，是否重取由消费方决定；栅栏前丢弃（消费方尚无菜单可重取）。</li>
+  <li>dbusmenu 信号白名单：只接受 <code>LayoutUpdated</code> / <code>ItemsPropertiesUpdated</code>；<code>ItemActivationRequested</code> 等其它同接口成员直接忽略，不修改 <code>pending_menu</code>。</li>
 </ul>
 
 <h3 id="sec-5-5">5.5. 输入路由与回执</h3>

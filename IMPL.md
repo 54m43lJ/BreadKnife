@@ -358,7 +358,7 @@
    - `bnote/BUILD.html` §2 注明隔离全量运行必须使用 `dbus-run-session -- cargo test`；未设置 `DBUS_SESSION_BUS_ADDRESS` 时协议用例同样跳过；协议用例用进程内静态锁串行化。
    - `BUILD.html` §2 未改动，根项目继续只列出库测试的隔离命令。
 
-### 8. zbus 接口级信号匹配会收到厂商自定义信号
+### 8. zbus 接口级信号匹配会收到厂商自定义信号 [已解决]
 
 1. 问题描述
    只按接口名订阅 `org.kde.StatusNotifierItem` 或 `com.canonical.dbusmenu` 时，任何同接口的自定义信号都会进入处理闭包，被误记为 `Changed` / `MenuChanged`；`dbusmenu` 的 `ItemActivationRequested` 也会混入。
@@ -373,6 +373,12 @@
 |--------|------|------|------|
 | `breadpan/CORE.html` | §4.6.1 / §5.4.2 | 增 | 列出允许的 SNI `New*` 与 dbusmenu 成员白名单，明确其它信号忽略。 |
 | `breadpan/USER.html` | §4.3 | 不动 | 厂商扩展不保证透传的边界已定义。 |
+
+4. 实际操作
+   - `breadpan/CORE.html` §4.6.1 新增 SNI 信号白名单注记：只接受 `NewStatus` / `NewIcon` / `NewTitle` / `NewToolTip` / `NewOverlayIcon` / `NewAttentionIcon`，同接口厂商自定义信号忽略。
+   - `breadpan/CORE.html` §4.6.1 补充成员名读取方式：从 `msg.header().member()` 读取，先把 header 绑定到局部变量；未命中的成员直接返回，不修改 `pending`。
+   - `breadpan/CORE.html` §5.4.2 新增 dbusmenu 白名单：只接受 `LayoutUpdated` / `ItemsPropertiesUpdated`；`ItemActivationRequested` 等其它同接口成员忽略，不修改 `pending_menu`。
+   - `breadpan/USER.html` §4.3 未改动。
 
 ### 9. GTK 主题投影被当成菜单行的下边框
 
