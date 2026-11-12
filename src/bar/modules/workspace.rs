@@ -2,7 +2,7 @@
 //! 按钮形态为三条件分层（README「界面交互」）；色彩映射见 ARCHITECTURE §3.10。
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -15,7 +15,22 @@ use crate::shared::protocol::Request;
 pub struct WorkspaceWidget {
     pub container: gtk::Box,
     ipc: Arc<IpcClient>,
-    buttons: Rc<RefCell<BTreeMap<i64, gtk::Button>>>,
+    buttons: Rc<RefCell<BTreeMap<i64, WsButton>>>,
+}
+
+/// 单个工作区按钮及其可原地更新的子部件。
+/// 状态推送只改样式类与浮层数据，不销毁按钮——按下与松开之间若重建，
+/// GtkButton 的 clicked 不再配对，快速连点会丢事件。
+struct WsButton {
+    button: gtk::Button,
+    base: gtk::Box,
+    indicator: gtk::Box,
+    tip: Rc<RefCell<WsTip>>,
+}
+
+struct WsTip {
+    name: String,
+    windows: Vec<WorkspaceWindow>,
 }
 
 impl WorkspaceWidget {
@@ -48,20 +63,60 @@ impl WorkspaceWidget {
         }
     }
 
+    /// 增量对账：同 id 按钮原地更新，只增删工作区集合的差集。
+    /// 不整条重建，避免状态推送在按下与松开之间销毁按钮而吞掉点击。
     pub fn rebuild(&self, states: &[WorkspaceState]) {
-        let buttons = self.buttons.clone();
-        {
-            let mut map = buttons.borrow_mut();
-            map.clear();
-            while let Some(child) = self.container.first_child() {
-                self.container.remove(&child);
+        let mut map = self.buttons.borrow_mut();
+        let live: HashSet<i64> = states.iter().map(|ws| ws.id).collect();
+
+        let stale: Vec<i64> = map
+            .keys()
+            .copied()
+            .filter(|id| !live.contains(id))
+            .collect();
+        for id in stale {
+            if let Some(entry) = map.remove(&id) {
+                self.container.remove(&entry.button);
             }
         }
+
+        let mut prev: Option<gtk::Button> = None;
+        // 仅当集合/顺序变化时重排；活跃态推送不移动按钮，避免打断进行中的按下。
+        let reorder = !self.order_matches(states, &map);
         for ws in states {
-            let button = self.make_button(ws);
-            buttons.borrow_mut().insert(ws.id, button.clone());
-            self.container.append(&button);
+            if let Some(entry) = map.get(&ws.id) {
+                entry.update(ws);
+            } else {
+                let entry = self.make_button(ws);
+                self.container.append(&entry.button);
+                map.insert(ws.id, entry);
+            }
+            let button = map
+                .get(&ws.id)
+                .map(|entry| entry.button.clone())
+                .expect("workspace button inserted above");
+            if reorder {
+                self.container.reorder_child_after(&button, prev.as_ref());
+            }
+            prev = Some(button);
         }
+    }
+
+    fn order_matches(&self, states: &[WorkspaceState], map: &BTreeMap<i64, WsButton>) -> bool {
+        let mut child = self.container.first_child();
+        for ws in states {
+            let Some(current) = child else {
+                return false;
+            };
+            let Some(entry) = map.get(&ws.id) else {
+                return false;
+            };
+            if current != entry.button {
+                return false;
+            }
+            child = current.next_sibling();
+        }
+        child.is_none()
     }
 
     /// 单按钮：基底 + 活跃叠加点。
@@ -69,7 +124,7 @@ impl WorkspaceWidget {
     /// 圆点；基底色＝紧急高亮／否则背景；叠加形态＝活跃圆点；叠加色＝高亮基底取
     /// 背景色（高对比）／否则对比色。按钮内容区会撑满，基底与叠加点各自居中保持
     /// 契约尺寸（4px 点 / 20×15 胶囊）。
-    fn make_button(&self, ws: &WorkspaceState) -> gtk::Button {
+    fn make_button(&self, ws: &WorkspaceState) -> WsButton {
         let button = gtk::Button::new();
         button.add_css_class("ws-btn");
         button.set_focusable(false);
@@ -97,27 +152,68 @@ impl WorkspaceWidget {
         overlay.add_overlay(&indicator);
         button.set_child(Some(&overlay));
 
-        let windows = ws.windows.clone();
-        let ws_name = ws.name.clone();
+        let tip = Rc::new(RefCell::new(WsTip {
+            name: ws.name.clone(),
+            windows: ws.windows.clone(),
+        }));
         button.set_has_tooltip(true);
-        button.connect_query_tooltip(move |_, _, _, _, tooltip| {
-            tooltip.set_custom(Some(&build_ws_tooltip(&ws_name, &windows)));
-            true
-        });
+        {
+            let tip = tip.clone();
+            button.connect_query_tooltip(move |_, _, _, _, tooltip| {
+                let tip = tip.borrow();
+                let content = build_ws_tooltip(&tip.name, &tip.windows);
+                tooltip.set_custom(Some(&content));
+                true
+            });
+        }
 
         let ipc = self.ipc.clone();
-        let target = ws.name.clone();
-        button.connect_clicked(move |_| {
-            let ipc = ipc.clone();
-            let target = target.clone();
-            std::thread::spawn(move || {
-                if let Err(e) = ipc.request(Request::WorkspaceSwitch { target }) {
-                    eprintln!("[workspace] switch failed: {e}");
-                }
+        {
+            let tip = tip.clone();
+            button.connect_clicked(move |_| {
+                let target = tip.borrow().name.clone();
+                let ipc = ipc.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = ipc.request(Request::WorkspaceSwitch { target }) {
+                        eprintln!("[workspace] switch failed: {e}");
+                    }
+                });
             });
-        });
+        }
 
-        button
+        WsButton {
+            button,
+            base,
+            indicator,
+            tip,
+        }
+    }
+}
+
+impl WsButton {
+    /// 原地刷新四要素与浮层数据；类集合整体替换，去掉上一帧的形态/紧急态。
+    fn update(&self, ws: &WorkspaceState) {
+        let urgent = ws.urgent && ws.has_windows;
+        let mut base_classes = vec!["ws-base", if ws.has_windows { "square" } else { "dot" }];
+        if urgent {
+            base_classes.push("urgent");
+        }
+        self.base.set_css_classes(&base_classes);
+        self.base.set_halign(gtk::Align::Center);
+        self.base.set_valign(gtk::Align::Center);
+
+        let mut indicator_classes = vec!["ws-ind"];
+        if urgent {
+            indicator_classes.push("on-urgent");
+        }
+        self.indicator.set_css_classes(&indicator_classes);
+        self.indicator.set_halign(gtk::Align::Center);
+        self.indicator.set_valign(gtk::Align::Center);
+        self.indicator.set_visible(ws.active);
+
+        let mut tip = self.tip.borrow_mut();
+        tip.name.clone_from(&ws.name);
+        tip.windows.clone_from(&ws.windows);
     }
 }
 
