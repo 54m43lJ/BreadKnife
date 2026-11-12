@@ -351,31 +351,31 @@
 | `USER.html` | §5.2.2 Workspace 按钮 | 不动 | 浮层配色（`surface` / `fg` / `gold` / 圆角 8px）已在现有条款中，样式实现分离不改变契约。 |
 | `USER.html` | §2 通用约定 | 不动 | 按要求不新增“浮层不属于 tooltip”的规则，只保留 `bread.css` 中的样式定义。 |
 
-### 13. 工作区基底与紧急/活跃对比色改取 cream / purple
+### 13. 工作区基底与紧急/活跃对比色改取 fg / purple
 
 1. 问题描述
-   原实现的基底色为 `purple`、紧急态取 `fg`，活跃叠点取 `fg`；用户要求基底改 `cream`，紧急与活跃的对比色统一用 `purple`，紧急态仍保持两色互换。
+   原实现的基底色为 `purple`、紧急态取 `fg`，活跃叠点取 `fg`；用户要求基底改 `fg`，紧急与活跃的对比色统一用 `purple`，紧急态仍保持两色互换。`cream` 在深色任务栏上过亮，不作为最终基色。
 2. 解决方法
-   - 常态基底（圆点与长方形）改为 `cream`；活跃叠点改 `purple`。
-   - 紧急基底改 `purple`；紧急基底上的活跃叠点改 `cream`，保持两色互换。
+   - 常态基底（圆点与长方形）改为 `fg`；活跃叠点改 `purple`。
+   - 紧急基底改 `purple`；紧急基底上的活跃叠点改 `fg`，保持两色互换。
    - 过渡仍为 150ms ease，形态与尺寸不变。
 3. 修订建议
 
 | 文档名 | 章节 | 动作 | 内容 |
 |--------|------|------|------|
-| `USER.html` | §5.2.2 Workspace 按钮 | 改 | 基底常态 `cream`、活跃叠点 `purple`；紧急基底 `purple`、叠点 `cream`。 |
-| `ABOUT.html` | 「界面交互」工作区矩阵 note | 改 | 背景色改 `cream`、对比色改 `purple`；紧急态仍为两色互换。 |
+| `USER.html` | §5.2.2 Workspace 按钮 | 改 | 基底常态 `fg`、活跃叠点 `purple`；紧急基底 `purple`、叠点 `fg`。 |
+| `ABOUT.html` | 「界面交互」工作区矩阵 note | 改 | 背景色改 `fg`、对比色改 `purple`；紧急态仍为两色互换。 |
 
 ### 14. 托盘背景块与 hover 配色
 
 1. 问题描述
-   托盘区域与图标按钮使用 `fg` 作底，普通 hover 又落到通用 `surface`，在浅底上对比很脏；同时背景块贴满任务栏 30px 高度，缺少上下呼吸。
+   `cream` 作托盘底色在任务栏上过亮；改用 `fg` 后，普通 hover 若直接落到通用 `surface` 会破坏底色层次，需要一个半透明叠加。同时背景块贴满任务栏 30px 高度，缺少上下呼吸。
 2. 解决方法
-   - `.tray-box` 与 `.tray-btn` 背景改 `cream`，`.tray-box` 增加上下 2px margin。
-   - `.tray-btn:hover` 明确使用 `fg` 填充，覆盖通用按钮的 `surface` hover。
-   - 移除 `tray-attention` 的独立 hover 覆写，所有托盘项统一走 `fg` hover；NeedsAttention 的额外视觉不在本轮范围。
+   - `.tray-box` 与 `.tray-btn` 背景改 `fg`，`.tray-box` 增加上下 2px margin。
+   - `.tray-btn:hover` 使用 `alpha(@muted, 0.35)` 叠在 `fg` 基底上；GTK CSS 的 `alpha()` 可用，无需回退 `purple`。
+   - 移除 `tray-attention` 的独立 hover 覆写，所有托盘项统一走半透明 muted；NeedsAttention 的额外视觉不在本轮范围。
 3. 修订建议
 
 | 文档名 | 章节 | 动作 | 内容 |
 |--------|------|------|------|
-| `USER.html` | §5.2.3 托盘与托盘菜单 | 改 | 托盘区域与图标按钮底色改 `cream`；hover 填充 `fg`；背景块上下留 2px 间距。 |
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 改 | 托盘区域与图标按钮底色改 `fg`；hover 用 35% `muted` 叠加；背景块上下留 2px 间距。 |

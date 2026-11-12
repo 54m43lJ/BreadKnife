@@ -34,8 +34,8 @@ button:hover {
 }
 
 /* ── 工作区条（四要素：README「界面交互」；色彩：USER §5.2.2）──
-   基底形态＝有窗口方形／无窗口圆点；基底色＝常态 cream／紧急 purple；
-   叠加形态＝活跃圆点；叠加色＝常态 purple／紧急 cream */
+   基底形态＝有窗口方形／无窗口圆点；基底色＝常态 fg／紧急 purple；
+   叠加形态＝活跃圆点；叠加色＝常态 purple／紧急 fg */
 .ws-btn {
     padding: 2px 3px;
     min-width: 22px;
@@ -47,7 +47,7 @@ button:hover {
     min-width: 4px;
     min-height: 4px;
     border-radius: 50%;
-    background-color: @cream;
+    background-color: @fg;
     transition: all 150ms ease;
 }
 
@@ -56,7 +56,7 @@ button:hover {
     min-width: 20px;
     min-height: 15px;
     border-radius: 10px;
-    background-color: @cream;
+    background-color: @fg;
 }
 
 /* 紧急：基底取对比色（无窗口不可紧急） */
@@ -75,7 +75,7 @@ button:hover {
 
 /* 紧急基底上：叠加点取基底常态色 */
 .ws-ind.on-urgent {
-    background-color: @cream;
+    background-color: @fg;
 }
 
 /* ── 通用 tooltip：与工作区浮层同一套配色，独立定义 ──
@@ -173,7 +173,7 @@ tooltip > box > label {
 
 /* ── 托盘 ── */
 .tray-box {
-    background-color: @cream;
+    background-color: @fg;
     border-radius: 6px;
     /* 与任务栏上下留一点呼吸；背景块不贴满 30px 栏高 */
     margin: 2px 0;
@@ -184,12 +184,12 @@ tooltip > box > label {
     min-width: 22px;
     min-height: 22px;
     border-radius: 6px;
-    background-color: @cream;
+    background-color: @fg;
 }
 
-/* Hover 取前景色，与 cream 基底形成清晰对比 */
+/* Hover 取半透明 muted 叠在 fg 基底上，保留底色又拉出层次 */
 .tray-btn:hover {
-    background-color: @fg;
+    background-color: alpha(@muted, 0.35);
 }
 
 /* 失联置灰（移除只由 Removed 驱动） */
