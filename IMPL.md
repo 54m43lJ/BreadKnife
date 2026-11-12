@@ -214,7 +214,7 @@
 
 ## 三、其它技术上踩的坑
 
-### 1. zbus 方法并发执行导致“首见序”按完成顺序错位
+### 1. zbus 方法并发执行导致“首见序”按完成顺序错位 [已解决]
 
 1. 问题描述
    zbus 默认把接口方法派发为独立任务；两个 `RegisterStatusNotifierItem` 即使按 A、B 到达，也可能 B 先完成 `GetNameOwner` / 路由探测并先入册。若在 `ItemTracker::upsert` 里才分配 `next_seq`，首见序会变成完成序。
@@ -229,6 +229,11 @@
 |--------|------|------|------|
 | `breadpan/CORE.html` | §4.4 `tracker.rs` | 增 | 增加 `upsert_at(entry, seq)` 与 `arrival_seq` 的说明：到达序号在首次 await 前领取。 |
 | `breadpan/CORE.html` | §5.3.1 报到 | 增 | 在 `GetNameOwner` 之前插入“领取到达序号”步骤。 |
+
+4. 实际操作
+   - `breadpan/CORE.html` §4.4 在 `ItemTracker` 增加 `upsert_at(entry, seq)` 签名，注明 `Inserted` 使用传入序号、`Refreshed` / `Renamed` 保留原值。
+   - `breadpan/CORE.html` §4.4 注记补充 `BusCenter.arrival_seq`（`AtomicU64`）：报到在首次 `await` 前领取到达序号，再交给 `upsert_at`；并发完成顺序不再影响首见序；启动反向发现按服务名排序后顺序注册。
+   - `breadpan/CORE.html` §5.3.1 调用栈在 `split_service_arg` 与 `GetNameOwner` 之间插入 `bus.arrival_seq.fetch_add(1)`，并把入册调用改为 `upsert_at(ItemEntry, seq)`；注记补充“到达序号必须在首次 await 前领取”。
 
 ### 2. RwLock 读守卫跨 `if let` / `await` 造成写锁死等
 

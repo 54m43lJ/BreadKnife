@@ -154,6 +154,8 @@ pub(crate) struct ItemTracker {
 impl ItemTracker {
     /// 报到入册：双注册并入的落点（§5.3.1）
     pub(crate) fn upsert(&amp;mut self, entry: ItemEntry) -&gt; Upsert;
+    /// 按到达序号入册：Inserted 使用 seq，Refreshed / Renamed 保留原值（§5.3.1）
+    pub(crate) fn upsert_at(&amp;mut self, entry: ItemEntry, seq: u64) -&gt; Upsert;
     /// 死亡清理：按（服务名或属主唯一名）命中移除，返回被移除者
     pub(crate) fn unregister(&amp;mut self, name: &amp;str) -&gt; Vec&lt;ItemEntry&gt;;
     /// 同名换主：属主唯一名重绑定（条目保留、id 不变；不在册 → false，§5.3.2）
@@ -177,7 +179,8 @@ impl ItemTracker {
     pub(crate) fn clear(&amp;mut self) -&gt; Vec&lt;ItemEntry&gt;;
 }</code></pre>
 <ul class="note">
-  <li><code>seq</code> 在首次 <code>upsert</code> 插入时由 <code>next_seq</code> 分配；<code>Refreshed</code> 与 <code>Renamed</code> 保留原值，<code>unregister</code> 后重新报到按新条目追加。列表输出统一按 <code>seq</code> 升序（USER §2）。</li>
+  <li><code>seq</code> 在首次插入时分配：<code>upsert_at(entry, seq)</code> 的 <code>Inserted</code> 使用传入序号，<code>Refreshed</code> 与 <code>Renamed</code> 保留原值，<code>unregister</code> 后重新报到按新条目追加。列表输出统一按 <code>seq</code> 升序（USER §2）。</li>
+  <li>报到路径在首次 <code>await</code> 前用 <code>BusCenter.arrival_seq</code>（<code>AtomicU64</code>）领取到达序号，再传给 <code>upsert_at</code>；zbus 并发派发的方法即使完成顺序不同，首见序仍按到达顺序确定。启动反向发现按服务名排序后顺序注册，沿用同一路径。</li>
 </ul>
 
 <h3 id="sec-4-props">4.5. props.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -485,9 +488,10 @@ debounce_task(bus)
 ├── header.sender()
 └── dbus::register_item(bus, service, sender, announce=true)
      ├── split_service_arg(service, sender)
+     ├── bus.arrival_seq.fetch_add(1)          // 首次 await 前领取到达序号
      ├── bus.call(GetNameOwner(service))
      ├── props::probe_routing(service, path)
-     └── ItemTracker::upsert(ItemEntry)
+     └── ItemTracker::upsert_at(ItemEntry, seq)
           ├── service 升级？ → events.send(NameChanged{old, new})
           └── 新建且 announce 且栅栏已置位？
                ├── events.send(Added(id))
@@ -497,7 +501,8 @@ debounce_task(bus)
   <li>两前缀接口挂同一路径（见 <a href="#sec-4-dbus-iface">§4.6.4</a>）；前缀策略见 <a href="PROVIDER.html#sec-2">PROVIDER §2</a>。</li>
   <li>报到参数三形态：<code>"name"</code> → 默认路径；<code>"name/path"</code> → 就地切分；<code>"/path"</code> → 服务名取注册方唯一名。解析失败以 <code>TrayError::Protocol</code> 拒绝受理。</li>
   <li><code>GetNameOwner</code> 失败回退 service 本身，不阻塞报到。</li>
-  <li><code>upsert</code> 以两轮 lookup 自愈并入：① 注册名 == service；② 发送者唯一名 == unique。命中则原地刷新，未命中新建。</li>
+  <li><code>upsert_at</code> 以两轮 lookup 自愈并入：① 注册名 == service；② 发送者唯一名 == unique。命中则原地刷新，未命中新建；只有 <code>Inserted</code> 使用到达序号，刷新与重键保留原 <code>seq</code>。</li>
+  <li>到达序号必须在 <code>GetNameOwner</code> 等首次 <code>await</code> 之前领取；若等解析 / 探测完成后再分配，并发报到的首见序会退化为完成序。</li>
   <li>未置位栅栏或 <code>announce=false</code> 时静默入册：无广播、无 <code>Added</code>，由快照承载。</li>
 </ul>
 
