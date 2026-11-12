@@ -317,7 +317,7 @@
    - `CORE.html` §4.9 / §4.13 / §4.14 / §4.16 各新增同一条通用注记：字段类型为语义示意，GTK 生命周期下可变状态以 `Rc` / `RefCell` / `Mutex` 持有；需要被信号闭包捕获的回调方法可使用 `self: &Rc<Self>`，捕获前先 clone 句柄。
    - `CORE.html` §4.15 未改动，`popdown` / `RefCell` 借用纪律继续由该节现有注记承载。
 
-### 6. clap `trailing_var_arg` 吞掉后台化参数
+### 6. clap `trailing_var_arg` 吞掉后台化参数 [已解决]
 
 1. 问题描述
    `bread __daemon --socket X` 中 `--socket` 位于子命令之后，被 `trailing_var_arg = true` 收进 `cmd`；子进程的 `Args.socket` 仍是 `None`，后台 daemon 忽略自定义套接字。
@@ -331,6 +331,11 @@
 |--------|------|------|------|
 | `CORE.html` | §4.1 `main.rs` | 增 | 注明后台化 spawn 的参数顺序：`--socket` 必须在 `__daemon` 之前。 |
 | `BUILD.html` | §4 补充说明 | 不动 | `-s/--socket` 的用户说明不变。 |
+
+4. 实际操作
+   - `CORE.html` §4.1 新增注记：后台化 spawn 固定使用 `bread --socket X __daemon`，`--socket` 必须在 `__daemon` 之前，先由 clap 解析为全局 `Args.socket`。
+   - 注记同时说明原因：`cmd` 使用 `trailing_var_arg = true`，放在子命令之后的选项会被收进 `cmd`，后台 daemon 会退回默认套接字。
+   - `BUILD.html` §4 未改动，`-s/--socket` 的用户说明保持现状。
 
 ### 7. 协议测试在桌面总线上的 `NameTaken` 竞争
 

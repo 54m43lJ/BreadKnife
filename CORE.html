@@ -87,6 +87,9 @@ scripts/
 
 <h3 id="sec-4-main">4.1. main.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>fn main();</code></pre>
+<ul class="note">
+  <li>后台化 spawn 的参数顺序固定为 <code>bread --socket X __daemon</code>：<code>--socket</code> 必须在 <code>__daemon</code> 之前，先由 clap 解析为全局 <code>Args.socket</code>，再进入子命令。由于 <code>cmd</code> 使用 <code>trailing_var_arg = true</code>，放在子命令之后的选项会被收进 <code>cmd</code>，导致后台 daemon 退回默认套接字。</li>
+</ul>
 
 <h3 id="sec-4-daemon-mod">4.2. daemon/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub fn run(control_path: &amp;str) -&gt; Result&lt;(), String&gt;;
