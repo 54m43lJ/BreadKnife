@@ -25,7 +25,7 @@
   <tr><td>通知协议库</td><td><code>bnote</code> 随仓库落位（路径依赖；zbus / tokio 由库内部持有，宿主不装配总线运行时）</td></tr>
   <tr><td>通知事件消费</td><td>宿主侧以 <code>futures::executor::block_on</code> 驱动 <code>NoticeReceiver::recv</code> 的异步事件流，不引入额外运行时</td></tr>
   <tr><td>Python 3</td><td><code>scripts/hypr-smoke.sh</code> 的 socket2 事件采样与 <code>scripts/resource-smoke.py</code> 的资源/能耗采样</td></tr>
-  <tr><td>可选系统工具</td><td><code>pamixer</code>（音量）、<code>brightnessctl</code>（亮度：内置面板）、<code>ddcutil</code>（亮度：外接显示器，DDC/CI）、<code>canberra-gtk-play</code>（通知提示音）、<code>xdg-open</code>（通知正文链接）——缺席时对应功能降级，不阻断构建。媒体（MPRIS）/ 网络（NetworkManager）/ 蓝牙（BlueZ）经 DBus 消费，无需额外工具</td></tr>
+  <tr><td>可选系统工具</td><td><code>pamixer</code> / <code>wpctl</code>（PipeWire）/ <code>pactl</code>（PulseAudio）（音量，按此顺序回退）、<code>brightnessctl</code>（亮度：内置面板）、<code>ddcutil</code>（亮度：外接显示器，DDC/CI）、<code>canberra-gtk-play</code>（通知提示音）、<code>xdg-open</code>（通知正文链接）——缺席时对应功能降级，不阻断构建。媒体（MPRIS）/ 网络（NetworkManager）/ 蓝牙（BlueZ）经 DBus 消费，无需额外工具</td></tr>
   <tr><td>测试环境</td><td>应用测试无需显示服务；breadpan / bnote 库测试需 DBus session bus（<code>dbus-run-session</code>）</td></tr>
 </table>
 

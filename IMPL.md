@@ -524,7 +524,7 @@
    - `breadpan/USER.html` §3.6 的 `right_click` 注释补充“注册期探测缺失时交互期补探一次，仍无菜单才 ContextMenu fallback”；§3.5 与 `TrayItem.menu` 的字段说明注明该值为现场读取，注册期探测失败不永久生效，交互时会补探。
    - 仅改文档；`breadpan/src/dbus/interact.rs` 现有 `ensure_menu` 与补探逻辑未改动。
 
-### 16. 音量只认 pamixer、亮度误读键盘 LED，导致拿不到数据
+### 16. 音量只认 pamixer、亮度误读键盘 LED，导致拿不到数据 [已解决]
 
 1. 问题描述
    环境没有 `pamixer`，音量读取直接返回 `None`；亮度读取执行 `brightnessctl -m` 时取第一行（可能是键盘 LED 设备）并解析最后一个字段（max），成功返回了错误值，`ddcutil` 外接显示器回退因此永远不会执行。表现为音量和亮度都没有可用数据。
@@ -541,6 +541,13 @@
 | `PROVIDER.html` | §4.3 外部工具 | 改 | 音量增加 `wpctl` / `pactl` 回退；`brightnessctl` 注明只读 `backlight` 类并取百分比字段。 |
 | `BUILD.html` | §1 依赖表“可选系统工具” | 改 | 补充 `wpctl`（PipeWire）/ `pactl`（PulseAudio）为音量后端回退。 |
 | `CORE.html` | §4.5 `daemon/system.rs` | 改 | `set_volume` 注释改为后端链；补充亮度读取的后端顺序与 `backlight` 过滤语义。 |
+
+4. 实际操作
+   - `PROVIDER.html` §4.3 外部工具表把音量拆为 `pamixer` / `wpctl` / `pactl` 三行，注明按 `pamixer → wpctl → pactl` 回退，全部缺席才灰置音量滑块；`brightnessctl` 行注明读取只用 `-c backlight` 并取百分比字段，`ddcutil` 行注明无内置面板时的读取回退。
+   - `PROVIDER.html` §4.3 注记补充音量读取 / 设置的后端顺序 `pamixer → wpctl → pactl`、亮度读取的 `backlight` 过滤，以及亮度设置同时尝试 `brightnessctl` 与 `ddcutil`、两者都失败才报错。
+   - `BUILD.html` §1 可选系统工具补充 `wpctl`（PipeWire）/ `pactl`（PulseAudio）作为音量后端回退。
+   - `CORE.html` §4.5 更新 `set_volume` / `set_brightness` 注释，并把音量与亮度后端链、`backlight` 过滤语义写入注记。
+   - 仅改文档；`src/daemon/system.rs` 现有后端链与解析实现未改动。
 
 ### 17. 贴栏通知顶部空白过大
 
