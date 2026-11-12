@@ -128,7 +128,7 @@
    - `CORE.html` §4.6 补充 `invoke_action` 的令牌失败语义：非 `Stopped` 只跳过令牌回发，`ActionInvoked` 仍照常发送；`Stopped` 按命令线程停止路径处理。
    - `USER.html` §5.2.6 未改动，不可用态与刷新按钮继续作为窗口侧契约。
 
-### 3. 系统状态只写“订阅”，没有具体接口与刷新策略
+### 3. 系统状态只写“订阅”，没有具体接口与刷新策略 [已解决]
 
 1. 问题描述
    根 `CORE.html` §4.5 写 `start(tx)` 订阅 UPower / NetworkManager / BlueZ / MPRIS，但没有列明各服务的属性名、信号名、刷新节拍与失败回退。实现如果只按文档无法确定该监听哪些 PropertiesChanged，也无法判断启动时是否需要主动拉取一次。
@@ -143,6 +143,12 @@
 |--------|------|------|------|
 | `CORE.html` | §4.5 `daemon/system.rs` | 改 | 补充当前实现的采样节拍与降级规则；或列出要订阅的具体接口/属性，明确信号驱动与轮询兜底的关系。 |
 | `PROVIDER.html` | §4.2 系统 DBus 服务 | 不动 | 保留服务与缺席行为表，具体属性名归 CORE。 |
+
+4. 实际操作
+   - `CORE.html` §4.5 新增注记，写明当前采样基线：私有 tokio 运行时周期轮询，音量 / 亮度 `FAST_POLL = 5s`，电池 / 网络 / 蓝牙 `SLOW_POLL = 30s`；当前不订阅 `PropertiesChanged`，轮询是唯一数据源，后续信号增量只作为叠加且保留轮询兜底。
+   - `CORE.html` §4.5 列明各服务消费口径：UPower `DisplayDevice` 的 `Percentage` / `State`；NetworkManager `PrimaryConnectionType` 及类型映射；BlueZ `GetManagedObjects` 的 `Adapter1.Powered` / `Device1.Connected`；MPRIS 只在 `media_control` 请求时经 session bus 访问 Player，不参与周期采样；音量后端 `pamixer → wpctl → pactl`，亮度 `brightnessctl -c backlight` → `ddcutil`。
+   - `CORE.html` §4.5 补充降级规则：总线 / 服务 / 工具缺席时对应字段保持 `None`，不阻塞其它项；仅在值变化时发送 `DaemonEvent::System`，daemon 再对整份状态去重后广播 `StateDelta.system`。
+   - `PROVIDER.html` §4.2 未改动，继续保留服务清单与缺席行为表。
 
 ### 4. 特殊工作区显示时“底层普通工作区”的取法未定义
 

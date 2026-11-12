@@ -245,6 +245,15 @@ pub fn menu_activate(handle: &amp;TrayHandle, item: &amp;str, entry: i32)
 pub fn media_control(op: MediaOp);        // MPRIS 操作（阻塞调用线程）
 pub fn set_volume(value: u32);            // pamixer
 pub fn set_brightness(value: u32);        // brightnessctl / ddcutil</code></pre>
+<ul class="note">
+  <li>采样基线：system 线程内的私有 tokio 运行时按固定节拍轮询，<code>FAST_POLL = 5s</code> 覆盖音量 / 亮度，<code>SLOW_POLL = 30s</code> 覆盖电池 / 网络 / 蓝牙；当前不订阅 <code>PropertiesChanged</code>，轮询是唯一数据源，后续可叠加信号增量但保留轮询作为兜底，不改变 <code>SystemState</code> / <code>StateDelta</code> 契约。</li>
+  <li>电池：system bus 的 UPower <code>/org/freedesktop/UPower/devices/DisplayDevice</code>，读取 <code>org.freedesktop.UPower.Device</code> 的 <code>Percentage</code> 与 <code>State</code>（<code>1</code> = 充电中）。</li>
+  <li>网络：system bus 的 NetworkManager <code>/org/freedesktop/NetworkManager</code>，读取 <code>org.freedesktop.NetworkManager.PrimaryConnectionType</code>；空串映射为 <code>none</code> 且未连接，<code>802-3-ethernet</code> → <code>ethernet</code>，<code>802-11-wireless</code> / <code>wifi</code> → <code>wifi</code>，其它值 → <code>other</code>。</li>
+  <li>蓝牙：system bus 的 BlueZ <code>/</code>，经 <code>org.freedesktop.DBus.ObjectManager.GetManagedObjects</code> 清点 <code>org.bluez.Adapter1.Powered</code> 与已连接 <code>org.bluez.Device1.Connected</code> 数量。</li>
+  <li>MPRIS 不参与周期采样：仅在 <code>media_control</code> 请求时经 session bus 选择播放器（优先非 <code>.instance</code> 的唯一名）调用 <code>org.mpris.MediaPlayer2.Player</code> 方法；session bus 不可用时记录日志并返回。</li>
+  <li>音量后端链为 <code>pamixer → wpctl → pactl</code>；亮度先取 <code>brightnessctl -m -c backlight</code> 的百分比字段，无内置面板时回退 <code>ddcutil getvcp 10 --brief</code>。</li>
+  <li>降级规则：会话 / 系统总线不可用、对应服务缺席或读取失败时，该项保持 <code>None</code>，不阻塞其它项；窗口隐藏入口或灰置对应面板项。每轮只在值变化时发送 <code>DaemonEvent::System</code>，daemon 再对整份 <code>SystemState</code> 去重后广播 <code>StateDelta.system</code>。</li>
+</ul>
 
 <h3 id="sec-4-notify">4.6. daemon/notify.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub const NOTIFICATION_COMMAND_TIMEOUT_MS: u64;   // 推荐值 5_000
