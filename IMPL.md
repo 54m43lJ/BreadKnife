@@ -107,7 +107,7 @@
    - `breadpan/CORE.html` §5.3.1 未改动，继续保留参数解析与 `upsert` 流程。
    - 仅改文档；错误映射与 `breadpan/src/dbus/iface.rs`、幂等入册与首次插入广播逻辑与 `breadpan/src/dbus/mod.rs` 现有实现一致。
 
-### 2. 通知命令失败后的状态迁移没有具体接口
+### 2. 通知命令失败后的状态迁移没有具体接口 [已解决]
 
 1. 问题描述
    根 `CORE.html` §4.6 注记要求命令线程对 `Timeout` / `Stopped` 按 bnote 建议处置（重试或重建），但没有说明 daemon 如何把这一失败反馈给通知中心，也没有重建入口。
@@ -122,6 +122,11 @@
 |--------|------|------|------|
 | `CORE.html` | §4.6 `daemon/notify.rs` | 增 | 明确命令线程失败路径：Stopped → NotificationStatus::Unavailable 并退出；Timeout → 记日志等待刷新；令牌失败不阻断动作回发。 |
 | `USER.html` | §5.2.6 通知中心 | 不动 | 不可用态与刷新按钮已定义，保持现状。 |
+
+4. 实际操作
+   - `CORE.html` §4.6 把原“命令线程失败记录日志”注记改为分层描述：`Stopped` 上报 `NotificationStatus::Unavailable { message }` 并退出命令线程，重建只由刷新按钮的 `Request::NotificationRetry` 触发；`Timeout` / 其它错误只记日志、保留会话，UI 乐观更新并由下一次快照校正；两种情况都不自动重试。
+   - `CORE.html` §4.6 补充 `invoke_action` 的令牌失败语义：非 `Stopped` 只跳过令牌回发，`ActionInvoked` 仍照常发送；`Stopped` 按命令线程停止路径处理。
+   - `USER.html` §5.2.6 未改动，不可用态与刷新按钮继续作为窗口侧契约。
 
 ### 3. 系统状态只写“订阅”，没有具体接口与刷新策略
 

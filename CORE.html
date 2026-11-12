@@ -285,8 +285,8 @@ pub fn play_sound(record: &amp;NotificationRecord);</code></pre>
   <li>能力清单与语义见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>；<code>SessionConfig.capabilities</code> 返回 §4.5 声明的能力。</li>
   <li>服务器信息：name <code>bread</code>、vendor <code>BreadKnife</code>、version 取 <code>env!("CARGO_PKG_VERSION")</code>、spec_version <code>1.2</code>；<code>command_timeout_ms</code> 取 <code>NOTIFICATION_COMMAND_TIMEOUT_MS</code>（推荐值 5_000）。</li>
   <li>手动重试由通知中心的刷新按钮触发 <code>Request::NotificationRetry</code>；daemon 若已有服务则先停机，再重新调用 <code>NotificationService::start</code>，不排队、不替换已有通知服务。</li>
-  <li>命令线程失败记录日志，并按 bnote 的错误建议处置（<code>Timeout</code> 可重试或重建会话、<code>Stopped</code> 重建会话）；窗口 UI 乐观更新，重连快照时校正。</li>
-  <li><code>invoke_action</code> 在同一命令线程内按序调用 <code>SessionHandle::activation_token</code>（token 为 <code>Some</code> 时）与 <code>SessionHandle::invoke_action</code>。</li>
+  <li>命令线程失败分层：<code>Stopped</code> → 向 daemon 发送 <code>NotificationStatus::Unavailable { message }</code> 并退出命令线程，通知中心显示不可用态，重建只由用户点击刷新触发 <code>Request::NotificationRetry</code>；<code>Timeout</code> / 其它错误 → 只记录日志并保留当前会话，UI 继续乐观更新，下一次快照校正。两种情况都不自动重试。</li>
+  <li><code>invoke_action</code> 在同一命令线程内按序调用 <code>SessionHandle::activation_token</code>（token 为 <code>Some</code> 时）与 <code>SessionHandle::invoke_action</code>；令牌调用失败（非 <code>Stopped</code>）只跳过令牌回发，<code>ActionInvoked</code> 仍照常发送，<code>Stopped</code> 则按上条上报不可用并退出。</li>
   <li>提示音：<code>suppress_sound</code> 为真跳过；<code>sound_file</code> 用 <code>SOUND_BACKEND -f</code>，<code>sound_name</code> 用 <code>SOUND_BACKEND -i</code>；命令异步 spawn、不等待，失败只记日志。启动时 <code>sound_available</code> 检测 PATH，缺席则能力清单不声明 <code>sound</code>。</li>
 </ul>
 
