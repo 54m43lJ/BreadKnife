@@ -236,6 +236,7 @@ impl WindowApp {
             MenuChanged { item } => self.tray.menu_changed(&item),
             Notification(record) => self.info.upsert_center(record),
             NotificationPopup(record) => self.info.push_popup(record),
+            NotificationDismissed(id) => self.info.dismiss_popup(id),
             NotificationRemoved(id) => self.info.remove_notification(id),
             NotificationCleared(app_name) => self.info.clear_notifications(app_name.as_deref()),
             Reload => {

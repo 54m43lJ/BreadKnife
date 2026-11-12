@@ -17,7 +17,7 @@ use crate::shared::model::{
     ActiveWindow, NotificationAction, NotificationIcon, NotificationRecord, NotificationStatus,
     NotificationUrgency,
 };
-use crate::shared::protocol::{NotificationCloseReason, Request};
+use crate::shared::protocol::{NotificationDismissReason, Request};
 
 pub const POPUP_VISIBLE_MAX: usize = 10;
 pub const GROUP_PREVIEW_COUNT: usize = 3;
@@ -215,6 +215,11 @@ impl InfoCenterWidget {
         self.notification_window.push(record);
     }
 
+    /// dismiss：只收贴栏卡片，通知中心条目保留到清理。
+    pub fn dismiss_popup(&self, id: u32) {
+        self.notification_window.remove(id);
+    }
+
     pub fn set_notification_retry(&self, retry: RetryCallback) {
         *self.retry.borrow_mut() = Some(retry);
         self.rebuild_center();
@@ -359,7 +364,7 @@ impl CenterView {
         close.connect_clicked(move |_| {
             send_request(
                 &ipc,
-                Request::NotificationCloseGroup {
+                Request::NotificationClearGroup {
                     app_name: app_name.clone(),
                 },
             );
@@ -482,6 +487,10 @@ impl NotificationWindow {
 
     fn push(self: &Rc<Self>, record: NotificationRecord) {
         let id = record.id;
+        if record.dismissed {
+            self.remove(id);
+            return;
+        }
         {
             let mut records = self.records.borrow_mut();
             if let Some(existing) = records.iter_mut().find(|item| item.id == id) {
@@ -560,25 +569,16 @@ impl NotificationWindow {
 
     fn expire(&self, id: u32) {
         self.timers.borrow_mut().remove(&id);
-        let transient = {
-            let mut records = self.records.borrow_mut();
-            let Some(pos) = records.iter().position(|item| item.id == id) else {
-                return;
-            };
-            let record = records.remove(pos);
-            record.transient
-        };
+        self.records.borrow_mut().retain(|item| item.id != id);
         self.rebuild();
         self.show();
-        if transient {
-            send_request(
-                &self.ipc,
-                Request::NotificationClose {
-                    id,
-                    reason: NotificationCloseReason::Expired,
-                },
-            );
-        }
+        send_request(
+            &self.ipc,
+            Request::NotificationDismiss {
+                id,
+                reason: NotificationDismissReason::Expired,
+            },
+        );
     }
 
     fn set_status(&self, status: &NotificationStatus) {
@@ -629,14 +629,16 @@ impl NotificationWindow {
             self.container.remove(&child);
         }
         let records = self.records.borrow();
-        for record in records.iter().take(POPUP_VISIBLE_MAX) {
+        let active: Vec<&NotificationRecord> =
+            records.iter().filter(|record| !record.dismissed).collect();
+        for record in active.iter().take(POPUP_VISIBLE_MAX) {
             self.container
                 .append(&notification_card(&self.ipc, record, false));
         }
-        if records.len() > POPUP_VISIBLE_MAX {
+        if active.len() > POPUP_VISIBLE_MAX {
             let hidden = gtk::Label::new(Some(&format!(
                 "还有 {} 条通知",
-                records.len() - POPUP_VISIBLE_MAX
+                active.len() - POPUP_VISIBLE_MAX
             )));
             hidden.add_css_class("notif-hidden");
             self.container.append(&hidden);
@@ -690,13 +692,15 @@ fn notification_card(ipc: &Arc<IpcClient>, record: &NotificationRecord, center: 
         let ipc = ipc.clone();
         let id = record.id;
         close.connect_clicked(move |_| {
-            send_request(
-                &ipc,
-                Request::NotificationClose {
+            let request = if center {
+                Request::NotificationRemove { id }
+            } else {
+                Request::NotificationDismiss {
                     id,
-                    reason: NotificationCloseReason::Dismissed,
-                },
-            );
+                    reason: NotificationDismissReason::Dismissed,
+                }
+            };
+            send_request(&ipc, request);
         });
     }
     header.append(&close);
@@ -738,21 +742,25 @@ fn notification_card(ipc: &Arc<IpcClient>, record: &NotificationRecord, center: 
         card.append(&actions);
     }
 
-    // 卡片点击：左键默认动作 / 中键关闭 / 弹窗右键清空。
+    // 卡片点击：左键默认动作 / 中键 dismiss / 弹窗右键全部 dismiss。
     for button in [1u32, 2, 3] {
         let gesture = gtk::GestureClick::new();
         gesture.set_button(button);
         let ipc = ipc.clone();
         let id = record.id;
         gesture.connect_pressed(move |_g, _n, _x, _y| match button {
-            2 => send_request(
-                &ipc,
-                Request::NotificationClose {
-                    id,
-                    reason: NotificationCloseReason::Dismissed,
-                },
-            ),
-            3 if !center => send_request(&ipc, Request::NotificationClear),
+            2 => {
+                let request = if center {
+                    Request::NotificationRemove { id }
+                } else {
+                    Request::NotificationDismiss {
+                        id,
+                        reason: NotificationDismissReason::Dismissed,
+                    }
+                };
+                send_request(&ipc, request);
+            }
+            3 if !center => send_request(&ipc, Request::NotificationDismissAll),
             1 => send_request(
                 &ipc,
                 Request::NotificationActivate {

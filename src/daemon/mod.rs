@@ -19,7 +19,7 @@ use crate::shared::model::{
     MinimizedWindow, NotificationRecord, NotificationStatus, StateDelta, SystemState, TrayItemView,
     WindowSnapshot, WorkspaceState, WorkspaceWindow,
 };
-use crate::shared::protocol::{Frame, NotificationCloseReason, Push, Request, Response};
+use crate::shared::protocol::{Frame, NotificationDismissReason, Push, Request, Response};
 
 /// 事件循环滴答：超时档兼作重同步去抖窗口（事件风暴在若干个滴答内合并为一次全量重读）。
 /// 50ms：工作区切换的更新延迟不超过一帧量级，同时仍能合并连续的窗口生命周期事件。
@@ -642,12 +642,20 @@ impl Daemon {
                 self.retry_notification();
                 ipc::reply(&out, id, Response::Ok);
             }
-            Request::NotificationClose { id: nid, reason } => {
-                self.close_notification(nid, reason);
+            Request::NotificationDismiss { id: nid, reason } => {
+                self.dismiss_notification(nid, reason);
                 ipc::reply(&out, id, Response::Ok);
             }
-            Request::NotificationCloseGroup { app_name } => {
-                self.close_notification_group(&app_name);
+            Request::NotificationRemove { id: nid } => {
+                self.remove_notification(nid);
+                ipc::reply(&out, id, Response::Ok);
+            }
+            Request::NotificationDismissAll => {
+                self.dismiss_all_notifications();
+                ipc::reply(&out, id, Response::Ok);
+            }
+            Request::NotificationClearGroup { app_name } => {
+                self.clear_notification_group(&app_name);
                 ipc::reply(&out, id, Response::Ok);
             }
             Request::NotificationClear => {
@@ -780,11 +788,21 @@ impl Daemon {
         }
     }
 
+    /// 发送方 `CloseNotification`：视为 dismiss；贴栏卡片移除，条目保留在中心。
     fn on_notification_closed(&mut self, id: u32) {
-        if let Some(pos) = self.notifications.iter().position(|n| n.id == id) {
-            self.notifications.remove(pos);
+        let Some(pos) = self.notifications.iter().position(|n| n.id == id) else {
+            return;
+        };
+        if self.notifications[pos].transient {
+            let _ = self.notifications.remove(pos);
             self.broadcast(Push::NotificationRemoved(id));
+            return;
         }
+        if self.notifications[pos].dismissed {
+            return;
+        }
+        self.notifications[pos].dismissed = true;
+        self.broadcast(Push::NotificationDismissed(id));
     }
 
     fn on_notification_status(&mut self, status: NotificationStatus) {
@@ -797,21 +815,66 @@ impl Daemon {
         }
     }
 
-    fn close_notification(&mut self, id: u32, reason: NotificationCloseReason) {
-        if let Some(pos) = self.notifications.iter().position(|n| n.id == id) {
-            self.notifications.remove(pos);
+    /// 用户 dismiss / 超时：贴栏卡片消失，条目默认保留在通知中心等待清理；
+    /// `transient` 条目按时限直接删除。
+    fn dismiss_notification(&mut self, id: u32, reason: NotificationDismissReason) {
+        let Some(pos) = self.notifications.iter().position(|n| n.id == id) else {
+            return;
+        };
+        let mut record = self.notifications[pos].clone();
+        let bnote_reason = match reason {
+            NotificationDismissReason::Dismissed => bnote::CloseReason::Dismissed,
+            NotificationDismissReason::Expired => bnote::CloseReason::Expired,
+        };
+        if record.transient {
+            let _ = self.notifications.remove(pos);
             if let Some(service) = &self.notification {
-                let reason = match reason {
-                    NotificationCloseReason::Dismissed => bnote::CloseReason::Dismissed,
-                    NotificationCloseReason::Expired => bnote::CloseReason::Expired,
-                };
-                service.close(id, reason);
+                service.close(id, bnote_reason);
             }
             self.broadcast(Push::NotificationRemoved(id));
+            return;
+        }
+        if record.dismissed {
+            return;
+        }
+        if let Some(service) = &self.notification {
+            service.close(id, bnote_reason);
+        }
+        record.dismissed = true;
+        self.notifications[pos] = record;
+        self.broadcast(Push::NotificationDismissed(id));
+    }
+
+    /// 贴栏弹窗全部 dismiss：中心条目全部保留，等待用户清理。
+    fn dismiss_all_notifications(&mut self) {
+        let ids: Vec<u32> = self
+            .notifications
+            .iter()
+            .filter(|n| !n.dismissed)
+            .map(|n| n.id)
+            .collect();
+        for id in ids {
+            self.dismiss_notification(id, NotificationDismissReason::Dismissed);
         }
     }
 
-    fn close_notification_group(&mut self, app_name: &str) {
+    /// 通知中心清理单条：彻底移除；仍活跃的条目顺带向发送方 dismiss。
+    fn remove_notification(&mut self, id: u32) {
+        let Some(pos) = self.notifications.iter().position(|n| n.id == id) else {
+            return;
+        };
+        let Some(record) = self.notifications.remove(pos) else {
+            return;
+        };
+        if !record.dismissed
+            && let Some(service) = &self.notification
+        {
+            service.close(id, bnote::CloseReason::Dismissed);
+        }
+        self.broadcast(Push::NotificationRemoved(id));
+    }
+
+    fn clear_notification_group(&mut self, app_name: &str) {
         let ids: Vec<u32> = self
             .notifications
             .iter()
@@ -820,7 +883,13 @@ impl Daemon {
             .collect();
         if let Some(service) = &self.notification {
             for id in &ids {
-                service.close(*id, bnote::CloseReason::Dismissed);
+                if self
+                    .notifications
+                    .iter()
+                    .any(|n| n.id == *id && !n.dismissed)
+                {
+                    service.close(*id, bnote::CloseReason::Dismissed);
+                }
             }
         }
         self.notifications.retain(|n| n.app_name != app_name);
@@ -830,7 +899,9 @@ impl Daemon {
     fn clear_notifications(&mut self) {
         if let Some(service) = &self.notification {
             for record in &self.notifications {
-                service.close(record.id, bnote::CloseReason::Dismissed);
+                if !record.dismissed {
+                    service.close(record.id, bnote::CloseReason::Dismissed);
+                }
             }
         }
         self.notifications.clear();
@@ -862,7 +933,7 @@ impl Daemon {
                 return;
             }
         }
-        self.close_notification(id, NotificationCloseReason::Dismissed);
+        self.dismiss_notification(id, NotificationDismissReason::Dismissed);
     }
 
     fn retry_notification(&mut self) {

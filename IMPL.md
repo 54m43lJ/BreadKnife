@@ -456,3 +456,22 @@
 | 文档名 | 章节 | 动作 | 内容 |
 |--------|------|------|------|
 | `USER.html` | §5.2.5 通知弹窗 | 改 | 删除“条间分隔线 1px”，改为“多条之间以 4px 间距分隔，不画线”。 |
+
+### 20. dismiss 语义与清理混淆，dismiss 后条目被移出通知中心
+
+1. 问题描述
+   原 `NotificationClose` 同时承担“贴栏 dismiss”和“通知中心清理”两种动作：dismiss 时 daemon 直接把条目移出 `notifications` 并广播 `NotificationRemoved`，通知中心随之消失；用户要求 dismiss 只收起贴栏卡片，条目保留在中心等待清理。术语上“关闭通知”也应改为 dismiss。
+2. 解决方法
+   - 共享状态 `NotificationRecord` 增加 `dismissed`：dismiss 后置位，中心仍展示，贴栏弹窗过滤掉。
+   - 请求拆分：`NotificationDismiss { id, reason }` 只 dismiss 贴栏卡片；`NotificationRemove { id }` 为通知中心清理单条；新增 `NotificationDismissAll` 供贴栏右键全部 dismiss；组关闭/全部清理保持清理语义。
+   - 新增 `Push::NotificationDismissed(id)`：窗口只移除贴栏卡片，中心记录不动；`NotificationRemoved` 才彻底移除。
+   - 发送方 `CloseNotification`、动作触发（非 `resident`）与超时都走 dismiss；`transient` 超时仍删除条目。
+   - 通知中心单条关闭、组关闭、全部清理才向发送方 dismiss 并移除记录；已 dismissed 的条目清理时不再重复发送。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.5 通知弹窗 | 改 | 用户关闭统一改称 dismiss；dismiss 后条目保留通知中心，清理才移除；超时只收贴栏卡片（`transient` 删除）。 |
+| `USER.html` | §5.2.6 通知中心 | 改 | 单条关闭 / 组关闭 / 全部清理属于 cleanup，与弹窗 dismiss 区分；dismiss 条目保留至 cleanup。 |
+| `CORE.html` | §4.13 `info.rs` / §4.19 协议 | 改 | `NotificationRecord` 增 `dismissed`；Request 改为 `NotificationDismiss` / `NotificationRemove` / `NotificationDismissAll`；Push 增 `NotificationDismissed`。 |
+| `ABOUT.html` | 「界面交互」通知弹窗 | 改 | 行为措辞 close→dismiss，并补“dismiss 后保留通知中心等待清理”。 |

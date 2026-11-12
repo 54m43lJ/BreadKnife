@@ -232,6 +232,7 @@ fn to_record(notice: bnote::Notice) -> NotificationRecord {
         expire_timeout_ms: notice.expire_timeout_ms,
         transient: notice.transient,
         resident: notice.resident,
+        dismissed: false,
         sound_file: notice.sound_file,
         sound_name: notice.sound_name,
         suppress_sound: notice.suppress_sound,

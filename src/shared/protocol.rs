@@ -35,7 +35,7 @@ pub enum MediaOp {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum NotificationCloseReason {
+pub enum NotificationDismissReason {
     Dismissed,
     Expired,
 }
@@ -81,11 +81,18 @@ pub enum Request {
         value: u32,
     },
     NotificationRetry,
-    NotificationClose {
+    /// 用户 dismiss / 超时：从贴栏弹窗移除，默认保留在通知中心。
+    NotificationDismiss {
         id: u32,
-        reason: NotificationCloseReason,
+        reason: NotificationDismissReason,
     },
-    NotificationCloseGroup {
+    /// 通知中心清理单条：从中心与弹窗彻底移除。
+    NotificationRemove {
+        id: u32,
+    },
+    /// 贴栏弹窗全部 dismiss（中心保留）。
+    NotificationDismissAll,
+    NotificationClearGroup {
         app_name: String,
     },
     NotificationClear,
@@ -122,6 +129,8 @@ pub enum Push {
     Notification(NotificationRecord),
     /// 仅当前显示器：贴栏弹窗。
     NotificationPopup(NotificationRecord),
+    /// 贴栏弹窗移除（中心保留，dismiss 语义）。
+    NotificationDismissed(u32),
     NotificationRemoved(u32),
     NotificationCleared(Option<String>),
     /// 按 daemon 跟踪的路径重读 CSS。

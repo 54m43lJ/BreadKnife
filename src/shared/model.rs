@@ -203,6 +203,9 @@ pub struct NotificationRecord {
     pub expire_timeout_ms: Option<u32>,
     pub transient: bool,
     pub resident: bool,
+    /// 已 dismiss：从贴栏弹窗移除，但保留在通知中心等待清理。
+    #[serde(default)]
+    pub dismissed: bool,
     pub sound_file: Option<String>,
     pub sound_name: Option<String>,
     pub suppress_sound: bool,

@@ -102,6 +102,7 @@ fn sample_snapshot() -> WindowSnapshot {
             expire_timeout_ms: None,
             transient: false,
             resident: false,
+            dismissed: false,
             sound_file: None,
             sound_name: None,
             suppress_sound: false,
