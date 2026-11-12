@@ -256,7 +256,7 @@
    - `breadpan/CORE.html` §5.3.2 补充锁使用纪律：读守卫不得跨越后续写锁或 `await`，读后可能写的路径先用显式块取出结果再分支；删除 / 重键先释放登记锁，再清理 `pending` / `pending_menu`。
    - `breadpan/CORE.html` §4.6.2 未改动，共享簿记类型保持现状。
 
-### 3. Hyprland v2 事件载荷取错 token，且特殊工作区事件名写错
+### 3. Hyprland v2 事件载荷取错 token，且特殊工作区事件名写错 [已解决]
 
 1. 问题描述
    `monitoraddedv2` / `monitorremovedv2` 的载荷是 `MONITORID,MONITORNAME,DESCRIPTION`；早期解析取第一个 token，拿到的是数字 id，热插拔时会 spawn/kill 名为 `"0"` 的窗口。另 `activespecial` / `activespecialv2` 被误写成 `activespecialworkspace`，特殊工作区切换不会触发重同步。
@@ -270,6 +270,11 @@
 |--------|------|------|------|
 | `PROVIDER.html` | §4.1 Hyprland IPC | 增 | 在事件表补充 v2 载荷顺序与 `activespecial*` / `moveworkspace*` / `renameworkspace` 事件名。 |
 | `CORE.html` | §4.3 `HyprlandEvent` | 不动 | 事件枚举已覆盖，载荷细节归 PROVIDER。 |
+
+4. 实际操作
+   - `PROVIDER.html` §4.1 事件表拆分显示器事件：v1 `monitoradded` / `monitorremoved` 取第一个 token；v2 `monitoraddedv2` / `monitorremovedv2` 载荷为 `MONITORID,MONITORNAME,DESCRIPTION`，取第二个 token 作为显示器名。
+   - `PROVIDER.html` §4.1 增补 `activespecial` / `activespecialv2`（特殊工作区切换）与 `moveworkspace` / `moveworkspacev2` / `renameworkspace`（工作区移动 / 重命名）均触发全量重同步。
+   - `CORE.html` §4.3 未改动，`HyprlandEvent` 枚举保持现状，载荷细节由 PROVIDER 承载。
 
 ### 4. layer-shell 窗口位置与全局 CSS 作用域
 
