@@ -335,3 +335,47 @@
 |--------|------|------|------|
 | `CORE.html` | §4.2 `daemon/mod.rs` | 改 | `run_loop` 注释补 `TICK = 50ms`：滴答仅作重同步去抖窗口，`recv_timeout` 是阻塞等待事件而非轮询。 |
 | `CORE.html` | §5.1.1 daemon 启动 | 不动 | 调用栈的 `rx.recv_timeout(TICK)` 与“超时且 `pending_resync` → `resync()`”保持现状，仅数值变化。 |
+
+### 12. tooltip 配色与工作区浮层共用一套容器规则
+
+1. 问题描述
+   `tooltip` 规则同时承担普通 tooltip 与工作区悬停浮层的外观：浮层通过 `set_custom` 塞进 tooltip 容器，配色只能跟着 tooltip 走，内容再套样式会出现双重内边距/描边的风险；而浮层语义上并不是 tooltip，需要独立定义。
+2. 解决方法
+   - `tooltip` 容器与内部 `box` 设为透明、无内边距；普通 tooltip 的 `surface` 底、`fg` 字、`gold` 1px 边框、圆角 8px、内边距 6px／水平 8px 落在 `tooltip > box > label`。
+   - `.ws-tip` 独立定义完整外观：`surface` 底、`fg` 字、`gold` 1px 边框、圆角 8px、内边距 6px／水平 8px，并保留标题 / 窗口行 / 空态的配色。
+   - 两处使用同一套色板（`surface` / `fg` / `gold`），视觉统一但不共享选择器。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.2 Workspace 按钮 | 不动 | 浮层配色（`surface` / `fg` / `gold` / 圆角 8px）已在现有条款中，样式实现分离不改变契约。 |
+| `USER.html` | §2 通用约定 | 不动 | 按要求不新增“浮层不属于 tooltip”的规则，只保留 `bread.css` 中的样式定义。 |
+
+### 13. 工作区基底与紧急/活跃对比色改取 cream / purple
+
+1. 问题描述
+   原实现的基底色为 `purple`、紧急态取 `fg`，活跃叠点取 `fg`；用户要求基底改 `cream`，紧急与活跃的对比色统一用 `purple`，紧急态仍保持两色互换。
+2. 解决方法
+   - 常态基底（圆点与长方形）改为 `cream`；活跃叠点改 `purple`。
+   - 紧急基底改 `purple`；紧急基底上的活跃叠点改 `cream`，保持两色互换。
+   - 过渡仍为 150ms ease，形态与尺寸不变。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.2 Workspace 按钮 | 改 | 基底常态 `cream`、活跃叠点 `purple`；紧急基底 `purple`、叠点 `cream`。 |
+| `ABOUT.html` | 「界面交互」工作区矩阵 note | 改 | 背景色改 `cream`、对比色改 `purple`；紧急态仍为两色互换。 |
+
+### 14. 托盘背景块与 hover 配色
+
+1. 问题描述
+   托盘区域与图标按钮使用 `fg` 作底，普通 hover 又落到通用 `surface`，在浅底上对比很脏；同时背景块贴满任务栏 30px 高度，缺少上下呼吸。
+2. 解决方法
+   - `.tray-box` 与 `.tray-btn` 背景改 `cream`，`.tray-box` 增加上下 2px margin。
+   - `.tray-btn:hover` 明确使用 `fg` 填充，覆盖通用按钮的 `surface` hover。
+   - 移除 `tray-attention` 的独立 hover 覆写，所有托盘项统一走 `fg` hover；NeedsAttention 的额外视觉不在本轮范围。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 改 | 托盘区域与图标按钮底色改 `cream`；hover 填充 `fg`；背景块上下留 2px 间距。 |

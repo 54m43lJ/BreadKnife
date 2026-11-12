@@ -34,8 +34,8 @@ button:hover {
 }
 
 /* ── 工作区条（四要素：README「界面交互」；色彩：USER §5.2.2）──
-   基底形态＝有窗口方形／无窗口圆点；基底色＝常态 purple／紧急 fg；
-   叠加形态＝活跃圆点；叠加色＝常态 fg／紧急 purple */
+   基底形态＝有窗口方形／无窗口圆点；基底色＝常态 cream／紧急 purple；
+   叠加形态＝活跃圆点；叠加色＝常态 purple／紧急 cream */
 .ws-btn {
     padding: 2px 3px;
     min-width: 22px;
@@ -47,7 +47,7 @@ button:hover {
     min-width: 4px;
     min-height: 4px;
     border-radius: 50%;
-    background-color: @purple;
+    background-color: @cream;
     transition: all 150ms ease;
 }
 
@@ -56,12 +56,12 @@ button:hover {
     min-width: 20px;
     min-height: 15px;
     border-radius: 10px;
-    background-color: @purple;
+    background-color: @cream;
 }
 
-/* 紧急：基底取前景色（无窗口不可紧急） */
+/* 紧急：基底取对比色（无窗口不可紧急） */
 .ws-base.urgent {
-    background-color: @fg;
+    background-color: @purple;
 }
 
 /* 活跃：叠加对比色小圆点（无窗口时与基底小圆点等大重叠） */
@@ -69,23 +69,47 @@ button:hover {
     min-width: 4px;
     min-height: 4px;
     border-radius: 50%;
-    background-color: @fg;
+    background-color: @purple;
     transition: all 150ms ease;
 }
 
-/* 紧急基底上：叠加点取 purple */
+/* 紧急基底上：叠加点取基底常态色 */
 .ws-ind.on-urgent {
-    background-color: @purple;
+    background-color: @cream;
 }
 
-/* 工作区悬停浮层：窗口标题列表 */
+/* ── 通用 tooltip：与工作区浮层同一套配色，独立定义 ──
+   容器与 box 透明，由文字标签承载 surface 底 / gold 边框，
+   使普通 tooltip 与工作区浮层可以各自定义、互不嵌套描边。 */
 tooltip {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
+tooltip > box {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+tooltip > box > label {
     background-color: @surface;
     color: @fg;
     border: 1px solid @gold;
     border-radius: 8px;
+    padding: 6px 8px;
 }
-.ws-tip { padding: 6px 8px; }
+
+/* ── 工作区悬停浮层：独立定义（语义上不是 tooltip）── */
+.ws-tip {
+    background-color: @surface;
+    color: @fg;
+    border: 1px solid @gold;
+    border-radius: 8px;
+    padding: 6px 8px;
+}
 .ws-tip-title {
     color: @gold;
     font-weight: bold;
@@ -149,8 +173,10 @@ tooltip {
 
 /* ── 托盘 ── */
 .tray-box {
-    background-color: @fg;
+    background-color: @cream;
     border-radius: 6px;
+    /* 与任务栏上下留一点呼吸；背景块不贴满 30px 栏高 */
+    margin: 2px 0;
 }
 
 .tray-btn {
@@ -158,17 +184,17 @@ tooltip {
     min-width: 22px;
     min-height: 22px;
     border-radius: 6px;
+    background-color: @cream;
+}
+
+/* Hover 取前景色，与 cream 基底形成清晰对比 */
+.tray-btn:hover {
     background-color: @fg;
 }
 
 /* 失联置灰（移除只由 Removed 驱动） */
 .tray-btn.tray-dead {
     opacity: 0.35;
-}
-
-/* 注意态（NeedsAttention）微高亮 */
-.tray-btn.tray-attention:hover {
-    background-color: alpha(@gold, 0.25);
 }
 
 /* ── 自绘菜单弹窗（macOS 式：无气泡尾、贴边平铺面板）── */
