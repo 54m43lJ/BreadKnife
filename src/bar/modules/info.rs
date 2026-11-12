@@ -329,13 +329,16 @@ impl CenterView {
     }
 
     /// 内容自然高度 → 滚动区最小高度（上限 100% 屏高）。
-    /// 仅靠 `propagate_natural_height` 时 popover 在可见状态下可能保持旧高度。
+    /// 仅靠 `propagate_natural_height` 时 popover 在可见状态下可能保持旧高度；
+    /// 重新 present 才会按新的自然尺寸更新弹窗表面。
     fn fit_height(&self) {
         let (_, natural, _, _) = self.content.measure(gtk::Orientation::Vertical, -1);
         self.scroll
             .set_min_content_height(natural.min(self.max_height));
         self.scroll.queue_resize();
-        self.popover.queue_resize();
+        if self.popover.is_visible() {
+            self.popover.present();
+        }
     }
 
     fn group_header(&self, app: &str, open: bool) -> gtk::Box {
@@ -626,12 +629,7 @@ impl NotificationWindow {
             self.container.remove(&child);
         }
         let records = self.records.borrow();
-        for (index, record) in records.iter().take(POPUP_VISIBLE_MAX).enumerate() {
-            if index > 0 {
-                let separator = gtk::Separator::new(gtk::Orientation::Horizontal);
-                separator.add_css_class("notif-sep");
-                self.container.append(&separator);
-            }
+        for record in records.iter().take(POPUP_VISIBLE_MAX) {
             self.container
                 .append(&notification_card(&self.ipc, record, false));
         }

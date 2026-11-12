@@ -432,13 +432,27 @@
 ### 18. 通知中心组标题箭头不随收缩状态变化、面板高度不回落
 
 1. 问题描述
-   组标题箭头用 `expanded`（“展开全部”状态）决定方向，普通预览态的展开/收缩不会改变箭头；组收起后内容虽被移除，但 popover 在可见状态下保持旧高度，不会自动回落。
+   组标题箭头用 `expanded`（“展开全部”状态）决定方向，普通预览态的展开/收缩不会改变箭头；组收起后内容虽被移除，但 popover 在可见状态下保持旧高度，不会自动回落。仅 queue resize 不足以更新已可见的 xdg_popup，必须重新 present。
 2. 解决方法
    - 箭头方向改由 `!collapsed.contains(app)` 决定：收起 `▸`、展开 `▾`；`expanded` 仅用于“展开全部”隐藏其它组。
-   - `CenterView` 保存 popover、滚动区与最大高度；每次重建后测量内容自然高度，`set_min_content_height(min(natural, max_height))` 并 queue resize。
+   - `CenterView` 保存 popover、滚动区与最大高度；每次重建后测量内容自然高度，`set_min_content_height(min(natural, max_height))`，再对可见 popover 调用 `present()` 重新呈现。
+   - 独立 GTK 探针验证：内容从 8 项减到 2 项后，popover 高度由 204 收缩到 72。
 3. 修订建议
 
 | 文档名 | 章节 | 动作 | 内容 |
 |--------|------|------|------|
 | `USER.html` | §5.2.6 通知中心 | 改 | 明确组标题箭头与展开/收缩一致（收起 `▸`、展开 `▾`），面板高度随组状态实时变化。 |
 | `CORE.html` | §4.13 `bar/modules/info.rs` | 改 | `CenterView` 保存 popover / scroll / max_height；`rebuild` 末尾以 `fit_height()` 同步滚动区与弹窗高度。 |
+
+### 19. 堆叠通知之间多出一条分隔线
+
+1. 问题描述
+   `NotificationWindow::rebuild` 在每两张通知卡之间插入一个 `GtkSeparator`（`.notif-sep`，`gold` 1px），用户认为堆叠弹窗之间不应画线。
+2. 解决方法
+   - 删除重建循环中的分隔线节点。
+   - 删除 `.notif-sep` 样式；卡片之间只保留 `.notif-card` 的 4px 下边距。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.5 通知弹窗 | 改 | 删除“条间分隔线 1px”，改为“多条之间以 4px 间距分隔，不画线”。 |

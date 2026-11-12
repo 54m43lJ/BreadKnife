@@ -347,11 +347,6 @@ scale highlight {
     padding: 12px 8px;
     margin: 0 0 4px 0;
 }
-.notif-sep {
-    min-height: 1px;
-    background-color: @gold;
-    margin: 2px 4px;
-}
 .notif-card.crit {
     background-color: @red;
     color: @cream;
