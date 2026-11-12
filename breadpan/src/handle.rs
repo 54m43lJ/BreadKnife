@@ -177,7 +177,6 @@ impl TrayHandle {
                     items.push(item);
                 }
             }
-            items.sort_by(|a, b| a.id.cmp(&b.id));
             Ok(items)
         })
         .unwrap_or_default()
@@ -320,8 +319,10 @@ impl TrayHandle {
         id: &TrayItemId,
         menu_item_id: i32,
     ) -> Result<InteractionOutcome, TrayError> {
-        let bus = self.live()?;
-        interact::menu_activate(bus, id, menu_item_id)
+        let id = id.clone();
+        self.dispatch(
+            move |bus| async move { interact::menu_activate(&bus, &id, menu_item_id).await },
+        )
     }
 
     // ── 停机 ──

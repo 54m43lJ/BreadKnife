@@ -3,16 +3,16 @@
 //! 弹窗经 PopupManager 托管（根层挂根窗口；子层挂根层弹窗，Wayland 嵌套，见 popup.rs）。
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 
 use gtk::prelude::*;
 
+use crate::bar::UiTask;
 use crate::bar::ipc::IpcClient;
 use crate::bar::modules::popup::{self, PopupManager};
-use crate::bar::UiTask;
 use crate::shared::model::{
     IconView, InteractionOutcome, MenuItem, MenuItemType, MenuSnapshot, ToggleState, ToggleType,
     TrayItemView, TrayUpdate,
@@ -32,7 +32,11 @@ struct TrayInner {
     container: gtk::Box,
     ipc: Arc<IpcClient>,
     ui: Sender<UiTask>,
-    icons: RefCell<BTreeMap<String, gtk::Button>>,
+    icons: RefCell<HashMap<String, gtk::Button>>,
+    /// 每个图标当前 id（Renamed 后手势仍指向新 id）。
+    keys: RefCell<HashMap<String, Rc<RefCell<String>>>>,
+    /// 图标显示序（首见序）。
+    order: RefCell<Vec<String>>,
     /// 当前打开的根菜单会话（一个窗口同时至多一个根弹窗）。
     menu: RefCell<Option<MenuSession>>,
     /// 已展开的子层：(弹窗, 锚行)——行级悬停去留判定（经典菜单语义，见 close_subs_not_at）。
@@ -56,10 +60,16 @@ impl TrayWidget {
         let inner = Rc::new(TrayInner {
             window: window.clone(),
             popup,
-            container: gtk::Box::new(gtk::Orientation::Horizontal, 0),
+            container: {
+                let container = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                container.add_css_class("tray-box");
+                container
+            },
             ipc,
             ui,
-            icons: RefCell::new(BTreeMap::new()),
+            icons: RefCell::new(HashMap::new()),
+            keys: RefCell::new(HashMap::new()),
+            order: RefCell::new(Vec::new()),
             menu: RefCell::new(None),
             subs: RefCell::new(Vec::new()),
             pending_rows: RefCell::new(HashMap::new()),
@@ -75,6 +85,8 @@ impl TrayWidget {
         {
             let mut icons = self.inner.icons.borrow_mut();
             icons.clear();
+            self.inner.order.borrow_mut().clear();
+            self.inner.keys.borrow_mut().clear();
             while let Some(child) = self.inner.container.first_child() {
                 self.inner.container.remove(&child);
             }
@@ -86,11 +98,16 @@ impl TrayWidget {
 
     pub fn apply(&self, update: TrayUpdate) {
         match update {
-            TrayUpdate::Added(view) | TrayUpdate::Changed(view) => {
-                remove_icon(&self.inner, &view.id);
-                add_icon(&self.inner, &view);
+            TrayUpdate::Added(view) => {
+                if !self.inner.icons.borrow().contains_key(&view.id) {
+                    add_icon(&self.inner, &view);
+                } else {
+                    update_icon(&self.inner, &view);
+                }
             }
+            TrayUpdate::Changed(view) => update_icon(&self.inner, &view),
             TrayUpdate::Removed(id) => remove_icon(&self.inner, &id),
+            TrayUpdate::Renamed { old, new } => rename_icon(&self.inner, &old, &new),
         }
     }
 
@@ -116,12 +133,7 @@ impl TrayWidget {
         }
     }
 
-    pub fn on_expand_done(
-        &self,
-        item: &str,
-        entry: i32,
-        result: Result<Response, String>,
-    ) {
+    pub fn on_expand_done(&self, item: &str, entry: i32, result: Result<Response, String>) {
         let key = (item.to_string(), entry);
         let anchor = self.inner.pending_rows.borrow_mut().remove(&key);
         match (result, anchor) {
@@ -169,7 +181,9 @@ impl TrayWidget {
         if self.inner.menu_open_for(item) {
             return;
         }
-        let Ok(Response::Menu(snapshot)) = result else { return };
+        let Ok(Response::Menu(snapshot)) = result else {
+            return;
+        };
         if !snapshot.items.iter().any(|m| m.visible) {
             return;
         }
@@ -194,10 +208,10 @@ impl TrayInner {
 fn add_icon(inner: &Rc<TrayInner>, view: &TrayItemView) {
     let button = gtk::Button::new();
     button.add_css_class("tray-btn");
+    let key = Rc::new(RefCell::new(view.id.clone()));
     button.set_focusable(false);
 
     let paintable = icon_paintable_of(&view.icon);
-    apply_pad_class(&button, &view.icon);
     let image = gtk::Image::from_paintable(Some(&paintable));
     image.set_pixel_size(ICON_SIZE);
     button.set_child(Some(&image));
@@ -211,7 +225,8 @@ fn add_icon(inner: &Rc<TrayInner>, view: &TrayItemView) {
         button.add_css_class("tray-attention");
     }
 
-    attach_gestures(inner, &button, &view.id);
+    inner.keys.borrow_mut().insert(view.id.clone(), key.clone());
+    attach_gestures(inner, &button, key.clone());
 
     // 菜单跟踪悬停切换（macOS 菜单栏式）：有弹窗显示时驻留即读该 item 菜单并替换
     {
@@ -226,118 +241,114 @@ fn add_icon(inner: &Rc<TrayInner>, view: &TrayItemView) {
             let item = item.clone();
             std::thread::spawn(move || {
                 let result = ipc.request(Request::TrayMenuRead { item: item.clone() });
-                let _ = ui.send(UiTask::TrayHoverMenu { item, token, result });
+                let _ = ui.send(UiTask::TrayHoverMenu {
+                    item,
+                    token,
+                    result,
+                });
             });
         });
     }
 
     inner.container.append(&button);
     inner.icons.borrow_mut().insert(view.id.clone(), button);
+    inner.order.borrow_mut().push(view.id.clone());
 }
 
 fn remove_icon(inner: &Rc<TrayInner>, id: &str) {
     // 借用即刻释放：container.remove 可能触发菜单 closed 等同步信号重入
     let button = inner.icons.borrow_mut().remove(id);
+    inner.keys.borrow_mut().remove(id);
+    inner.order.borrow_mut().retain(|item| item != id);
     if let Some(button) = button {
         inner.container.remove(&button);
     }
 }
 
-/// 对比底色垫高（深浅随图标反相）：采样像素亮度决定底色深浅。
-fn apply_pad_class(button: &gtk::Button, view: &IconView) {
-    match icon_is_dark(view) {
-        Some(true) => button.add_css_class("tray-pad-on-dark"),
-        Some(false) => button.add_css_class("tray-pad-on-light"),
-        None => {}
+/// 原位更新：只换内容与状态，不改变图标在容器中的位置。
+fn update_icon(inner: &Rc<TrayInner>, view: &TrayItemView) {
+    let Some(button) = inner.icons.borrow().get(&view.id).cloned() else {
+        add_icon(inner, view);
+        return;
+    };
+    let paintable = icon_paintable_of(&view.icon);
+    let image = gtk::Image::from_paintable(Some(&paintable));
+    image.set_pixel_size(ICON_SIZE);
+    button.set_child(Some(&image));
+    button.set_tooltip_text(view.tooltip.as_deref());
+    if view.alive {
+        button.remove_css_class("tray-dead");
+    } else {
+        button.add_css_class("tray-dead");
+    }
+    if view.attention {
+        button.add_css_class("tray-attention");
+    } else {
+        button.remove_css_class("tray-attention");
     }
 }
 
-/// 像素平均亮度判定：位图（原始字节）/ 文件路径（纹理）/ 主题名（回源文件）；
-/// 不可得 → None（不加垫色）。
-fn icon_is_dark(view: &IconView) -> Option<bool> {
-    match view {
-        IconView::Pixmap { width, height, argb } => {
-            luminance_of_samples(argb.chunks_exact(4), *width, *height)
-        }
-        IconView::Path(path) => {
-            let texture = gtk::gdk::Texture::from_filename(path).ok()?;
-            texture_luminance(&texture)
-        }
-        IconView::Name(name) => {
-            // 主题命中的 IconPaintable 回源文件路径取纹理
-            let paintable =
-                breadpan::gtk::icon_paintable(&breadpan::IconSource::Name(name.clone()));
-            let icon_paintable = paintable.downcast_ref::<gtk::IconPaintable>()?;
-            let path = icon_paintable.file()?.path()?;
-            let texture = gtk::gdk::Texture::from_filename(path).ok()?;
-            texture_luminance(&texture)
+/// 同一 Item id 重键：原位换键，不移动位置。
+fn rename_icon(inner: &Rc<TrayInner>, old: &str, new: &str) {
+    if let Some(button) = inner.icons.borrow_mut().remove(old) {
+        inner.icons.borrow_mut().insert(new.to_string(), button);
+        if let Some(slot) = inner
+            .order
+            .borrow_mut()
+            .iter_mut()
+            .find(|item| item.as_str() == old)
+        {
+            *slot = new.to_string();
         }
     }
-}
-
-fn texture_luminance(texture: &gtk::gdk::Texture) -> Option<bool> {
-    let w = texture.width();
-    let h = texture.height();
-    if w <= 0 || h <= 0 || w as i64 * h as i64 > 4096 * 4096 {
-        return None;
+    if let Some(key) = inner.keys.borrow_mut().remove(old) {
+        *key.borrow_mut() = new.to_string();
+        inner.keys.borrow_mut().insert(new.to_string(), key);
     }
-    let stride = (w * 4) as usize;
-    let mut buf = vec![0u8; stride * h as usize];
-    gtk::gdk::prelude::TextureExtManual::download(texture, &mut buf, stride);
-    luminance_of_samples(buf.chunks_exact(4), w as u32, h as u32)
-}
-
-/// 4 字节像素采样的 alpha 加权亮度（≤512 采样；通道序对均值无影响）。
-fn luminance_of_samples<'a>(
-    pixels: impl Iterator<Item = &'a [u8]>,
-    width: u32,
-    height: u32,
-) -> Option<bool> {
-    let total = (width as usize) * (height as usize);
-    if total == 0 {
-        return None;
+    if inner.menu.borrow().as_ref().is_some_and(|s| s.item == old) {
+        close_menu(inner);
     }
-    let step = (total / 512).max(1);
-    let mut sum = 0f64;
-    let mut count = 0f64;
-    for (i, px) in pixels.enumerate() {
-        if i % step != 0 || px.len() < 4 {
-            continue;
-        }
-        let a = px[3] as f64 / 255.0;
-        sum += a * (px[0] as f64 + px[1] as f64 + px[2] as f64) / 3.0;
-        count += a;
-    }
-    if count < 1.0 {
-        return None;
-    }
-    Some(sum / count / 255.0 < 0.55)
 }
 
 // ── 手势 → IPC → daemon ──
 
-fn attach_gestures(inner: &Rc<TrayInner>, button: &gtk::Button, id: &str) {
+fn attach_gestures(inner: &Rc<TrayInner>, button: &gtk::Button, key: Rc<RefCell<String>>) {
     // 左 / 中 / 右键（坐标取部件局部，SNI 常规做法）
     for button_number in [1u32, 2, 3] {
         let gesture = gtk::GestureClick::new();
         gesture.set_button(button_number);
         let inner2 = inner.clone();
-        let id = id.to_string();
+        let key = key.clone();
         gesture.connect_pressed(move |g, _n, x, y| {
+            let id = key.borrow().clone();
             // toggle：本次按下刚在捕获阶段关掉自己的菜单 → 不再发起重复交互
-            if inner2.popup.press_closed_contains(&format!("tray:{id}")) || inner2.menu_open_for(&id) {
+            if inner2.popup.press_closed_contains(&format!("tray:{id}"))
+                || inner2.menu_open_for(&id)
+            {
                 return;
             }
             let input = match g.current_button() {
-                2 => InteractInput::Middle { x: x as i32, y: y as i32 },
-                3 => InteractInput::Right { x: x as i32, y: y as i32 },
-                _ => InteractInput::Left { x: x as i32, y: y as i32 },
+                2 => InteractInput::Middle {
+                    x: x as i32,
+                    y: y as i32,
+                },
+                3 => InteractInput::Right {
+                    x: x as i32,
+                    y: y as i32,
+                },
+                _ => InteractInput::Left {
+                    x: x as i32,
+                    y: y as i32,
+                },
             };
             let ipc = inner2.ipc.clone();
             let ui = inner2.ui.clone();
             let item = id.clone();
             std::thread::spawn(move || {
-                let result = ipc.request(Request::TrayInteract { item: item.clone(), input });
+                let result = ipc.request(Request::TrayInteract {
+                    item: item.clone(),
+                    input,
+                });
                 let _ = ui.send(UiTask::TrayInteractDone { item, result });
             });
         });
@@ -349,17 +360,21 @@ fn attach_gestures(inner: &Rc<TrayInner>, button: &gtk::Button, id: &str) {
         gtk::EventControllerScrollFlags::VERTICAL | gtk::EventControllerScrollFlags::HORIZONTAL,
     );
     let inner2 = inner.clone();
-    let id = id.to_string();
+    let key = key.clone();
     scroll.connect_scroll(move |_ctrl, dx, dy| {
         let input = if dy.abs() >= dx.abs() {
-            if dy > 0.0 { InteractInput::ScrollDown { steps: 1 } } else { InteractInput::ScrollUp { steps: 1 } }
+            if dy > 0.0 {
+                InteractInput::ScrollDown { steps: 1 }
+            } else {
+                InteractInput::ScrollUp { steps: 1 }
+            }
         } else if dx > 0.0 {
             InteractInput::ScrollRight { steps: 1 }
         } else {
             InteractInput::ScrollLeft { steps: 1 }
         };
         let ipc = inner2.ipc.clone();
-        let item = id.clone();
+        let item = key.borrow().clone();
         std::thread::spawn(move || {
             if let Err(e) = ipc.request(Request::TrayInteract { item, input }) {
                 eprintln!("[tray] scroll failed: {e}");
@@ -397,7 +412,10 @@ fn show_menu(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: 
     }
     inner.popup.manage(&popover);
     inner.popup.clone().open(&popover, format!("tray:{item}"));
-    *inner.menu.borrow_mut() = Some(MenuSession { item: item.to_string(), popover });
+    *inner.menu.borrow_mut() = Some(MenuSession {
+        item: item.to_string(),
+        popover,
+    });
 }
 
 /// 关闭本 Item 的菜单链（根 + 全部子层）。
@@ -517,7 +535,10 @@ fn build_menu_row(inner: &Rc<TrayInner>, item: &str, entry: &MenuItem) -> gtk::B
             let ui = inner2.ui.clone();
             let item = item.clone();
             std::thread::spawn(move || {
-                let result = ipc.request(Request::TrayMenuActivate { item: item.clone(), entry: entry_id });
+                let result = ipc.request(Request::TrayMenuActivate {
+                    item: item.clone(),
+                    entry: entry_id,
+                });
                 let _ = ui.send(UiTask::TrayActivateDone { item, result });
             });
         }
@@ -540,18 +561,30 @@ fn request_expand(inner: &Rc<TrayInner>, row: &gtk::Button, item: &str, entry: i
     let ui = inner.ui.clone();
     let item = item.to_string();
     std::thread::spawn(move || {
-        let result = ipc.request(Request::TrayMenuExpand { item: item.clone(), entry });
-        let _ = ui.send(UiTask::TrayExpandDone { item, entry, result });
+        let result = ipc.request(Request::TrayMenuExpand {
+            item: item.clone(),
+            entry,
+        });
+        let _ = ui.send(UiTask::TrayExpandDone {
+            item,
+            entry,
+            result,
+        });
     });
 }
 
 /// 父面板内衬（bread.css `.menu-popover contents` padding 4px + border 1px）：
 /// 子菜单锚点矩形按此左右外扩，实现与父面板边缘相接的贴边对齐。
-const MENU_PANEL_INSET: f64 = 5.0;
+const MENU_PANEL_INSET: f64 = 4.0;
 
 /// 子层弹窗：挂根菜单弹窗之下（Wayland 嵌套弹窗），锚定该行右侧展开；
 /// 换层时旧子层先收，根层收回时子层随之收回。
-fn open_sub_popover(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: MenuSnapshot) {
+fn open_sub_popover(
+    inner: &Rc<TrayInner>,
+    anchor: &gtk::Button,
+    item: &str,
+    snapshot: MenuSnapshot,
+) {
     // 借用即刻释放：widget 调用不得在任何 RefCell 借用之下
     let root = inner.menu.borrow().as_ref().map(|s| s.popover.clone());
     let Some(root) = root else {
@@ -585,9 +618,15 @@ fn open_sub_popover(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, sna
             inner2.subs.borrow_mut().retain(|(sp, _)| sp != &p);
         });
     }
-    inner.subs.borrow_mut().push((popover.clone(), anchor.clone()));
+    inner
+        .subs
+        .borrow_mut()
+        .push((popover.clone(), anchor.clone()));
     inner.popup.manage(&popover);
-    inner.popup.clone().open(&popover, format!("tray:{item}:sub"));
+    inner
+        .popup
+        .clone()
+        .open(&popover, format!("tray:{item}:sub"));
 }
 
 /// 行级悬停统一规则（经典菜单语义，根行与子行同规则）：
@@ -609,9 +648,11 @@ fn close_subs_not_at(inner: &Rc<TrayInner>, hovered: &gtk::Button) {
 /// MenuChanged 重取刷新：根层或已展开路径——首版重取根层并重建
 /// （已展开子层先收，用户按需再展开）。
 fn menu_refresh(inner: &Rc<TrayInner>, item: &str) {
-    let open = inner.menu.borrow().as_ref().is_some_and(|s| {
-        s.item == item && s.popover.is_visible()
-    });
+    let open = inner
+        .menu
+        .borrow()
+        .as_ref()
+        .is_some_and(|s| s.item == item && s.popover.is_visible());
     if !open {
         return;
     }
@@ -631,13 +672,15 @@ fn icon_paintable_of(view: &IconView) -> gtk::gdk::Paintable {
     let source = match view {
         IconView::Name(name) => breadpan::IconSource::Name(name.clone()),
         IconView::Path(path) => breadpan::IconSource::Path(path.clone()),
-        IconView::Pixmap { width, height, argb } => {
-            breadpan::IconSource::Pixmap(breadpan::Pixmap {
-                width: *width,
-                height: *height,
-                argb: argb.clone(),
-            })
-        }
+        IconView::Pixmap {
+            width,
+            height,
+            argb,
+        } => breadpan::IconSource::Pixmap(breadpan::Pixmap {
+            width: *width,
+            height: *height,
+            argb: argb.clone(),
+        }),
     };
     breadpan::gtk::icon_paintable(&source)
 }

@@ -11,13 +11,12 @@
 
 <h1>breadpan 构建与开发</h1>
 <blockquote>
-  面向开发者的构建、示例运行与测试说明。项目描述见
-  <a href="README.html">README.html</a>，实现规格见
-  <a href="ARCHITECTURE.html">ARCHITECTURE.html</a> 与
-  <a href="CODE.html">CODE.html</a>。
+  面向开发者的准备、构建、示例与测试说明。项目描述见 <a href="ABOUT.html">ABOUT.html</a>，
+  使用契约见 <a href="USER.html">USER.html</a>，协议边界见 <a href="PROVIDER.html">PROVIDER.html</a>，
+  实现规格见 <a href="CORE.html">CORE.html</a>。
 </blockquote>
 
-<h2>构建依赖</h2>
+<h2>1. 开发者准备</h2>
 <table>
   <tr><th>项</th><th>说明</th></tr>
   <tr><td>Rust 工具链</td><td>rustup / cargo（edition 2021）</td></tr>
@@ -29,15 +28,29 @@
   <li>本库为独立 crate（仓库内路径 <code>breadpan/</code>），须独立编译测试，不要求仓库内其他工程存在；下述命令均在 <code>breadpan/</code> 目录内执行。</li>
 </ul>
 
-<h2>编译</h2>
+<h2>2. 开发命令</h2>
 <pre><code>cargo build              # 协议核心 + GTK 整合层（默认特性）
-cargo build --release</code></pre>
-<table>
-  <tr><th>变体</th><th>命令</th><th>说明</th></tr>
-  <tr><td>无 GTK 构建</td><td><code>cargo build --no-default-features</code></td><td>仅协议核心；宿主环境缺 gtk4 开发包、或不需要渲染直出（自绘图标）时使用</td></tr>
-</table>
+cargo build --release
+cargo build --no-default-features   # 仅协议核心（无 GTK 环境或自绘图标时）</code></pre>
+<h3>测试</h3>
+<pre><code>cargo test                              # 单元测试任意环境可跑；生命周期用例需 session bus
+dbus-run-session -- cargo test          # 隔离总线全量运行（推荐）</code></pre>
+<ul class="note">
+  <li>生命周期用例内置 mock Item 与 mock dbusmenu，占用 Watcher 总线名：真实桌面上若已有他人 Watcher，该用例自动跳过（输出 <code>SKIPPED</code> 提示），不算失败；</li>
+  <li>生命周期覆盖：快照首事件、报到与双注册并入（NameChanged）、死亡清理、变更窗口合并、菜单流程与子层懒加载、输入路由与回执、同名换主（OwnerChanged）、停机与通道关闭。</li>
+</ul>
 
-<h2>运行示例</h2>
+<h2>3. 安装指南</h2>
+
+<h3>3.1. Linux</h3>
+<h4>路径依赖</h4>
+<p>作为路径依赖加入消费方清单：</p>
+<pre><code>[dependencies]
+breadpan = { path = "../breadpan" }   # 或发布后的版本号</code></pre>
+<p>运行前提：DBus session bus 可用，且 Watcher 总线名未被他人持有——桌面已运行托盘（任务栏 / DE Shell 内置 Watcher）时启动报 <code>NameTaken</code> 退出；须先停掉既有 Watcher，或用 <code>dbus-run-session</code> 在空总线上演示。</p>
+
+<h2>4. 补充说明</h2>
+<p>唯一示例目录 <code>examples/</code>，示例清单以本节为权威：</p>
 <pre><code>cargo run --example minimal
 cargo run --example interactions</code></pre>
 <table>
@@ -45,12 +58,6 @@ cargo run --example interactions</code></pre>
   <tr><td><code>minimal</code></td><td>打印快照（含各 Item 的标题/状态）与全部事件流——快照/出现/移除/变更/菜单变更/名称变更/换主/交互回执/内部叙述；持续消费至 Ctrl-C 或终局事件（Displaced / Fatal）</td></tr>
   <tr><td><code>interactions</code></td><td><strong>交互式宿主</strong>，与真实托盘程序同构：后台线程持续消费事件流并维护 Item 卡片册（快照重建 / Added 建卡 / Removed 删卡 / Changed 重读刷新 / NameChanged 迁卡，过程实时打印）；主线程 REPL 以「编号、精确 id 或 id 前缀」引用 Item，发起查询与全部交互，菜单互动现场读取并打印返回数据。<code>quit</code> 或 Ctrl-D 优雅停机退出</td></tr>
 </table>
-<ul class="note">
-  <li>示例清单与演示内容以 <a href="README.html">README.html</a>「实例代码」为权威；</li>
-  <li>运行前提：DBus session bus 可用，且 Watcher 总线名未被他人持有——桌面已运行托盘（任务栏 / DE Shell 内置 Watcher）时启动报 <code>NameTaken</code> 退出；须先停掉既有 Watcher，或用 <code>dbus-run-session</code> 在空总线上演示；</li>
-  <li>隔离演示：<code>dbus-run-session -- cargo run --example minimal</code>——空总线验证启动与事件循环（无真实 Item，快照为空）；</li>
-  <li>真机演示提示：无 Watcher 的裸 Wayland 会话中运行，库会接管登记中心——存量 Item（如残留的托盘应用）经反向发现进入快照，等待 Watcher 出现的应用随后以增量事件报到；停掉任一托盘应用可观察 <code>Removed</code>，操作托盘图标可观察 <code>Changed</code> / <code>InteractionResult</code>。</li>
-</ul>
 <pre><code>list                          列出在册 Item（编号 / id / 标题 / 状态 / 存活）
 info     &lt;item&gt;               查看 Item 全部属性（现场读取，零缓存）
 menu     &lt;item&gt;               读取根层菜单（条目 / 可用性 / 勾选态 / 子菜单标记）
@@ -62,23 +69,17 @@ scroll   &lt;item&gt; &lt;方向&gt; [步数]  滚轮四向（up/down/left/right
 mclick   &lt;item&gt; &lt;条目id&gt;      菜单条目点击提交（回执经事件流打印）
 alive    &lt;item&gt;               存活探测结论（零 DBus 流量）
 quit                          优雅停机退出</code></pre>
-<ul class="note">
-  <li>交互式命令一览；<code>cargo run --example interactions</code> 后输入 <code>help</code> 可随时查看；</li>
-  <li><code>&lt;item&gt;</code> 为 <code>list</code> 编号、精确 id 或唯一 id 前缀。</li>
-</ul>
 
-<h2>测试</h2>
-<pre><code>cargo test                              # 单元测试任意环境可跑；生命周期用例需 session bus
-dbus-run-session -- cargo test          # 隔离总线全量运行（推荐）</code></pre>
-<ul class="note">
-  <li>生命周期用例内置 mock Item 与 mock dbusmenu，占用 Watcher 总线名：真实桌面上若已有他人 Watcher，该用例自动跳过（输出 <code>SKIPPED</code> 提示），不算失败；</li>
-  <li>生命周期覆盖：快照首事件、报到与双注册并入（NameChanged）、死亡清理、变更窗口合并、菜单流程与子层懒加载、输入路由与回执、同名换主（OwnerChanged）、停机与通道关闭。</li>
-</ul>
 
+<ul class="note">
+  <li>隔离演示：<code>dbus-run-session -- cargo run --example minimal</code>——空总线验证启动与事件循环（无真实 Item，快照为空）；</li>
+  <li>真机演示提示：无 Watcher 的裸 Wayland 会话中运行，库会接管登记中心——存量 Item（如残留的托盘应用）经反向发现进入快照，等待 Watcher 出现的应用随后以增量事件报到；停掉任一托盘应用可观察 <code>Removed</code>，操作托盘图标可观察 <code>Changed</code> / <code>InteractionResult</code>。</li>
+</ul>
 <footer>
-  文档：<a href="README.html">README</a> ·
-  <a href="ARCHITECTURE.html">ARCHITECTURE</a> ·
-  <a href="CODE.html">CODE</a> · BUILD
+  文档：<a href="ABOUT.html">ABOUT</a> ·
+  <a href="USER.html">USER</a> ·
+  <a href="CORE.html">CORE</a> ·
+  <a href="PROVIDER.html">PROVIDER</a> · BUILD
 </footer>
 
 </main>

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadknife 用户契约</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+
+<h1>breadknife 用户契约</h1>
+<blockquote>
+  本文档面向使用方（用户与二次开发者）：总体架构、用户可见约定、边界流程、对外接口与 UI 契约。
+  能力级边界以 <a href="ABOUT.html">ABOUT.html</a> 为权威，外部依赖契约见 <a href="PROVIDER.html">PROVIDER.html</a>，实现骨架见 <a href="CORE.html">CORE.html</a>。
+</blockquote>
+
+<h2 id="sec-1">1. 术语</h2>
+<p>托盘域术语（Watcher、Item、渲染直出等）沿用成员库定义，见
+<a href="breadpan/USER.html#sec-1">breadpan/USER.html §1</a>；通知域术语（通知、事件流、紧急度、动作、关闭原因等）沿用
+<a href="bnote/USER.html#sec-1">bnote/USER.html §1</a>。本文档不重复定义。</p>
+<table>
+  <tr><th>术语</th><th>定义</th></tr>
+  <tr><td>最小化工作区</td><td>Hyprland 特殊工作区 <code>special:minimized</code>；窗口是否属于最小化集合以该工作区归属判定</td></tr>
+  <tr><td>最小化窗口</td><td>位于最小化工作区的普通窗口；最小化动作由 Hyprland 配置或外部工具提供，bread 只负责收集与恢复</td></tr>
+  <tr><td>最小化托盘</td><td>屏幕底部自动隐藏的窗口入口；按显示器收集本屏最小化窗口，提供恢复与关闭</td></tr>
+  <tr><td>窗口激活</td><td>用户点击通知动作后，通知发送方请求将其窗口置前的行为；仅在支持 <code>xdg-activation</code> 的 Wayland 会话生效</td></tr>
+</table>
+
+<h2 id="sec-2">2. 通用约定</h2>
+<ul>
+  <li><strong>缺失降级</strong>：服务 / 后端缺失时——入口组件自动隐藏（如无电池设备的电池、服务缺席的网络），弹出面板内操作项灰置并提示。</li>
+  <li><strong>边框取色</strong>：所有边框与分隔线一律取 <code>gold</code>；无边框元素不受约束。</li>
+  <li><strong>Hover</strong>：一切元素的 Hover 均为 <code>surface</code> 填充、文字色不变；组件小节另有说明的除外。</li>
+</ul>
+
+<h2 id="sec-3">3. 架构与流程</h2>
+
+<h3 id="sec-3-1">3.1. 总体架构</h3>
+<div class="diagram"><img src="diagram/breadknife-architecture.svg" alt="总体架构"></div>
+<ul class="note">
+  <li>Hyprland IPC 是唯一的外部状态来源，驱动全部任务栏更新；</li>
+  <li>托盘协议由 bread 内部封装，任务栏不接触 SNI / DBusMenu 协议细节；</li>
+  <li>有副作用（有状态）操作统一经后台执行；不影响追踪状态的操作允许直通。</li>
+</ul>
+
+<h3 id="sec-3-2">3.2. 时序：启动</h3>
+<div class="diagram"><img src="diagram/breadknife-startup.svg" alt="时序：启动"></div>
+
+<h3 id="sec-3-3">3.3. 时序：显示器插拔</h3>
+<div class="diagram"><img src="diagram/breadknife-monitor-hotplug.svg" alt="时序：显示器插拔"></div>
+
+<h3 id="sec-3-4">3.4. 时序：控制指令与热重载</h3>
+<div class="diagram"><img src="diagram/breadknife-control-reload.svg" alt="时序：控制指令与热重载"></div>
+
+<h3 id="sec-3-5">3.5. 时序：托盘右键菜单</h3>
+<div class="diagram"><img src="diagram/breadknife-tray-menu.svg" alt="时序：托盘右键菜单"></div>
+
+<h3 id="sec-3-6">3.6. 时序：通知到达</h3>
+<div class="diagram"><img src="diagram/breadknife-notification.svg" alt="时序：通知到达"></div>
+
+<h2 id="sec-4">4. 接口</h2>
+
+<h3 id="sec-4-1">4.1. Unix Socket（控制接口）</h3>
+<p>路径：<code>/run/user/$UID/bread.sock</code>；契约：文本行协议，一行一条指令，以 <code>\n</code> 结尾，处理结果不回写。由 <code>bread</code> 客户端转发（脚本亦可直接使用）。</p>
+<table>
+  <tr><th>指令</th><th>行为</th></tr>
+  <tr><td><code>open &lt;name&gt; [-m &lt;monitor&gt;]</code></td><td>打开指定窗口（缺省全部已连接显示器；<code>-m</code> 限定显示器）</td></tr>
+  <tr><td><code>close &lt;name&gt; [-m &lt;monitor&gt;]</code></td><td>关闭指定窗口（同 <code>open</code> 的显示器口径）</td></tr>
+  <tr><td><code>open-all</code> / <code>close-all</code></td><td>打开 / 关闭全部窗口</td></tr>
+  <tr><td><code>exit</code></td><td>退出 daemon（终止全部窗口进程）</td></tr>
+  <tr><td><code>reload</code></td><td>热重载：广播全部窗口按跟踪的 CSS 路径重读</td></tr>
+</table>
+
+<h3 id="sec-4-2">4.2. 控制指令模型</h3>
+<pre><code>pub enum ControlCommand {
+    Open { name: String, monitor: Option&lt;String&gt; },
+    Close { name: String, monitor: Option&lt;String&gt; },
+    OpenAll,
+    CloseAll,
+    Exit,
+    Reload,
+}</code></pre>
+
+<h2 id="sec-5">5. UI</h2>
+
+<h3 id="sec-5-1">5.1. 样式基础变量</h3>
+<div class="pal">
+  <div class="sw"><div class="chip" style="background:#231F1F"></div><div class="lab"><code>bg</code><span>#231F1F</span><em>主背景</em></div></div>
+  <div class="sw"><div class="chip" style="background:#3E3542"></div><div class="lab"><code>surface</code><span>#3E3542</span><em>次级浮层：弹窗、通知底、输入框底</em></div></div>
+  <div class="sw"><div class="chip" style="background:#D6CAB6"></div><div class="lab"><code>fg</code><span>#D6CAB6</span><em>正文文字、滑块轨道</em></div></div>
+  <div class="sw"><div class="chip" style="background:#B0B4BC"></div><div class="lab"><code>muted</code><span>#B0B4BC</span><em>中性图标</em></div></div>
+  <div class="sw"><div class="chip" style="background:#89338E"></div><div class="lab"><code>purple</code><span>#89338E</span><em>hover/选中填充、亮底上的文字</em></div></div>
+  <div class="sw"><div class="chip" style="background:#E593E7"></div><div class="lab"><code>purple-light</code><span>#E593E7</span><em>提亮：浮层上的文字、hover 高亮</em></div></div>
+  <div class="sw"><div class="chip" style="background:#9D7E4D"></div><div class="lab"><code>gold</code><span>#9D7E4D</span><em>细线、进度填充、弱文字</em></div></div>
+  <div class="sw"><div class="chip" style="background:#FFF7E4"></div><div class="lab"><code>cream</code><span>#FFF7E4</span><em>亮面背景、选中/hover 文字</em></div></div>
+  <div class="sw"><div class="chip" style="background:#CC2A47"></div><div class="lab"><code>red</code><span>#CC2A47</span><em>警告/危险</em></div></div>
+</div>
+<ul class="note">
+  <li>语义仅供参考，一切以 <a href="#sec-5-2">§5.2</a> 各组件的取用为准。</li>
+</ul>
+
+<h3 id="sec-5-2">5.2. 组件样式规范</h3>
+<p>按组件分节给出可视化样例与限定条件。注记文字构成视觉契约；样例仅作示意，数值以注记与 CSS 为准。</p>
+
+<h4 id="sec-5-2-1">5.2.1. 任务栏窗口与按钮</h4>
+<div class="mk">
+  <div class="mk-scene">
+    <div class="mk-bar" style="width:430px"></div>
+  </div>
+  <div class="mk-scene">
+    <div class="mk-btnstage"><div class="mk-btn">常规</div><div class="mk-btn hi">Hover 态</div></div>
+  </div>
+</div>
+<ul class="note">
+  <li>任务栏窗口：高 30px、四角无圆角，背景 <code>bg</code>，底边 1px 细线。</li>
+  <li>按钮：透明底、无边框、圆角 6px、padding 0；Hover 态填充 <code>surface</code>，文字色不变（通用规则见 <a href="#sec-2">§2</a>）。</li>
+  <li>内容布局为左（<a href="#sec-5-2-2">Workspace 按钮</a>）—中（活动窗口标题）—右（<a href="#sec-5-2-3">托盘</a>、<a href="#sec-5-2-4">控制中心入口</a>）三区。</li>
+</ul>
+
+<h4 id="sec-5-2-2">5.2.2. Workspace 按钮</h4>
+<div class="mk">
+  <div class="mk-scene">
+    <div class="mk-bar" style="width:260px">
+      <div class="l">
+        <div class="mk-dot"></div>
+        <div class="mk-dot fg"></div>
+        <div class="mk-rect"></div>
+        <div class="mk-rect"><div class="mk-ind"></div></div>
+        <div class="mk-rect urgent"></div>
+        <div class="mk-rect urgent"><div class="mk-ind on-urgent"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="mk-scene">
+    <div class="mk-ws-tip">
+      <div class="mk-ws-tip-title">工作区 2</div>
+      <div class="mk-ws-tip-row">文档 - BreadKnife</div>
+      <div class="mk-ws-tip-row">终端</div>
+      <div class="mk-ws-tip-row">文件</div>
+      <div class="mk-ws-tip-row">设置</div>
+      <div class="mk-ws-tip-more">...</div>
+    </div>
+  </div>
+</div>
+<ul class="note">
+  <li>从左至右：无窗口、无窗口且活跃、有窗口、有窗口且活跃、有窗口且紧急、有窗口且紧急且活跃。</li>
+  <li>基底：无窗口＝直径 4px 圆点，有窗口＝20×15px 长方形（圆角半径 10px），均取 <code>purple</code>；紧急＝长方形整体取 <code>fg</code>，仅限有窗口。</li>
+  <li>活跃叠点直径 4px 取 <code>fg</code>；紧急基底上叠点取 <code>purple</code>，紧急态即基底与叠点两色互换；无窗口且活跃时叠点与基底圆点等大重叠，视觉为单个 <code>fg</code> 圆点。</li>
+  <li>悬停工作区按钮显示窗口标题浮层：按 Hyprland 焦点历史排序（最近聚焦在前），最多 4 条；超出时第五条固定为「...」，不显示具体计数；无窗口显示「无窗口」。首期仅标题，截图预览为后续可选扩展。</li>
+  <li>浮层宽 220px、<code>surface</code> 底 <code>fg</code> 字、1px <code>gold</code> 边框、圆角 8px、内边距 6px／水平 8px；工作区名 <code>gold</code> 加粗，窗口行 1 行省略。</li>
+  <li>可见性矩阵见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>；状态过渡 150ms ease。</li>
+</ul>
+
+<h4 id="sec-5-2-3">5.2.3. 托盘与托盘菜单</h4>
+<div class="mk">
+  <div class="mk-scene">
+    <div class="mk-bar" style="width:240px">
+      <div class="r">
+        <div class="mk-tray">
+          <div class="mk-tbtn"><svg width="15" height="15" viewBox="0 0 15 15"><path fill-rule="evenodd" fill="#1a1a1a" d="M7.5 1.5a6 6 0 1 0 0 12 6 6 0 0 0 0-12zm0 3.4a2.6 2.6 0 1 1 0 5.2 2.6 2.6 0 0 1 0-5.2z"/></svg></div>
+          <div class="mk-tbtn"><svg width="15" height="15" viewBox="0 0 15 15"><path fill-rule="evenodd" fill="#f2f2f2" d="M7.5 1.5a6 6 0 1 0 0 12 6 6 0 0 0 0-12zm0 3.4a2.6 2.6 0 1 1 0 5.2 2.6 2.6 0 0 1 0-5.2z"/></svg></div>
+        </div>
+      </div>
+    </div>
+    <div class="mk-menu">
+      <div class="mk-mrow"><span class="mk-mi"></span>连接设备</div>
+      <div class="mk-mrow hi"><span class="mk-mi"></span>音量与播放</div>
+      <div class="mk-mrow"><span class="mk-chk">✓</span>开机启动</div>
+      <div class="mk-msep"></div>
+      <div class="mk-mrow dis"><span class="mk-mi"></span>不可用项</div>
+      <div class="mk-mrow"><span class="mk-mi"></span>首选项<span class="mk-arr">▸</span></div>
+    </div>
+  </div>
+</div>
+<ul class="note">
+  <li>托盘区域整体（含各图标按钮）与菜单同底色 <code>fg</code>；图标直接置于该底色上，不做按图标明暗反相的底色垫高。</li>
+  <li>图标按钮 22×22px、圆角 6px；失联图标置灰（不透明度 35%）。</li>
+  <li>图标按首见序（<a href="breadpan/USER.html#sec-1">breadpan USER §1</a>）从左到右排列：已有图标不因其它图标加入、移除或属性变化而移动，新图标追加在最右侧；同一 Item 的 id 重键保持原位。</li>
+  <li>菜单容器圆角 8px、内边距 4px、无边框，以投影与任务栏分离；菜单行圆角 4px、水平内边距 10px、最小宽 120px。</li>
+  <li>菜单文字取 <code>bg</code>；Hover 行 <code>purple</code> 填充配 <code>cream</code> 字（例外，见 <a href="#sec-2">§2</a>）；勾选标记 <code>gold</code>；子菜单箭头 <code>muted</code>；禁用行不透明度 45%。</li>
+  <li>分隔线 1px，上下边距 3px、水平边距 6px。</li>
+  <li>同级条目悬停驻留 150ms 展开子菜单；已有弹窗显示时，托盘图标悬停驻留 150ms 直接切换菜单。</li>
+</ul>
+
+<h4 id="sec-5-2-4">5.2.4. 控制中心</h4>
+<div class="mk">
+  <div class="mk-scene">
+    <div class="mk-bar" style="width:240px">
+      <div class="r">
+        <div class="mk-entry"><span>87%</span><span>12:34</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="mk-scene">
+    <div class="mk-panel">
+      <div class="mk-slab"><span>音量</span><span>60%</span></div>
+      <div class="mk-slider"><div class="mk-trough"></div><div class="mk-fill" style="width:60%"></div><div class="mk-knob" style="left:60%"></div></div>
+      <div class="mk-slab"><span>亮度</span><span>40%</span></div>
+      <div class="mk-slider"><div class="mk-trough"></div><div class="mk-fill" style="width:40%"></div><div class="mk-knob" style="left:40%"></div></div>
+    </div>
+  </div>
+</div>
+<ul class="note">
+  <li>常驻入口与弹出面板的内容构成见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>。</li>
+  <li>入口容器与通用按钮一致：透明底、圆角 6px、内边距 2px 10px，Hover 态 <code>surface</code>。</li>
+  <li>弹出面板：圆角 10px、内边距 12px、最小宽 260px。</li>
+  <li>滑块：滑轨高 4px（圆角 2px）取 <code>fg</code>，已填充段与滑块 Hover 取 <code>purple-light</code>；滑块 12px 圆形取 <code>purple</code>。</li>
+</ul>
+
+<h4 id="sec-5-2-5">5.2.5. 通知弹窗</h4>
+<div class="mk">
+  <div class="mk-scene">
+    <div class="mk-bar" style="width:300px"><div class="mk-titlezone" style="width:180px">活动窗口标题</div></div>
+    <div class="mk-notif">
+      <div class="app">应用名</div>
+      <div class="x">✕</div>
+      <div class="tt">通知标题</div>
+      <div class="bd"><div class="mk-nicon"></div><div>通知正文；过长行在中部截断并显示省略号。</div></div>
+    </div>
+  </div>
+  <div class="mk-scene">
+    <div class="mk-bar" style="width:300px"><div class="mk-titlezone" style="width:180px">活动窗口标题</div></div>
+    <div class="mk-notif crit">
+      <div class="app">应用名</div>
+      <div class="x">✕</div>
+      <div class="tt">紧急通知标题</div>
+      <div class="bd"><div class="mk-nicon"></div><div>紧急通知默认常驻，直至手动关闭。</div></div>
+    </div>
+  </div>
+</div>
+<ul class="note">
+  <li>宽 300px，单条最高 400px；圆角 15px，边框 1px；内边距 12px／水平 8px。</li>
+  <li>标题居中、正文左对齐；过长行在中部截断显示省略号；关闭按钮固定在卡片右上角。</li>
+  <li>图标左置 32px：主题名按图标主题递归查找，<code>file://</code> URI 直接加载本地文件，位图直接显示；图标与文字间距 16px。</li>
+  <li>通知携带动作时，在正文下方按顺序显示动作按钮；默认文字，<code>action-icons</code> 时以动作 key 作为图标名、label 作为提示 / 无障碍文本，图标未命中回退文字。点击按钮触发对应动作并关闭该条（<code>resident</code> 除外）；左键点击卡片触发默认动作（无 <code>default</code> 时取唯一动作）并关闭（<code>resident</code> 除外），无可用动作时仅关闭。</li>
+  <li>点击动作按钮或卡片的默认动作时，通知发送方可执行窗口激活；无可用动作、关闭、清理与超时不触发。</li>
+  <li>正文按 <code>body-markup</code> 解析规范允许的标记，不支持的标记按纯文本降级；<code>body-hyperlinks</code> 仅让 <code>http</code> / <code>https</code> / <code>mailto</code> 链接可点击，经默认处理程序打开，其它协议按纯文本；<code>body-images</code> 仅加载本地 <code>file://</code> 与图标主题名，不访问网络，按比例缩放且不超过正文区宽度，加载失败降级为替代文本。</li>
+  <li>普通与低优先级：<code>surface</code> 底 <code>fg</code> 字，应用名弱文字 <code>gold</code>；紧急：<code>red</code> 底 <code>cream</code> 字。</li>
+  <li>多条自任务栏正下方纵向堆叠，水平中心与标题区域中心对齐，新通知插入顶部（最新在最上，不按紧急度重排），条间分隔线 1px；同屏最多 10 条，超出显示隐藏计数。</li>
+  <li>超时：通知请求 0 为常驻、正数按毫秒；未指定时低优先级 30s，普通与紧急常驻。到期即时移除卡片，不另设淡出动画；超时只让贴栏卡片消失。</li>
+  <li>持久化：通知条目在 bread 运行期间保留，不落盘、不跨重启；只有用户关闭/清理、发送方撤回或同 id 替换、动作触发（<code>resident</code> 除外）、退出 bread 才彻底移除。保留语义与能力声明见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>。</li>
+  <li><code>transient</code> 绕过持久化，超时即删除条目；<code>resident</code> 使动作触发后保留条目。</li>
+  <li>提示音：<code>suppress-sound</code> 为真时不播放；否则优先 <code>sound-file</code>，其次 <code>sound-name</code>；宿主后端为 <code>canberra-gtk-play</code>，缺席时不播放且不声明 <code>sound</code> 能力。</li>
+  <li>仅当前显示器弹出；当前显示器取 Hyprland 焦点显示器，查询失败时回退首个显示器。</li>
+  <li>通知中心打开期间贴栏通知隐藏但不关闭，计时照常；隐藏期间超时的贴栏卡片消失，通知中心条目保留（<code>transient</code> 除外），关闭通知中心后不再重新显示隐藏期间超时的贴栏卡片。</li>
+  <li>弹出位置、标题居中、关闭按钮与按键、超时行为见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>。</li>
+</ul>
+
+<h4 id="sec-5-2-6">5.2.6. 通知中心</h4>
+<div class="mk">
+  <div class="mk-scene">
+    <div class="mk-bar" style="width:640px"><div class="mk-titlezone">活动窗口标题</div></div>
+    <div class="mk-nc">
+      <div class="mk-nc-head"><span class="mk-nc-clear">全部清理</span></div>
+      <div class="mk-nc-gh"><span class="arr">▾</span><span class="nm">应用 A</span><span class="mk-nc-gx">✕</span></div>
+      <div class="mk-nc-item">
+        <div class="mk-nc-tr"><span class="mk-nc-t">构建完成</span><span class="mk-nc-x">✕</span></div>
+        <div class="mk-nc-b">任务 #128 已成功结束，产物已上传。</div>
+      </div>
+      <div class="mk-nc-item crit">
+        <div class="mk-nc-tr"><span class="mk-nc-t">磁盘空间不足</span><span class="mk-nc-x">✕</span></div>
+        <div class="mk-nc-b">根分区剩余空间低于 5%，日志与历史快照仍在增长；本条正文超出两行，多余部分在此处裁剪显示省略号，悬停可查看全文内容并继续列举更多细节以填满第二行。</div>
+      </div>
+      <div class="mk-nc-item">
+        <div class="mk-nc-tr"><span class="mk-nc-t">部署完成</span><span class="mk-nc-x">✕</span></div>
+        <div class="mk-nc-b">生产环境已切换到新版本。</div>
+      </div>
+      <div class="mk-nc-more">… 还有 2 条</div>
+      <div class="mk-nc-gh"><span class="arr">▸</span><span class="nm">应用 B</span><span class="mk-nc-gx">✕</span></div>
+    </div>
+  </div>
+  <div class="mk-scene">
+    <div class="mk-bar" style="width:640px"><div class="mk-titlezone">活动窗口标题</div></div>
+    <div class="mk-nc">
+      <div class="mk-nc-unavail">
+        <div class="mk-nc-unavail-ic">!</div>
+        <div class="mk-nc-unavail-t">通知中心暂时不可用</div>
+        <div class="mk-nc-unavail-b">另一个通知服务正在运行，bread 无法接管 org.freedesktop.Notifications。</div>
+        <button class="mk-nc-retry" type="button" aria-label="重新尝试连接通知服务">
+          <span class="mk-nc-retry-ic" aria-hidden="true">↻</span>
+          <span>重试</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="note">
+  <li>点击标题区域切换通知中心：面板打开时再次点击标题区域关闭；点击弹窗外或按 Escape 同样关闭。</li>
+  <li>面板顶边紧贴任务栏底边，水平位置锚定标题区域中心（面板水平中心与标题区域水平中心对齐）；面板宽 40% 屏宽，高度随消息列表动态变化，上限 100% 屏高。</li>
+  <li>达到 100% 屏高后不再增高，面板内部滚动；面板底 <code>bg</code>，圆角 10px、边框 1px、内边距 4px。</li>
+  <li>消息按应用聚合：聚合标题为应用名，点击可展开/收缩，收缩后只保留聚合标题；组按最后一条消息的时间从新到旧排序，最后推送通知的应用在最上；组内消息同样从新到旧排序，新消息在最前。</li>
+  <li>聚合标题右侧带关闭按钮，点击清空本组全部消息；聚合标题与清理按钮：<code>fg</code> 底 <code>bg</code> 字，圆角 6px，与托盘同语言。</li>
+  <li>组内超过 3 条时，默认只显示最新 3 条，余下折叠为一条「…」条目；点击「…」展开本组全部消息，展开期间隐藏其它组，点击该组聚合标题收起并恢复其它组。</li>
+  <li>每条消息：普通 <code>surface</code> 底 <code>fg</code> 字；紧急 <code>red</code> 底 <code>cream</code> 字（与通知弹窗一致）；圆角 8px；标题至多 1 行、正文至多 2 行，超出裁剪显示省略号，悬停卡片显示全文；关闭按钮与标题同行置右。</li>
+  <li>通知携带动作时，在正文下方按顺序显示动作按钮；默认文字，<code>action-icons</code> 时以动作 key 作为图标名、label 作为提示 / 无障碍文本，图标未命中回退文字。点击按钮触发对应动作并关闭该条（<code>resident</code> 除外）；左键点击卡片触发默认动作（无 <code>default</code> 时取唯一动作）并关闭（<code>resident</code> 除外），无可用动作时仅关闭；中键或关闭按钮关闭该条。</li>
+  <li>动作回发的窗口激活行为同 <a href="#sec-5-2-5">§5.2.5</a>。</li>
+  <li>顶部一键清理全部按钮，位于右上角。</li>
+  <li>不可用态：通知服务启动失败或运行中终止时，面板保持相同外框与定位，内容区居中显示「通知中心暂时不可用」、失败说明与刷新按钮；不显示清理按钮、应用分组与消息卡。</li>
+  <li>手动重试：刷新按钮位于失败说明正文下方，点击后重新装配通知服务；成功则恢复保留的通知列表（无记录时为空态），仍失败则保留错误态。宿主不自动重试、不排队、不替换已有通知服务。</li>
+  <li>弹出触发、悬停查看全文与左键/中键行为见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>。</li>
+  <li>通知中心弹出时贴栏通知的显隐与计时见 <a href="#sec-5-2-5">§5.2.5</a>。</li>
+</ul>
+
+<h4 id="sec-5-2-7">5.2.7. 最小化托盘</h4>
+<div class="mk">
+  <div class="mk-scene">
+    <div class="mk-dock">
+      <div class="mk-dock-item">
+        <span class="mk-dock-ic"></span>
+        <span class="mk-dock-t">构建日志</span>
+        <span class="mk-dock-x">✕</span>
+      </div>
+      <div class="mk-dock-item hi">
+        <span class="mk-dock-ic"></span>
+        <span class="mk-dock-t">文档 - BreadKnife</span>
+        <span class="mk-dock-x">✕</span>
+      </div>
+      <div class="mk-dock-item">
+        <span class="mk-dock-ic"></span>
+        <span class="mk-dock-t">终端</span>
+        <span class="mk-dock-x">✕</span>
+      </div>
+    </div>
+  </div>
+</div>
+<ul class="note">
+  <li>每屏一条，面板水平居中于屏幕底部；无最小化窗口时完全隐藏，不占用底部输入区；有条目时保留 2px 高全宽触发条，指针进入后弹出面板，离开面板或触发条 300ms 后收起。</li>
+  <li>面板高 64px、内边距 6px、圆角 12px、底边距 8px；面板宽随条目增长，上限 88% 屏宽，超出时条目区横向滚动。</li>
+  <li>条目高 48px、宽 160px，图标 32px 左置，标题 1 行、超出省略，关闭键固定在条目右侧；条目横向排列。</li>
+  <li>面板 <code>surface</code> 底 <code>fg</code> 字、1px <code>gold</code> 边框；条目透明底，Hover <code>purple</code> 底 <code>cream</code> 字；关闭键取 <code>muted</code>，Hover 取 <code>red</code>；图标按窗口 class 从图标主题查找，未命中使用通用占位图标。</li>
+  <li>左键点击条目恢复窗口并聚焦；中键或关闭键关闭窗口；右键无动作（暂不实现菜单）。托盘不抢键盘焦点。</li>
+  <li>窗口进入最小化工作区即加入，按进入时间从旧到新排列，新条目追加在最右侧；标题变化实时更新，窗口移出或关闭即移除。</li>
+  <li>恢复目标为该窗口所属显示器的当前活动工作区；所属显示器移除后按 Hyprland 的新归属重新归类。</li>
+  <li>托盘不提供最小化动作；在 Hyprland 配置中把窗口移入 <code>special:minimized</code> 即可被收集，推荐键位见 <a href="BUILD.html">BUILD.html</a>。</li>
+</ul>
+
+</main>
+</body>
+</html>

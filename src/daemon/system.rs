@@ -8,7 +8,6 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use crate::daemon::notify;
 use crate::daemon::DaemonEvent;
 use crate::shared::model::{BatteryState, BluetoothState, NetworkState, SystemState, VolumeState};
 use crate::shared::protocol::MediaOp;
@@ -17,7 +16,9 @@ const FAST_POLL: Duration = Duration::from_secs(5); // 音量 / 亮度
 const SLOW_POLL: Duration = Duration::from_secs(30); // 电池 / 网络 / 蓝牙
 
 /// 媒体控制下发通道：请求线程 → system 运行时（zbus 连接绑定其创建的运行时）。
-static MEDIA_TX: OnceLock<tokio::sync::mpsc::UnboundedSender<MediaOp>> = OnceLock::new();
+type MediaReply = std::sync::mpsc::Sender<Result<(), String>>;
+static MEDIA_TX: OnceLock<tokio::sync::mpsc::UnboundedSender<(MediaOp, MediaReply)>> =
+    OnceLock::new();
 
 pub fn start(tx: Sender<DaemonEvent>) {
     std::thread::Builder::new()
@@ -45,9 +46,6 @@ pub fn start(tx: Sender<DaemonEvent>) {
                     }
                 };
                 if let Some(conn) = &session {
-                    if let Err(e) = notify::serve(conn, tx.clone()).await {
-                        eprintln!("[system] notification daemon degraded: {e}");
-                    }
                     spawn_media_worker(conn);
                 }
                 let state = Arc::new(Mutex::new(SystemState::default()));
@@ -83,33 +81,36 @@ pub fn start(tx: Sender<DaemonEvent>) {
         .expect("spawn system");
 }
 
-/// 通知记录缓存的窗口侧上限之外的守护侧留存上限。
-pub const NOTIFICATION_KEEP: usize = 50;
-
 // ── 媒体（MPRIS，session bus）──
 
 fn spawn_media_worker(conn: &zbus::Connection) {
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<MediaOp>();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(MediaOp, MediaReply)>();
     if MEDIA_TX.set(tx).is_err() {
         return; // 已就位（理论不达：start 单次）
     }
     let conn = conn.clone();
     tokio::spawn(async move {
-        while let Some(op) = rx.recv().await {
-            if let Err(e) = media_dispatch(&conn, op).await {
-                eprintln!("[system] media control failed: {e}");
-            }
+        while let Some((op, reply)) = rx.recv().await {
+            let result = media_dispatch(&conn, op).await;
+            let _ = reply.send(result);
         }
     });
 }
 
-/// 请求线程入口：投递到 system 运行时执行（连接不跨运行时使用）。
+/// 请求线程入口：投递到 system 运行时执行并阻塞等待结果（调用方在专用线程）。
 pub fn media_control(op: MediaOp) {
-    match MEDIA_TX.get() {
-        Some(tx) => {
-            let _ = tx.send(op);
-        }
-        None => eprintln!("[system] media control unavailable: no session bus"),
+    let Some(tx) = MEDIA_TX.get() else {
+        eprintln!("[system] media control unavailable: no session bus");
+        return;
+    };
+    let (reply, rx) = std::sync::mpsc::channel();
+    if tx.send((op, reply)).is_err() {
+        return;
+    }
+    match rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => eprintln!("[system] media control failed: {error}"),
+        Err(_) => eprintln!("[system] media control timed out"),
     }
 }
 
@@ -194,7 +195,10 @@ async fn battery_read(conn: &zbus::Connection) -> Option<BatteryState> {
     .ok()?;
     let percent: f64 = proxy.get_property("Percentage").await.ok()?;
     let state: u32 = proxy.get_property("State").await.unwrap_or(0);
-    Some(BatteryState { percent: percent.round() as u32, charging: state == 1 })
+    Some(BatteryState {
+        percent: percent.round() as u32,
+        charging: state == 1,
+    })
 }
 
 // ── 网络（NetworkManager，system bus）──
@@ -239,7 +243,10 @@ async fn network_read(conn: &zbus::Connection) -> Option<NetworkState> {
         "802-11-wireless" | "wifi" => "wifi",
         _ => "other",
     };
-    Some(NetworkState { kind: kind.into(), connected: !ctype.is_empty() })
+    Some(NetworkState {
+        kind: kind.into(),
+        connected: !ctype.is_empty(),
+    })
 }
 
 // ── 蓝牙（BlueZ，system bus）──
@@ -274,7 +281,10 @@ async fn bluetooth_read(conn: &zbus::Connection) -> Option<BluetoothState> {
         .ok()?;
     let tree: std::collections::HashMap<
         zbus::zvariant::OwnedObjectPath,
-        std::collections::HashMap<String, std::collections::HashMap<String, zbus::zvariant::OwnedValue>>,
+        std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+        >,
     > = om.call("GetManagedObjects", &()).await.ok()?;
     let mut powered = false;
     let mut connected = 0u32;
@@ -287,14 +297,13 @@ async fn bluetooth_read(conn: &zbus::Connection) -> Option<BluetoothState> {
                         .and_then(|v| v.downcast_ref::<bool>().ok())
                         .unwrap_or(false);
                 }
-                "org.bluez.Device1" => {
+                "org.bluez.Device1"
                     if props
                         .get("Connected")
                         .and_then(|v| v.downcast_ref::<bool>().ok())
-                        .unwrap_or(false)
-                    {
-                        connected += 1;
-                    }
+                        .unwrap_or(false) =>
+                {
+                    connected += 1;
                 }
                 _ => {}
             }
@@ -313,13 +322,12 @@ async fn poll_blocking(
 ) {
     loop {
         let s = state.clone();
-        let changed =
-            tokio::task::spawn_blocking(move || {
-                let mut g = s.lock().unwrap();
-                read(&mut g)
-            })
-            .await
-            .unwrap_or(false);
+        let changed = tokio::task::spawn_blocking(move || {
+            let mut g = s.lock().unwrap();
+            read(&mut g)
+        })
+        .await
+        .unwrap_or(false);
         if changed {
             let _ = tx.send(DaemonEvent::System(state.lock().unwrap().clone()));
         }
@@ -330,22 +338,17 @@ async fn poll_blocking(
 fn read_volume_brightness(g: &mut SystemState) -> bool {
     let mut changed = false;
 
-    let percent = run_capture(&["pamixer", "--get-volume"], |s| s.trim().parse::<u32>().ok());
-    if let Some(pct) = percent {
-        // 音量可读才更新（pamixer 缺席 → 保持 None，入口隐藏）
-        let muted = run_capture(&["pamixer", "--get-mute"], |s| Some(s.trim() == "true"))
-            .unwrap_or(false);
-        let volume = VolumeState { percent: pct, muted };
-        if g.volume.as_ref() != Some(&volume) {
-            g.volume = Some(volume);
-            changed = true;
-        }
+    // 音量：pamixer → wpctl(PipeWire) → pactl(PulseAudio)；任一可读即更新。
+    // 全部缺席时保持 None，入口隐藏。
+    let volume = read_volume();
+    if g.volume != volume {
+        g.volume = volume;
+        changed = true;
     }
 
-    // brightnessctl -m: "device,api,level,max,percent%"（内置面板）
-    let brightness = run_capture(&["brightnessctl", "-m"], |s| {
-        s.lines().next()?.rsplit(',').next()?.trim().trim_end_matches('%').parse::<u32>().ok()
-    });
+    // 亮度：brightnessctl 只认 backlight 类（避免把键盘 LED 当面板）；
+    // 无内置面板时回退 ddcutil 外接显示器。
+    let brightness = read_brightness();
     if g.brightness != brightness {
         g.brightness = brightness;
         changed = true;
@@ -353,22 +356,141 @@ fn read_volume_brightness(g: &mut SystemState) -> bool {
     changed
 }
 
+fn read_volume() -> Option<VolumeState> {
+    read_volume_pamixer()
+        .or_else(read_volume_wpctl)
+        .or_else(read_volume_pactl)
+}
+
+/// pamixer --get-volume / --get-mute（百分比整数 + true/false）。
+fn read_volume_pamixer() -> Option<VolumeState> {
+    let percent = run_capture(&["pamixer", "--get-volume"], |s| {
+        s.trim().parse::<u32>().ok()
+    })?;
+    let muted =
+        run_capture(&["pamixer", "--get-mute"], |s| Some(s.trim() == "true")).unwrap_or(false);
+    Some(VolumeState { percent, muted })
+}
+
+/// wpctl get-volume @DEFAULT_AUDIO_SINK@ → "Volume: 0.85" / "Volume: 0.85 [MUTED]"。
+fn read_volume_wpctl() -> Option<VolumeState> {
+    run_capture(
+        &["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
+        parse_wpctl_volume,
+    )
+}
+
+fn parse_wpctl_volume(s: &str) -> Option<VolumeState> {
+    let value = s.split_whitespace().nth(1)?.parse::<f64>().ok()?;
+    Some(VolumeState {
+        percent: (value * 100.0).round() as u32,
+        muted: s.contains("[MUTED]"),
+    })
+}
+
+/// pactl get-sink-volume / get-sink-mute → 输出中首个百分比 + "Mute: yes|no"。
+fn read_volume_pactl() -> Option<VolumeState> {
+    let percent = run_capture(
+        &["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
+        parse_pactl_volume,
+    )?;
+    let muted = run_capture(
+        &["pactl", "get-sink-mute", "@DEFAULT_SINK@"],
+        parse_pactl_mute,
+    )
+    .unwrap_or(false);
+    Some(VolumeState { percent, muted })
+}
+
+fn parse_pactl_volume(s: &str) -> Option<u32> {
+    s.split_whitespace().find_map(|token| {
+        token
+            .trim_end_matches(',')
+            .strip_suffix('%')?
+            .parse::<u32>()
+            .ok()
+    })
+}
+
+fn parse_pactl_mute(s: &str) -> Option<bool> {
+    Some(s.trim().ends_with("yes"))
+}
+
+fn read_brightness() -> Option<u32> {
+    read_brightness_builtin().or_else(read_brightness_external)
+}
+
+/// brightnessctl -m -c backlight → "device,class,current,percent%,max"。
+fn read_brightness_builtin() -> Option<u32> {
+    run_capture(
+        &["brightnessctl", "-m", "-c", "backlight"],
+        parse_brightnessctl_percent,
+    )
+}
+
+fn parse_brightnessctl_percent(s: &str) -> Option<u32> {
+    s.lines()
+        .next()?
+        .split(',')
+        .find_map(|field| field.trim().strip_suffix('%')?.parse::<u32>().ok())
+}
+
+/// ddcutil getvcp 10 --brief → "VCP 10 C <current> <max>"：换算为百分比。
+fn read_brightness_external() -> Option<u32> {
+    run_capture(
+        &["ddcutil", "getvcp", "10", "--brief"],
+        parse_ddcutil_percent,
+    )
+}
+
+fn parse_ddcutil_percent(s: &str) -> Option<u32> {
+    let numbers: Vec<u32> = s
+        .split_whitespace()
+        .filter_map(|token| token.parse::<u32>().ok())
+        .collect();
+    let current = *numbers.get(numbers.len().checked_sub(2)?)?;
+    let max = *numbers.last()?;
+    (max > 0).then(|| current * 100 / max)
+}
+
 // ── 执行面（窗口请求 → daemon 线程调用）──
 
 pub fn set_volume(value: u32) {
-    run_quiet(&["pamixer", "--set-volume", &value.to_string()]);
+    let percent = format!("{value}%");
+    // 与读取同一后端顺序：pamixer → wpctl → pactl；命中即止，避免重复设置。
+    if run_ok(&["pamixer", "--set-volume", &value.to_string()]) {
+        return;
+    }
+    if run_ok(&["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", &percent]) {
+        return;
+    }
+    run_quiet(&["pactl", "set-sink-volume", "@DEFAULT_SINK@", &percent]);
 }
 
 /// 亮度：brightnessctl 管内置面板，ddcutil 经 DDC/CI 管外接显示器（ARCHITECTURE §3.2）。
 pub fn set_brightness(value: u32) {
-    run_quiet(&["brightnessctl", "set", &format!("{value}%")]);
-    run_quiet(&["ddcutil", "setvcp", "10", &value.to_string()]);
+    let builtin = run_ok(&["brightnessctl", "set", &format!("{value}%")]);
+    let external = run_ok(&["ddcutil", "setvcp", "10", &value.to_string()]);
+    if !builtin && !external {
+        eprintln!("[system] brightness set failed: no usable backend");
+    }
 }
 
 // ── 子进程工具 ──
 
+/// 静默执行并返回成功与否（后端探测/回退用，不打印缺席工具的错误）。
+fn run_ok(argv: &[&str]) -> bool {
+    std::process::Command::new(argv[0])
+        .args(&argv[1..])
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
 fn run_quiet(argv: &[&str]) {
-    match std::process::Command::new(argv[0]).args(&argv[1..]).output() {
+    match std::process::Command::new(argv[0])
+        .args(&argv[1..])
+        .output()
+    {
         Ok(o) if o.status.success() => {}
         Ok(o) => {
             eprintln!(
@@ -382,9 +504,59 @@ fn run_quiet(argv: &[&str]) {
 }
 
 fn run_capture<T>(argv: &[&str], f: impl FnOnce(&str) -> Option<T>) -> Option<T> {
-    let out = std::process::Command::new(argv[0]).args(&argv[1..]).output().ok()?;
+    let out = std::process::Command::new(argv[0])
+        .args(&argv[1..])
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
     f(&String::from_utf8_lossy(&out.stdout))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn volume_backend_outputs() {
+        assert_eq!(
+            parse_wpctl_volume("Volume: 0.85\n"),
+            Some(VolumeState {
+                percent: 85,
+                muted: false
+            })
+        );
+        assert_eq!(
+            parse_wpctl_volume("Volume: 0.42 [MUTED]\n"),
+            Some(VolumeState {
+                percent: 42,
+                muted: true
+            })
+        );
+        assert_eq!(
+            parse_pactl_volume(
+                "Volume: front-left: 55705 /  85% / -4.24 dB,   front-right: 55705 /  85% / -4.24 dB\n        balance 0.00\n"
+            ),
+            Some(85)
+        );
+        assert_eq!(parse_pactl_mute("Mute: no\n"), Some(false));
+        assert_eq!(parse_pactl_mute("Mute: yes\n"), Some(true));
+    }
+
+    #[test]
+    fn brightness_backend_outputs() {
+        // device,class,current,percent%,max；取百分比而非 max。
+        assert_eq!(
+            parse_brightnessctl_percent("intel_backlight,backlight,480,50%,960\n"),
+            Some(50)
+        );
+        // 键盘 LED 也不能被当成面板亮度（读取侧已用 -c backlight 过滤）。
+        assert_eq!(
+            parse_brightnessctl_percent("input10::capslock,leds,0,0%,1\n"),
+            Some(0)
+        );
+        assert_eq!(parse_ddcutil_percent("VCP 10 C 20 100\n"), Some(20));
+        assert_eq!(parse_ddcutil_percent("VCP 10 C 100 100\n"), Some(100));
+    }
 }

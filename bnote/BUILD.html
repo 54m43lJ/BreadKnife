@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bnote 构建与开发</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>bnote 构建与开发</h1>
+<blockquote>
+  面向开发者的准备、构建、示例与测试说明。项目描述见 <a href="ABOUT.html">ABOUT.html</a>，
+  使用契约见 <a href="USER.html">USER.html</a>，外部协议见 <a href="PROVIDER.html">PROVIDER.html</a>，
+  实现规格见 <a href="CORE.html">CORE.html</a>。
+</blockquote>
+
+<h2>1. 开发者准备</h2>
+<table>
+  <tr><th>项</th><th>说明</th></tr>
+  <tr><td>Rust 工具链</td><td>rustup / cargo（edition 2024）</td></tr>
+  <tr><td>运行时依赖</td><td><code>zbus</code>（tokio 特性）、<code>tokio</code>——均由库内部持有，宿主不装配</td></tr>
+  <tr><td>开发依赖</td><td><code>futures-util</code>（协议集成测试消费信号流）</td></tr>
+  <tr><td>测试环境</td><td>DBus session bus；<strong>无需显示服务</strong></td></tr>
+</table>
+<ul class="note">
+  <li>本库为独立 crate（仓库内路径 <code>bnote/</code>），须独立编译测试，不要求仓库内其他工程存在；下述命令均在 <code>bnote/</code> 目录内执行。</li>
+</ul>
+
+<h2>2. 开发命令</h2>
+<pre><code>cargo build
+cargo build --release
+cargo test                                            # 协议集成测试
+dbus-run-session -- cargo test                        # 隔离 session bus 全量运行（推荐）
+cargo run --example server                            # 交互式测试服务器</code></pre>
+
+<h2>3. 安装指南</h2>
+
+<h3>3.1. Linux</h3>
+<h4>路径依赖</h4>
+<p>作为路径依赖加入宿主清单：</p>
+<pre><code>[dependencies]
+bnote = { path = "../bnote" }   # 或发布后的版本号</code></pre>
+<p>运行前提：DBus session bus 可用，且 <code>org.freedesktop.Notifications</code> 未被其它通知守护持有；名字被占用时 <code>Session::start</code> 返回 <code>NameTaken</code>，由宿主决定重试或降级。</p>
+
+<h2>4. 补充说明</h2>
+<ul class="note">
+  <li>协议集成测试在隔离 session bus 上运行，覆盖方法应答、事件交付与信号回发；</li>
+  <li><code>examples/server.rs</code> 经 stdin 驱动宿主 API，用于手工验证通知、关闭、动作与令牌回发；</li>
+  <li>协议原文清理版见 <code>reference/</code>，以其中的分章文件为准。</li>
+</ul>
+
+<footer>
+  文档：<a href="ABOUT.html">ABOUT</a> ·
+  <a href="USER.html">USER</a> ·
+  <a href="CORE.html">CORE</a> ·
+  <a href="PROVIDER.html">PROVIDER</a> · BUILD
+</footer>
+
+</main>
+</body>
+</html>

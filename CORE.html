@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadknife 实现骨架</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+
+<h1>breadknife 实现骨架</h1>
+
+<h2 id="sec-1">1. 文件树</h2>
+<pre><code>breadknife/               # 项目群根（单一二进制 bread：daemon / 窗口 / 客户端 三角色）
+├── Cargo.toml          # crate 清单：依赖与特性
+├── <a href="breadpan/CORE.html">breadpan/</a>             # 成员项目（内部结构见其 CORE.html）
+├── <a href="bnote/CORE.html">bnote/</a>               # 成员项目：D-Bus 通知协议封装库（内部结构见其 CORE.html）
+└── src/
+    ├── <a href="#sec-4-main">main.rs</a>           # 入口：子命令分发（daemon / open / close / …）
+    ├── daemon/           # bread daemon（Model，无 GTK）
+    │   ├── <a href="#sec-4-daemon-mod">mod.rs</a>        # 装配与事件循环；停机
+    │   ├── <a href="#sec-4-hyprland">hyprland.rs</a>   # Hyprland IPC 只读监听：显示器 / 工作区 / 活动窗口 / 最小化集合
+    │   ├── <a href="#sec-4-daemon-tray">tray.rs</a>       # breadpan 组装（Tray::start）+ 事件泵 + 交互执行 + 菜单读取
+    │   ├── <a href="#sec-4-system">system.rs</a>     # UPower / NetworkManager / MPRIS；pamixer / brightnessctl / ddcutil
+    │   ├── <a href="#sec-4-notify">notify.rs</a>     # bnote 装配 + NameTaken 重试；通知守护角色 + 提示音播放
+    │   ├── <a href="#sec-4-windows">windows.rs</a>    # 窗口进程生命周期（spawn / kill / 崩溃重启）；显示器 → 窗口映射
+    │   └── <a href="#sec-4-daemon-ipc">ipc.rs</a>        # Unix socket 服务端：请求应答 + 状态推送
+    ├── bar/              # bar 窗口进程（View，GTK4）
+    │   ├── <a href="#sec-4-bar-mod">mod.rs</a>        # 装配与 GTK 主循环；层壳窗口实例；数据分发（喂给对应模块）
+    │   ├── <a href="#sec-4-bar-ipc">ipc.rs</a>        # IPC 客户端：快照 / 推送订阅、请求投递
+    │   ├── <a href="#sec-4-style">style.rs</a>      # 按 daemon 跟踪的路径加载 CSS；reload 重读
+    │   └── modules/
+    │       ├── <a href="#sec-4-workspace">workspace.rs</a>    # 工作区条（渲染 + 手势捕获 + 悬停窗口列表）
+    │       ├── <a href="#sec-4-info">info.rs</a>        # 活动窗口图标 / 标题 + 通知中心 popover + 贴栏通知窗口 + 动作激活令牌
+    │       ├── <a href="#sec-4-dock">dock.rs</a>        # 最小化托盘：底部触发条 + 窗口条目（独立 layer-shell，无 grab）
+    │       ├── <a href="#sec-4-popup">popup.rs</a>        # 弹窗会话：grab 弹窗统一托管（含通知中心 · 根窗口 / 上级弹窗定位 · 任务栏内捕获关闭 · Escape / toggle）
+    │       ├── <a href="#sec-4-tray">tray.rs</a>         # 托盘模块：图标渲染直出 + 手势捕获 + 菜单弹窗（自绘：懒加载 / 激活 / 刷新）
+    │       └── <a href="#sec-4-center">center.rs</a>       # 控制中心入口与弹出面板
+    ├── shared/           # daemon / 窗口共用
+    │   ├── <a href="#sec-4-protocol">protocol.rs</a>   # IPC 消息类型（请求 / 应答 / 推送）
+    │   └── <a href="#sec-4-model">model.rs</a>      # 共享数据模型（窗口切片、状态增量）
+    ├── <a href="#sec-4-tests">tests.rs</a>          # 单元测试：协议回环 / 控制行解析 / 存活探测
+    └── assets/
+        └── bread.css     # 默认主题（变量定义）
+scripts/
+├── hypr-smoke.sh         # Hyprland 接口冒烟脚本
+└── resource-smoke.py     # 资源采样：CPU / 内存 / 唤醒 / RAPL 能耗</code></pre>
+<ul class="note">
+  <li>运行形态：<code>bread</code> 前台启动，<code>bread daemon</code> 自动后台化；daemon 维护 显示器 → 窗口进程 映射，随插拔 spawn / kill，窗口崩溃延时重启（有上限）。</li>
+  <li>退出：控制指令 <code>exit</code> → 终止全部窗口进程 → daemon 退出；窗口另有周期性存活检查（PID 文件 + <code>/proc</code>），确认 daemon 已退出后自主退出。</li>
+  <li><code>scripts/resource-smoke.py</code> 为开发期采样工具，不进入 daemon / 窗口运行时；指标与用法见 <a href="BUILD.html">BUILD.html</a>。</li>
+</ul>
+
+<h2 id="sec-2">2. 通用约定</h2>
+<ul>
+  <li><strong>分层</strong>：bread daemon＝Model（无 GTK；信息源与全部映射的唯一持有者）；窗口进程＝View（GTK；只渲染与本地交互）。</li>
+  <li><strong>操作执行原则</strong>：有副作用（有状态）的操作必走 daemon；不影响 daemon 追踪状态的操作允许（不强制）直通。</li>
+  <li><strong>单二进制三角色</strong>：daemon、窗口（由 daemon spawn）、客户端（指令转发）。</li>
+  <li><strong>CSS 路径</strong>：由 daemon 控制与跟踪；窗口按该路径加载内容，<code>reload</code> 指令经 daemon 广播后重读。</li>
+  <li><strong>渲染归模块</strong>：窗口主进程只维护窗口实例与数据分发，一切渲染（含托盘菜单、通知中心与贴栏通知）由对应模块包干。</li>
+</ul>
+
+<h2 id="sec-3">3. SBOM</h2>
+<table>
+  <tr><th>依赖</th><th>用途</th></tr>
+  <tr><td><code>gtk4</code></td><td>窗口进程 GUI：控件、布局、图标主题</td></tr>
+  <tr><td><code>gtk4-layer-shell</code></td><td>任务栏、贴栏通知与最小化托盘的 Wayland layer surface 锚定</td></tr>
+  <tr><td><code>zbus</code></td><td>daemon 侧 D-Bus 客户端：UPower / NetworkManager / BlueZ / MPRIS</td></tr>
+  <tr><td><code>breadpan</code></td><td>成员库：SNI / DBusMenu 托盘协议栈</td></tr>
+  <tr><td><code>bnote</code></td><td>成员库：<code>org.freedesktop.Notifications</code> 协议</td></tr>
+  <tr><td><code>futures</code></td><td>以 <code>block_on</code> 驱动 bnote 的异步事件流</td></tr>
+  <tr><td><code>socket2</code></td><td>Hyprland IPC 套接字监听</td></tr>
+  <tr><td><code>serde</code> / <code>serde_json</code></td><td>Hyprland 状态与事件数据解析</td></tr>
+  <tr><td><code>base64</code></td><td>图标位图数据解码</td></tr>
+  <tr><td><code>clap</code></td><td>命令行参数解析</td></tr>
+</table>
+<ul class="note">
+  <li>GTK4 仅窗口进程链接；daemon 无 GTK。Wayland 层壳由 <code>gtk4-layer-shell</code> 提供。</li>
+  <li>D-Bus 由 <code>zbus</code> 消费；通知守护由 bnote 自持连接（<code>org.freedesktop.Notifications</code>，session bus），托盘域由 breadpan 自持连接。</li>
+  <li>合成器通信走 Hyprland IPC（Unix Socket，daemon 只读监听）；调节后端为 <code>pamixer</code> / <code>brightnessctl</code> / <code>ddcutil</code>。</li>
+</ul>
+
+<h2 id="sec-4">4. 内部类型与方法签名</h2>
+<p>只列关键内部类型与方法；条目承载签名与一行用途，方法内部步骤归 <a href="#sec-5">§5</a> 调用栈。标注 <code>//见 USER §xx.xx</code> 的条目引用 USER（USER.html）已定义语义，其余为与实现同步的 Rust 形体签名；共享模型字段以本节类型定义为契约。</p>
+
+<h3 id="sec-4-main">4.1. main.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>fn main();</code></pre>
+
+<h3 id="sec-4-daemon-mod">4.2. daemon/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn run(control_path: &amp;str) -&gt; Result&lt;(), String&gt;;
+
+pub const MINIMIZED_WORKSPACE: &amp;str;            // 推荐值 "special:minimized"
+
+pub struct Daemon {
+    pub(crate) rx: Receiver&lt;DaemonEvent&gt;,
+    pub(crate) tray: Option&lt;TrayHandle&gt;,
+    pub(crate) tray_registry: HashMap&lt;String, TrayItemView&gt;,
+    pub(crate) tray_order: Vec&lt;String&gt;,               // 图标显示序（首见序）
+    pub(crate) notification: Option&lt;NotificationService&gt;,
+    pub(crate) notifications: VecDeque&lt;NotificationRecord&gt;,
+    pub(crate) minimized: Vec&lt;MinimizedWindow&gt;,
+    pub(crate) system: SystemState,
+    pub(crate) windows: HashMap&lt;String, WindowProc&gt;,
+    pub(crate) monitors: Vec&lt;MonitorInfo&gt;,
+    pub(crate) workspaces: Vec&lt;WorkspaceInfo&gt;,
+    pub(crate) desired: HashSet&lt;String&gt;,
+}
+
+pub enum DaemonEvent {
+    Hyprland(hyprland::HyprlandEvent),
+    Tray(TrayEvent),
+    WindowMessage { id: u64, request: Request, out: Sender&lt;Frame&gt; },
+    Control(ControlCommand),
+    System(SystemState),
+    Notification(NotificationRecord),
+    NotificationClosed(u32),
+    NotificationStatus(NotificationStatus),
+    ChildExited { monitor: String },
+    TrayView { id: String, view: TrayItemView },
+    TrayViewGone { id: String },
+}
+
+impl Daemon {
+    fn run_loop(&amp;mut self);                                  // 事件循环；滴答超时档兼作重同步去抖窗口
+    fn handle(&amp;mut self, ev: DaemonEvent) -&gt; bool;           // false = 退出循环
+    fn on_hyprland(&amp;mut self, ev: hyprland::HyprlandEvent);
+    fn clear_urgent_on_active_transition(&amp;mut self);
+    fn resync(&amp;mut self);                                    // 全量重读 + 窗口进程对齐 + 切片推送
+    fn rebuild_workspace_slices(&amp;mut self);
+    fn push_workspace_slices(&amp;mut self);
+    fn spawn_window(&amp;mut self, monitor: &amp;str);
+    fn kill_window(&amp;mut self, monitor: &amp;str);
+    fn on_child_exited(&amp;mut self, monitor: String);
+    fn on_tray(&amp;mut self, ev: TrayEvent);
+    fn reread_tray_view(&amp;mut self, id: String);              // 独立线程现场重读
+    fn degrade_tray(&amp;mut self);
+    fn on_window_request(&amp;mut self, id: u64, request: Request, out: Sender&lt;Frame&gt;);
+    fn exec_tray(&amp;self, out: &amp;Sender&lt;Frame&gt;, id: u64,
+                 f: impl FnOnce(&amp;TrayHandle) -&gt; Response + Send + 'static);
+    fn on_control(&amp;mut self, cmd: ControlCommand);
+    fn on_notification(&amp;mut self, record: NotificationRecord);
+    fn on_notification_closed(&amp;mut self, id: u32);
+    fn on_notification_status(&amp;mut self, status: NotificationStatus);
+    fn close_notification(&amp;mut self, id: u32, reason: NotificationCloseReason);
+    fn close_notification_group(&amp;mut self, app_name: &amp;str);
+    fn clear_notifications(&amp;mut self);
+    fn activate_notification(&amp;mut self, id: u32, action_key: Option&lt;&amp;str&gt;,
+                             activation_token: Option&lt;&amp;str&gt;);
+    fn retry_notification(&amp;mut self);
+    fn resync_minimized(&amp;mut self);
+    fn minimize_window(&amp;mut self, address: &amp;str);
+    fn restore_minimized(&amp;mut self, address: &amp;str);
+    fn close_minimized(&amp;mut self, address: &amp;str);
+    fn push_minimized(&amp;self);
+    fn open_windows(&amp;mut self, name: String, monitor: Option&lt;String&gt;);
+    fn snapshot_for(&amp;self, monitor: &amp;str) -&gt; WindowSnapshot;
+    fn push_to(&amp;self, monitor: &amp;str, push: Push);
+    fn broadcast(&amp;self, push: Push);
+    fn shutdown(&amp;mut self);
+}
+
+pub enum ControlCommand;     //见 USER §4.2</code></pre>
+
+<h3 id="sec-4-hyprland">4.3. daemon/hyprland.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct MonitorInfo { pub name: String, pub focused: bool, pub active_ws: Option&lt;WorkspaceRef&gt; }
+pub struct WorkspaceRef { pub id: i64, pub name: String }
+pub struct WorkspaceInfo { pub id: i64, pub name: String, pub monitor: String, pub windows: u64 }
+pub struct WorkspaceRuleInfo { pub workspace_string: String, pub enabled: bool, pub monitor: String }
+pub struct ClientInfo {
+    pub address: String,
+    pub class: String,
+    pub title: String,
+    pub focus_history_id: i32,      // focusHistoryID：0 = 最近聚焦
+    pub monitor: String,            // 已由 monitor id 解析为显示器名；无效时回退当前聚焦显示器
+    pub workspace: WorkspaceRef,
+}
+
+pub fn monitors() -&gt; Vec&lt;MonitorInfo&gt;;
+pub fn workspaces() -&gt; Vec&lt;WorkspaceInfo&gt;;
+pub fn clients() -&gt; Vec&lt;ClientInfo&gt;;
+pub fn current_monitor() -&gt; Option&lt;String&gt;;                                        // monitors -j 的 focused；失败回退首个
+pub fn workspace_rules() -&gt; Vec&lt;WorkspaceRuleInfo&gt;;
+pub fn rule_workspace(rule: &amp;WorkspaceRuleInfo) -&gt; Option&lt;(String, Option&lt;i64&gt;)&gt;;   // 静态选择器 → (名称, id 提示)
+pub fn normalize_addr(addr: &amp;str) -&gt; String;                                      // 去 0x 前缀、小写
+pub fn workspace_of_client(address: &amp;str) -&gt; Option&lt;i64&gt;;
+pub fn active_workspace_name(monitor: &amp;str) -&gt; Option&lt;String&gt;;
+pub fn dispatch_workspace(target: &amp;str);                                          // Lua dispatch → 经典语法回退
+pub fn move_to_workspace(address: &amp;str, target: &amp;str);
+pub fn focus_window(address: &amp;str);
+pub fn close_window(address: &amp;str);
+pub fn watch(tx: Sender&lt;DaemonEvent&gt;);                                            // socket2 只读监听线程
+
+pub enum HyprlandEvent {
+    MonitorAdded(String),
+    MonitorRemoved(String),
+    ActiveWindow { class: String, title: String },
+    ActiveWindowAddr(String),
+    WindowTitle { addr: String, title: String },
+    Urgent { addr: String },
+    MoveWindow { addr: String, workspace: String },
+    OpenWindow { addr: String, workspace: String, class: String, title: String },
+    CloseWindow(String),
+    Minimized { addr: String, minimized: bool },
+    Resync,
+}</code></pre>
+<ul class="note">
+  <li><code>move_to_workspace</code> / <code>focus_window</code> / <code>close_window</code> 均以窗口 <code>address:</code> 选择器执行 Lua dispatch，失败时回退经典语法；窗口地址统一经 <code>normalize_addr</code> 归一。</li>
+  <li><code>minimized</code> 事件由外部 taskbar 通过 wlr-foreign-toplevel 请求触发；Hyprland 不因普通 CSD 最小化请求产生该事件。</li>
+  <li><code>clients()</code> 过滤最小化集合时消费 <code>workspace.name == MINIMIZED_WORKSPACE</code>；<code>monitor</code> 无效时回退当前聚焦显示器。工作区悬停列表同时消费 <code>title</code> / <code>class</code> / <code>focusHistoryID</code>，按焦点历史升序排列。</li>
+  <li><code>active_workspace_name</code> 返回普通工作区名；特殊工作区显示时取底层普通工作区，避免恢复目标仍是 <code>special:minimized</code>。</li>
+  <li><code>current_monitor</code> 经 <code>hyprctl -j monitors</code> 取 <code>focused</code> 显示器；查询失败或无 focused 时回退首个显示器，无显示器时返回 <code>None</code>。不启用 <code>.socket.sock</code> 查询，保持 socket2 只读与单一查询路径。</li>
+</ul>
+
+<h3 id="sec-4-daemon-tray">4.4. daemon/tray.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn start(tx: Sender&lt;DaemonEvent&gt;) -&gt; Option&lt;TrayHandle&gt;;    // 进程级组装一次；失败降级空托盘
+
+pub fn view_of(item: TrayItem) -&gt; TrayItemView;
+pub fn outcome_of(outcome: breadpan::InteractionOutcome) -&gt; InteractionOutcome;
+
+pub fn interact(handle: &amp;TrayHandle, item: &amp;str, input: &amp;InteractInput)
+    -&gt; Result&lt;InteractionOutcome, breadpan::TrayError&gt;;
+pub fn menu_read(handle: &amp;TrayHandle, item: &amp;str)
+    -&gt; Result&lt;MenuSnapshot, breadpan::TrayError&gt;;
+pub fn menu_expand(handle: &amp;TrayHandle, item: &amp;str, entry: i32)
+    -&gt; Result&lt;MenuSnapshot, breadpan::TrayError&gt;;
+pub fn menu_activate(handle: &amp;TrayHandle, item: &amp;str, entry: i32)
+    -&gt; Result&lt;InteractionOutcome, breadpan::TrayError&gt;;</code></pre>
+<ul class="note">
+  <li>组装：daemon 进程内 <code>Tray::start</code> 一次完成——登记中心（Watcher 角色）在会话总线就位、存量 Item 反向发现、事件通道建立。</li>
+  <li>封装边界：托盘域总线互动全部由 breadpan 封装于 daemon；窗口不接触 SNI / DBusMenu 协议细节、不持有托盘 DBus 连接，只接收数据并渲染。</li>
+  <li>执行位置：全部托盘调用（交互、菜单读取）在 daemon 内执行，breadpan 的同步阻塞不冻结窗口。</li>
+  <li>驱动源：breadpan 事件（快照、生命周期、属性、菜单变更、回执）是托盘 UI 更新的唯一驱动源，经 daemon 转换为窗口推送。</li>
+  <li>显示序沿用 breadpan 首见序：<code>TrayEvent::Snapshot</code> 按原序建立 <code>tray_order</code>，<code>TrayEvent::Added</code> 立即追加右端，<code>NameChanged</code> 原位换键并广播 <code>TrayUpdate::Renamed</code>（不补 Removed / Added），<code>Removed</code> 删除；<code>TrayView</code> 只更新内容、不改变顺序；daemon 不按 id 重排。</li>
+</ul>
+
+<h3 id="sec-4-system">4.5. daemon/system.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn start(tx: Sender&lt;DaemonEvent&gt;);    // UPower / NetworkManager / BlueZ / MPRIS 订阅
+pub fn media_control(op: MediaOp);        // MPRIS 操作（阻塞调用线程）
+pub fn set_volume(value: u32);            // pamixer
+pub fn set_brightness(value: u32);        // brightnessctl / ddcutil</code></pre>
+
+<h3 id="sec-4-notify">4.6. daemon/notify.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub const NOTIFICATION_COMMAND_TIMEOUT_MS: u64;   // 推荐值 5_000
+pub const SOUND_BACKEND: &amp;str;                    // 推荐值 "canberra-gtk-play"
+
+pub struct NotificationService {
+    session: bnote::SessionHandle,
+    command_tx: Sender&lt;NotificationCommand&gt;,
+    event_thread: JoinHandle&lt;()&gt;,
+    command_thread: JoinHandle&lt;()&gt;,
+}
+
+pub enum NotificationCommand {
+    Close { id: u32, reason: bnote::CloseReason },
+    InvokeAction { id: u32, key: String, activation_token: Option&lt;String&gt; },
+    Shutdown,
+}
+
+pub fn start(tx: Sender&lt;DaemonEvent&gt;) -&gt; Result&lt;NotificationService, bnote::Error&gt;;
+
+impl NotificationService {
+    pub fn close(&amp;self, id: u32, reason: bnote::CloseReason);
+    pub fn invoke_action(&amp;self, id: u32, key: &amp;str,
+                        activation_token: Option&lt;&amp;str&gt;);
+    pub fn shutdown(&amp;self);
+}
+
+fn session_config() -&gt; bnote::SessionConfig;
+fn unavailable_message(err: bnote::Error) -&gt; String;
+fn to_record(notice: bnote::Notice) -&gt; NotificationRecord;
+pub fn sound_available() -&gt; bool;                 // PATH 中存在 SOUND_BACKEND
+pub fn play_sound(record: &amp;NotificationRecord);</code></pre>
+<ul class="note">
+  <li><code>start</code> 同步建立 bnote 会话；事件线程以 <code>futures::executor::block_on(NoticeReceiver::recv())</code> 消费异步事件流，命令线程串行执行阻塞的 <code>SessionHandle</code> 调用。</li>
+  <li>事件映射：<code>Notify</code> → <code>DaemonEvent::Notification</code>，<code>Close</code> → <code>NotificationClosed</code>，<code>Fatal</code> → <code>NotificationStatus(Unavailable { message })</code>。</li>
+  <li><code>to_record</code> 原样映射 <code>Notice</code> 的 id / app_name / icon / summary / body / actions / action_icons / urgency / expire_timeout_ms / transient / resident / sound_file / sound_name / suppress_sound；窗口只消费共享模型，不接触 bnote 类型。</li>
+  <li><code>unavailable_message</code> 对 <code>NameTaken</code> 返回固定文案，其它错误返回 <code>Error</code> 的文本。</li>
+  <li>能力清单与语义见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>；<code>SessionConfig.capabilities</code> 返回 §4.5 声明的能力。</li>
+  <li>服务器信息：name <code>bread</code>、vendor <code>BreadKnife</code>、version 取 <code>env!("CARGO_PKG_VERSION")</code>、spec_version <code>1.2</code>；<code>command_timeout_ms</code> 取 <code>NOTIFICATION_COMMAND_TIMEOUT_MS</code>（推荐值 5_000）。</li>
+  <li>手动重试由通知中心的刷新按钮触发 <code>Request::NotificationRetry</code>；daemon 若已有服务则先停机，再重新调用 <code>NotificationService::start</code>，不排队、不替换已有通知服务。</li>
+  <li>命令线程失败记录日志，并按 bnote 的错误建议处置（<code>Timeout</code> 可重试或重建会话、<code>Stopped</code> 重建会话）；窗口 UI 乐观更新，重连快照时校正。</li>
+  <li><code>invoke_action</code> 在同一命令线程内按序调用 <code>SessionHandle::activation_token</code>（token 为 <code>Some</code> 时）与 <code>SessionHandle::invoke_action</code>。</li>
+  <li>提示音：<code>suppress_sound</code> 为真跳过；<code>sound_file</code> 用 <code>SOUND_BACKEND -f</code>，<code>sound_name</code> 用 <code>SOUND_BACKEND -i</code>；命令异步 spawn、不等待，失败只记日志。启动时 <code>sound_available</code> 检测 PATH，缺席则能力清单不声明 <code>sound</code>。</li>
+</ul>
+
+<h3 id="sec-4-windows">4.7. daemon/windows.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct WindowProc {
+    pub child: std::process::Child,
+    pub out: Option&lt;Sender&lt;Frame&gt;&gt;,    // Hello 后登记的推送通道；None = 未接入 / 已断开
+    pub killing: bool,
+    pub started: Instant,
+}
+
+pub fn spawn(tx: &amp;Sender&lt;DaemonEvent&gt;, monitor: &amp;str, window_socket: &amp;str) -&gt; Option&lt;WindowProc&gt;;</code></pre>
+
+<h3 id="sec-4-daemon-ipc">4.8. daemon/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn serve_control(path: &amp;str, tx: Sender&lt;DaemonEvent&gt;) -&gt; std::io::Result&lt;()&gt;;
+pub fn serve_windows(path: &amp;str, tx: Sender&lt;DaemonEvent&gt;) -&gt; std::io::Result&lt;()&gt;;
+
+pub fn reply(out: &amp;Sender&lt;Frame&gt;, id: u64, response: Response);
+pub fn push(out: &amp;Sender&lt;Frame&gt;, push: Push);
+pub fn hello_reply(out: &amp;Sender&lt;Frame&gt;, id: u64, snapshot: WindowSnapshot);    // 先快照推送、后应答</code></pre>
+
+<h3 id="sec-4-bar-mod">4.9. bar/mod.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn run(monitor: &amp;str, socket: &amp;Path) -&gt; Result&lt;(), String&gt;;
+
+pub struct WindowApp {
+    app: gtk::Application,
+    ipc: Arc&lt;IpcClient&gt;,
+    ui_tx: Sender&lt;UiTask&gt;,
+    workspace: WorkspaceWidget,
+    info: InfoCenterWidget,
+    dock: DockWidget,
+    tray: TrayWidget,
+    center: CenterWidget,
+}
+
+pub enum UiTask {
+    Push(Push),
+    TrayInteractDone { item: String, result: Result&lt;Response, String&gt; },
+    TrayExpandDone { item: String, entry: i32, result: Result&lt;Response, String&gt; },
+    TrayActivateDone { item: String, result: Result&lt;Response, String&gt; },
+    TrayMenuReadDone { item: String, result: Result&lt;Response, String&gt; },
+    TrayHoverMenu { item: String, token: u64, result: Result&lt;Response, String&gt; },
+}
+
+impl WindowApp {
+    pub fn create(app: &amp;Application, monitor: &amp;str, socket: &amp;Path) -&gt; Result&lt;Rc&lt;Self&gt;, String&gt;;
+    fn handle_task(&amp;self, task: UiTask);
+    fn handle_push(&amp;self, push: Push);
+    fn apply_snapshot(&amp;self, snapshot: &amp;WindowSnapshot);
+}</code></pre>
+<ul class="note">
+  <li><code>Notification</code> → <code>InfoCenterWidget::upsert_center</code>；<code>NotificationPopup</code> → <code>push_popup</code>；<code>NotificationRemoved</code> / <code>NotificationCleared</code> → 同步通知中心与贴栏栈。</li>
+  <li><code>State</code> / <code>Snapshot</code> 携带 <code>NotificationStatus</code>，据此更新中心不可用态并隐藏贴栏通知；携带的 <code>minimized</code> 列表喂给 <code>DockWidget</code>。</li>
+</ul>
+
+<h3 id="sec-4-bar-ipc">4.10. bar/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct IpcClient {
+    stream: Mutex&lt;UnixStream&gt;,
+    next_id: AtomicU64,
+    pending: Mutex&lt;HashMap&lt;u64, Sender&lt;Response&gt;&gt;&gt;,
+    ui_tx: Sender&lt;UiTask&gt;,
+    monitor: String,
+}
+
+impl IpcClient {
+    pub fn connect(path: &amp;Path, monitor: &amp;str, ui_tx: Sender&lt;UiTask&gt;) -&gt; Result&lt;Arc&lt;Self&gt;, String&gt;;
+    pub fn request(&amp;self, request: Request) -&gt; Result&lt;Response, String&gt;;    // 阻塞；失败重连一次重试
+}</code></pre>
+
+<h3 id="sec-4-style">4.11. bar/style.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub fn load(path: &amp;str) -&gt; Result&lt;(), String&gt;;
+pub fn reload(path: &amp;str) -&gt; Result&lt;(), String&gt;;</code></pre>
+
+<h3 id="sec-4-workspace">4.12. bar/modules/workspace.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct WorkspaceWidget {
+    pub container: gtk::Box,
+    ipc: Arc&lt;IpcClient&gt;,
+    buttons: RefCell&lt;Vec&lt;gtk::Button&gt;&gt;,
+}
+
+impl WorkspaceWidget {
+    pub fn new(ipc: Arc&lt;IpcClient&gt;) -&gt; Self;
+    pub fn rebuild(&amp;self, states: &amp;[WorkspaceState]);
+}
+
+fn build_ws_tooltip(name: &amp;str, windows: &amp;[WorkspaceWindow]) -&gt; gtk::Box;</code></pre>
+<ul class="note">
+  <li><code>make_button</code> 以 <code>query_tooltip</code> 设置自定义浮层：工作区名加粗，窗口标题按焦点历史排序，最多 4 列；超出时第五条固定为「...」，空工作区显示「无窗口」。首期不加载截图。</li>
+  <li>浮层宽 220px，样式类 <code>ws-tip*</code>；窗口标题单行省略；点击与滚轮切换行为不变。</li>
+</ul>
+
+<h3 id="sec-4-info">4.13. bar/modules/info.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct InfoCenterWidget {
+    pub container: gtk::Box,
+    ipc: Arc&lt;IpcClient&gt;,
+    title_label: gtk::Label,
+    center: gtk::Popover,
+    notification_window: Rc&lt;NotificationWindow&gt;,
+    records: RefCell&lt;Vec&lt;NotificationRecord&gt;&gt;,
+}
+
+impl InfoCenterWidget {
+    pub fn new(ipc: Arc&lt;IpcClient&gt;, monitor: &amp;str, window: &amp;gtk::Window,
+               popup: Rc&lt;PopupManager&gt;) -&gt; Self;
+    pub fn set_active(&amp;self, active: &amp;ActiveWindow);
+    pub fn toggle_center(&amp;self);
+    pub fn set_notification_status(&amp;self, status: &amp;NotificationStatus);
+    pub fn set_records(&amp;self, records: &amp;[NotificationRecord]);
+    pub fn upsert_center(&amp;self, record: NotificationRecord);
+    pub fn remove_notification(&amp;self, id: u32);
+    pub fn clear_notifications(&amp;self, app_name: Option&lt;&amp;str&gt;);
+    pub fn push_popup(&amp;self, record: NotificationRecord);
+    pub fn set_notification_retry(&amp;self, retry: Rc&lt;dyn Fn()&gt;);
+}
+
+fn activation_token() -&gt; Option&lt;String&gt;;   // 动作点击时现场生成激活令牌
+
+struct NotificationWindow {
+    window: gtk::Window,
+    container: gtk::Box,
+    records: RefCell&lt;Vec&lt;NotificationRecord&gt;&gt;,
+    timers: RefCell&lt;HashMap&lt;u32, glib::SourceId&gt;&gt;,
+    anchor: gtk::Widget,
+}
+
+impl NotificationWindow {
+    fn new(ipc: Arc&lt;IpcClient&gt;, monitor: &amp;str, window: &amp;gtk::Window,
+           anchor: &amp;impl IsA&lt;gtk::Widget&gt;) -&gt; Rc&lt;Self&gt;;
+    fn push(&amp;self, record: NotificationRecord);
+    fn remove(&amp;self, id: u32);
+    fn clear(&amp;self, app_name: Option&lt;&amp;str&gt;);
+    fn set_status(&amp;self, status: &amp;NotificationStatus);
+    fn set_center_open(&amp;self, open: bool);
+    fn show(&amp;self);
+    fn hide(&amp;self);
+    fn rebuild(&amp;self);
+}
+
+pub const POPUP_VISIBLE_MAX: usize;        // 推荐值 10
+pub const GROUP_PREVIEW_COUNT: usize;      // 推荐值 3
+pub const POPUP_LOW_TIMEOUT_MS: u64;       // 推荐值 30_000；仅 Low 未指定超时时使用</code></pre>
+<ul class="note">
+  <li><code>InfoCenterWidget::new</code> 先建标题容器，再创建通知中心 popover（<code>PopupManager</code> 组 <code>info</code>）与独立的 <code>NotificationWindow</code>；贴栏通知不参与 <code>PopupManager</code>。</li>
+  <li><code>title_label</code> 的点击手势绑定 <code>toggle_center</code>：已打开则 <code>PopupManager::close_group("info")</code>，否则 <code>PopupManager::open(center, "info")</code> 并调用 <code>NotificationWindow::set_center_open(true)</code>；<code>center</code> 的关闭信号调用 <code>NotificationWindow::set_center_open(false)</code>，覆盖再次点击标题区域、点击弹窗外与 Escape。</li>
+  <li><code>NotificationWindow</code> 是独立 layer-shell 窗口，不 grab；生命周期由每条通知的计时器与显式关闭请求管理，位置水平中心对齐标题区域。</li>
+  <li>中心记录按到达顺序新→旧保存；按应用聚合，组按最后一条消息时间新→旧，组内同样新→旧。组标题点击展开/收缩，收缩后只保留聚合标题，展开时只显示该组；组标题右侧关闭按钮清空本组。</li>
+  <li>组内超过 <code>GROUP_PREVIEW_COUNT</code> 条时只显示最新 <code>GROUP_PREVIEW_COUNT</code> 条 + 「…」条目；点击「…」展开该组全部消息，其它组隐藏。</li>
+  <li>标题/正文因裁剪省略时，将完整文本设为对应控件的 tooltip；悬停消息卡显示全文。</li>
+  <li>贴栏通知窗口内多张卡片纵向堆叠；新条在最上，同 id 原位替换并重置计时，超过 <code>POPUP_VISIBLE_MAX</code> 条显示隐藏计数。有限超时的条目独立计时；超时仅移除贴栏卡片，<code>transient</code> 记录同时发送 <code>NotificationClose { id, reason: Expired }</code>，非 transient 记录的中心条目保留。</li>
+  <li>超时取 <code>NotificationRecord.expire_timeout_ms</code>：<code>Some(0)</code> 常驻，<code>Some(ms)</code> 按 ms；<code>None</code> 时低优先级取 <code>POPUP_LOW_TIMEOUT_MS</code>，普通与紧急常驻。常驻条目不创建计时器。</li>
+  <li>通知中心打开时 <code>NotificationWindow::set_center_open(true)</code>：窗口隐藏，记录与计时器保留；关闭时重新显示未过期记录。期间到达的通知只入栈，不显示。</li>
+  <li><code>show</code> 仅在记录非空且窗口不可见时设置窗口可见；空栈不创建可见窗口；<code>hide</code> 仅隐藏，不清理记录。</li>
+  <li>动作按钮按 <code>actions</code> 顺序显示；默认文字，<code>action_icons</code> 为真且图标命中时用 action key 作为图标名、label 作为 tooltip / 无障碍文本，未命中回退文字。按钮发送 <code>NotificationActivate { id, action_key: Some(key), activation_token }</code>，左键点击卡片发送 <code>NotificationActivate { id, action_key: None, activation_token }</code>。</li>
+  <li><code>activation_token()</code> 只由动作按钮与左键默认动作调用；中键、关闭按钮、清空、超时与通知中心开关不调用；令牌不缓存、不复用。</li>
+  <li>daemon 触发动作后关闭该条（<code>resident</code> 保留）；无可用动作时左键仅关闭该条。贴栏卡片的中键/关闭按钮发送 <code>NotificationClose { id, reason: Dismissed }</code>，右键发送 <code>NotificationClear</code>；中心内的消息与组按钮复用关闭 / 动作请求。</li>
+  <li>通知中心的消息卡同样渲染动作按钮；默认文字，<code>action_icons</code> 为真且图标命中时用图标。点击发送 <code>NotificationActivate { id, action_key: Some(key), activation_token }</code>。</li>
+  <li><code>remove_notification</code> / <code>clear_notifications</code> 同时更新中心列表与贴栏通知窗口；快照只填充通知中心，贴栏通知窗口不重放历史。</li>
+  <li>服务不可用时中心显示失败说明与刷新按钮，贴栏通知窗口隐藏但保留记录。</li>
+  <li>图标三态：<code>None</code> 隐藏；<code>Name</code> 为主题名或 <code>file://</code> URI，主题名按图标主题递归查找、URI 直接加载本地文件；<code>Pixels</code> 转纹理。任一加载未命中按缺失降级隐藏。</li>
+</ul>
+
+<h3 id="sec-4-dock">4.14. bar/modules/dock.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct DockWidget {
+    trigger: gtk::Window,
+    panel: gtk::Window,
+    items: gtk::Box,
+    monitor: String,
+    ipc: Arc&lt;IpcClient&gt;,
+    data: RefCell&lt;Vec&lt;MinimizedWindow&gt;&gt;,
+    hide_timer: RefCell&lt;Option&lt;glib::SourceId&gt;&gt;,
+}
+
+impl DockWidget {
+    pub fn new(ipc: Arc&lt;IpcClient&gt;, monitor: &amp;str) -&gt; Rc&lt;Self&gt;;
+    pub fn set_items(&amp;self, items: &amp;[MinimizedWindow]);
+    fn rebuild(&amp;self);
+    fn show_panel(&amp;self);
+    fn hide_panel(&amp;self);
+    fn schedule_hide(&amp;self);
+    fn cancel_hide(&amp;self);
+    fn on_restore(&amp;self, address: &amp;str);
+    fn on_close(&amp;self, address: &amp;str);
+}
+
+pub const DOCK_TRIGGER_HEIGHT: i32;     // 推荐值 2
+pub const DOCK_HIDE_DELAY_MS: u64;      // 推荐值 300
+pub const DOCK_ITEM_WIDTH: i32;         // 推荐值 160
+pub const DOCK_MAX_WIDTH_RATIO: f64;    // 推荐值 0.88</code></pre>
+<ul class="note">
+  <li><code>trigger</code> 与 <code>panel</code> 是两个独立 layer-shell：<code>trigger</code> 为 2px 全宽底部条，<code>panel</code> 宽度按条目数计算并水平居中；两者 <code>exclusive_zone=0</code>、无 grab、键盘交互 none。</li>
+  <li><code>set_items</code> 过滤 <code>monitor</code> 与本窗口一致的最小化窗口；空列表隐藏 trigger 与 panel；非空时 trigger 常驻，panel 仅在指针进入 trigger 或 panel 时显示。</li>
+  <li>指针离开 panel 或 trigger 后 <code>DOCK_HIDE_DELAY_MS</code> 收起，重新进入取消计时。条目左键发送 <code>Request::MinimizedRestore</code>，中键/关闭键发送 <code>Request::MinimizedClose</code>；右键不绑定。</li>
+  <li>条目按 daemon 列表顺序渲染（旧→新，新条目右侧）；<code>rebuild</code> 重建条目，标题变化仅更新文本。图标按 <code>class</code> 从图标主题查找，未命中用通用占位图标。</li>
+  <li><code>panel</code> 宽度取「条目数 × <code>DOCK_ITEM_WIDTH</code> + padding」，上限「显示器宽度 × <code>DOCK_MAX_WIDTH_RATIO</code>」；超限时条目区横向滚动。</li>
+</ul>
+
+<h3 id="sec-4-popup">4.15. bar/modules/popup.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct PopupManager {
+    open: RefCell&lt;HashMap&lt;String, gtk::Popover&gt;&gt;,
+    press_closed: RefCell&lt;HashSet&lt;String&gt;&gt;,
+    hover: Cell&lt;u64&gt;,
+    poll: Cell&lt;Option&lt;glib::SourceId&gt;&gt;,
+}
+
+impl PopupManager {
+    pub fn install(window: &amp;gtk::Window) -&gt; Rc&lt;Self&gt;;
+    pub fn manage(self: &amp;Rc&lt;Self&gt;, popover: &amp;gtk::Popover);
+    pub fn open(self: &amp;Rc&lt;Self&gt;, popover: &amp;gtk::Popover, group: String);
+    pub fn close_group(&amp;self, group: &amp;str);
+    pub fn close_prefix(&amp;self, prefix: &amp;str);
+    pub fn close_all(&amp;self) -&gt; bool;
+    pub fn press_closed_contains(&amp;self, group: &amp;str) -&gt; bool;
+    pub fn any_open(&amp;self) -&gt; bool;
+    pub fn hover_generation(&amp;self) -&gt; u64;
+}
+
+pub fn attach(popover: &amp;gtk::Popover, parent: &amp;impl IsA&lt;gtk::Widget&gt;,
+              position: gtk::PositionType, halign: gtk::Align, valign: gtk::Align);
+pub fn point_at(popover: &amp;gtk::Popover, parent: &amp;impl IsA&lt;gtk::Widget&gt;,
+                anchor: &amp;impl IsA&lt;gtk::Widget&gt;);
+pub fn point_at_expanded(popover: &amp;gtk::Popover, parent: &amp;impl IsA&lt;gtk::Widget&gt;,
+                         anchor: &amp;impl IsA&lt;gtk::Widget&gt;, expand_x: f64);
+pub fn hover_switch&lt;F: Fn(u64) + 'static&gt;(manager: &amp;Rc&lt;PopupManager&gt;,
+                                          anchor: &amp;impl IsA&lt;gtk::Widget&gt;, switch: F);</code></pre>
+<ul class="note">
+  <li>通知中心使用组标签 <code>info</code> 并由 <code>PopupManager</code> 托管；贴栏通知是独立 layer-shell 窗口，不参与 <code>PopupManager</code>。</li>
+</ul>
+
+<h3 id="sec-4-tray">4.16. bar/modules/tray.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct TrayWidget {
+    container: gtk::Box,
+    menus: RefCell&lt;HashMap&lt;String, gtk::Popover&gt;&gt;,
+    ipc: Arc&lt;IpcClient&gt;,
+    ui_tx: Sender&lt;UiTask&gt;,
+    popup: Rc&lt;PopupManager&gt;,
+}
+
+impl TrayWidget {
+    pub fn new(ipc: Arc&lt;IpcClient&gt;, ui: Sender&lt;UiTask&gt;,
+               window: &amp;gtk::Window, popup: Rc&lt;PopupManager&gt;) -&gt; Self;
+    pub fn container(&amp;self) -&gt; gtk::Box;
+    pub fn rebuild(&amp;self, views: &amp;[TrayItemView]);
+    pub fn apply(&amp;self, update: TrayUpdate);
+    pub fn menu_changed(&amp;self, item: &amp;str);
+    pub fn on_interact_done(&amp;self, item: &amp;str, result: Result&lt;Response, String&gt;);
+    pub fn on_expand_done(&amp;self, item: &amp;str, entry: i32, result: Result&lt;Response, String&gt;);
+    pub fn on_activate_done(&amp;self, item: &amp;str, result: Result&lt;Response, String&gt;);
+    pub fn on_menu_read_done(&amp;self, item: &amp;str, result: Result&lt;Response, String&gt;);
+    pub fn on_hover_menu_done(&amp;self, item: &amp;str, token: u64, result: Result&lt;Response, String&gt;);
+}</code></pre>
+<ul class="note">
+  <li>图标按传入顺序横向排列：<code>Added</code> 追加右端，<code>Changed</code> 原位更新图标 / 提示 / 状态、不改变位置，<code>Renamed</code> 原位换键，<code>Removed</code> 删除后其余图标不移动；属性变化不得以先删后加实现。</li>
+</ul>
+
+<h3 id="sec-4-center">4.17. bar/modules/center.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct CenterWidget {
+    pub container: gtk::Box,
+    ipc: Arc&lt;IpcClient&gt;,
+    status_label: gtk::Label,
+    panel: gtk::Popover,
+    volume: gtk::Scale,
+    brightness: gtk::Scale,
+}
+
+impl CenterWidget {
+    pub fn new(ipc: Arc&lt;IpcClient&gt;, window: &amp;gtk::Window, popup: Rc&lt;PopupManager&gt;) -&gt; Self;
+    pub fn set_system(&amp;self, system: &amp;SystemState);
+}</code></pre>
+
+<h3 id="sec-4-protocol">4.18. shared/protocol.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub enum InteractInput {
+    Left { x: i32, y: i32 },
+    Middle { x: i32, y: i32 },
+    Right { x: i32, y: i32 },
+    ScrollUp { steps: i32 },
+    ScrollDown { steps: i32 },
+    ScrollLeft { steps: i32 },
+    ScrollRight { steps: i32 },
+}
+
+pub enum MediaOp { PlayPause, Next, Prev }
+pub enum NotificationCloseReason { Dismissed, Expired }
+
+pub enum Request {
+    Hello { monitor: String },
+    TrayInteract { item: String, input: InteractInput },
+    TrayMenuRead { item: String },
+    TrayMenuExpand { item: String, entry: i32 },
+    TrayMenuActivate { item: String, entry: i32 },
+    WorkspaceSwitch { target: String },
+    MinimizedRestore { address: String },
+    MinimizedClose { address: String },
+    MediaControl { op: MediaOp },
+    VolumeSet { value: u32 },
+    BrightnessSet { value: u32 },
+    NotificationRetry,
+    NotificationClose { id: u32, reason: NotificationCloseReason },
+    NotificationCloseGroup { app_name: String },
+    NotificationClear,
+    NotificationActivate {
+        id: u32,
+        action_key: Option&lt;String&gt;,
+        activation_token: Option&lt;String&gt;,
+    },
+}
+
+pub enum Response {
+    Ok,
+    Menu(MenuSnapshot),
+    Outcome(InteractionOutcome),
+    Error(String),
+}
+
+pub enum Push {
+    Snapshot(WindowSnapshot),
+    State(StateDelta),
+    Tray(TrayUpdate),
+    MenuChanged { item: String },
+    Notification(NotificationRecord),
+    NotificationPopup(NotificationRecord),
+    NotificationRemoved(u32),
+    NotificationCleared(Option&lt;String&gt;),
+    Reload,
+}
+
+pub enum ControlCommand;     //见 USER §4.2
+
+pub enum Frame {
+    Request { id: u64, request: Request },
+    Response { id: u64, response: Response },
+    Push { push: Push },
+}
+
+pub fn write_frame(stream: &amp;mut UnixStream, frame: &amp;Frame) -&gt; io::Result&lt;()&gt;;
+pub fn read_frame(stream: &amp;mut UnixStream) -&gt; io::Result&lt;Frame&gt;;
+
+pub fn runtime_dir() -&gt; PathBuf;
+pub fn default_control_socket() -&gt; PathBuf;
+pub fn window_socket_for(control: &amp;Path) -&gt; PathBuf;
+pub fn pid_file() -&gt; PathBuf;
+pub fn daemon_alive() -&gt; bool;
+pub fn shutdown_files();
+pub fn parse_control_line(line: &amp;str) -&gt; Option&lt;ControlCommand&gt;;</code></pre>
+<ul class="note">
+  <li>传输：Unix Socket（daemon 为服务端）；两类消息——窗口 → daemon 的请求（均有应答）与 daemon → 窗口的推送；首连握手后由 daemon 推送全量快照，此后增量衔接。</li>
+  <li><code>hello</code>：窗口接入握手，显示器名 → 先推全量快照、后应答受理。</li>
+  <li>请求语义：<code>tray.menu_read</code> / <code>tray.menu_expand</code> 返回菜单快照；<code>tray.interact</code> 返回路由结果（<code>Dispatched</code> / <code>Menu</code> 快照）；<code>notification.activate</code> 的动作 key 缺省取 <code>default</code> / 唯一动作，<code>activation_token</code> 缺省表示不生成；daemon 先回发令牌再触发动作，触发后关闭该条（<code>resident</code> 除外），无可用动作则直接关闭。</li>
+  <li>请求语义：<code>minimized.restore</code> 把窗口移到其显示器当前活动工作区并聚焦；<code>minimized.close</code> 请求关闭窗口；地址不在最小化集合时无操作。</li>
+  <li>推送语义：<code>notification</code> 推送全部窗口用于通知中心缓存；<code>notification_popup</code> 仅推当前显示器；<code>notification_removed</code> / <code>notification_cleared</code> 推送全部窗口；<code>state.minimized</code> 推送全部窗口，由各窗口按显示器过滤。</li>
+  <li>大对象（如位图图标）可经 fd 传递升级（memfd + <code>SCM_RIGHTS</code>），协议骨架不变。</li>
+  <li>断开处理：互动失败时窗口重连一次（按首连流程再取全量快照）；周期性存活检查（PID 文件）确认 daemon 已退出则自主退出。</li>
+</ul>
+
+<h3 id="sec-4-model">4.19. shared/model.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>pub struct WorkspaceWindow {
+    pub address: String,
+    pub title: String,
+    pub class: String,
+}
+
+pub struct WorkspaceState {     // 形态见 ABOUT「界面交互」；色彩映射见 USER §5.2.2
+    pub id: i64,
+    pub name: String,
+    pub urgent: bool,
+    pub active: bool,
+    pub has_windows: bool,
+    pub windows: Vec&lt;WorkspaceWindow&gt;,   // 按 focus_history_id 升序（最近聚焦在前）
+}
+
+pub struct ActiveWindow { pub class: String, pub title: String }
+
+pub enum IconView {
+    Name(String),
+    Path(String),
+    Pixmap { width: u32, height: u32, argb: Vec&lt;u8&gt; },
+}
+
+pub struct TrayItemView {
+    pub id: String,
+    pub title: Option&lt;String&gt;,
+    pub tooltip: Option&lt;String&gt;,
+    pub icon: IconView,
+    pub attention: bool,
+    pub alive: bool,
+    pub has_menu: bool,
+}
+
+pub enum TrayUpdate {
+    Added(TrayItemView),
+    Removed(String),
+    Changed(TrayItemView),
+    Renamed { old: String, new: String },   // 同一 Item id 重键：原位换键，不增删
+}
+
+pub struct MenuSnapshot { pub parent_id: i32, pub revision: u32, pub items: Vec&lt;MenuItem&gt; }
+
+pub struct MenuItem {
+    pub id: i32,
+    pub item_type: MenuItemType,
+    pub label: String,
+    pub raw_label: String,
+    pub enabled: bool,
+    pub visible: bool,
+    pub children_display: bool,
+    pub toggle_type: Option&lt;ToggleType&gt;,
+    pub toggle_state: Option&lt;ToggleState&gt;,
+    pub icon_name: Option&lt;String&gt;,
+    pub icon_data: Option&lt;Vec&lt;u8&gt;&gt;,
+}
+
+pub enum MenuItemType { Standard, Separator }
+pub enum ToggleType { Checkmark, Radio }
+pub enum ToggleState { Off, On, Indeterminate }
+pub enum InteractionOutcome { Dispatched, Menu(MenuSnapshot) }
+
+pub struct SystemState {
+    pub battery: Option&lt;BatteryState&gt;,
+    pub network: Option&lt;NetworkState&gt;,
+    pub bluetooth: Option&lt;BluetoothState&gt;,
+    pub volume: Option&lt;VolumeState&gt;,
+    pub brightness: Option&lt;u32&gt;,
+}
+
+pub struct BatteryState { pub percent: u32, pub charging: bool }
+pub struct NetworkState { pub kind: String, pub connected: bool }
+pub struct BluetoothState { pub powered: bool, pub connected: u32 }
+pub struct VolumeState { pub percent: u32, pub muted: bool }
+
+pub enum NotificationUrgency { Low, Normal, Critical }
+pub struct NotificationAction { pub key: String, pub label: String }
+pub enum NotificationIcon {
+    None,
+    Name(String),
+    Pixels { width: i32, height: i32, rgba: Vec&lt;u8&gt; },
+}
+
+pub struct NotificationRecord {     // bnote::Notice 的共享投影
+    pub id: u32,
+    pub app_name: String,
+    pub icon: NotificationIcon,
+    pub summary: String,
+    pub body: String,
+    pub actions: Vec&lt;NotificationAction&gt;,
+    pub action_icons: bool,
+    pub urgency: NotificationUrgency,
+    pub expire_timeout_ms: Option&lt;u32&gt;,
+    pub transient: bool,
+    pub resident: bool,
+    pub sound_file: Option&lt;String&gt;,
+    pub sound_name: Option&lt;String&gt;,
+    pub suppress_sound: bool,
+}
+
+pub enum NotificationStatus {
+    Ready,
+    Unavailable { message: String },
+}
+
+pub struct MinimizedWindow {
+    pub address: String,
+    pub class: String,
+    pub title: String,
+    pub monitor: String,
+}
+
+pub struct WindowSnapshot {
+    pub monitor: String,
+    pub workspaces: Vec&lt;WorkspaceState&gt;,
+    pub active: ActiveWindow,
+    pub tray: Vec&lt;TrayItemView&gt;,
+    pub notifications: Vec&lt;NotificationRecord&gt;,
+    pub notification: NotificationStatus,
+    pub minimized: Vec&lt;MinimizedWindow&gt;,
+    pub system: SystemState,
+    pub css_path: String,
+}
+
+pub struct StateDelta {
+    pub workspaces: Option&lt;Vec&lt;WorkspaceState&gt;&gt;,
+    pub active: Option&lt;ActiveWindow&gt;,
+    pub system: Option&lt;SystemState&gt;,
+    pub notification: Option&lt;NotificationStatus&gt;,
+    pub minimized: Option&lt;Vec&lt;MinimizedWindow&gt;&gt;,
+}</code></pre>
+<ul class="note">
+  <li><code>WorkspaceState</code>：本屏工作区清单＝现存工作区 ∪ 绑定到本屏的静态 workspace 规则（有规则无窗口＝非活跃工作区）；启动/插拔/配置重载时全量重建（按名去重 + id 排序）。<code>windows</code> 为该工作区窗口标题快照，按 <code>focusHistoryID</code> 升序（最近聚焦在前）。</li>
+  <li><code>WorkspaceWindow</code>：<code>address</code> 为归一化窗口地址，<code>title</code> / <code>class</code> 供悬停列表与后续截图预览使用；列表随打开、关闭、移动、标题变化事件刷新。</li>
+  <li><code>WindowSnapshot</code>：单窗口所需状态——本屏工作区、活动窗口、托盘、通知、通知服务状态、最小化窗口、CSS 路径；首连全量；<code>tray</code> 按首见序排列（见 <a href="breadpan/USER.html#sec-2">breadpan USER §2</a>）。</li>
+  <li><code>TrayUpdate</code>：<code>Added</code> 追加右端、<code>Changed</code> 原位更新、<code>Renamed</code> 原位换键、<code>Removed</code> 删除；窗口按该语义维护首见序。</li>
+  <li><code>MinimizedWindow</code>：<code>address</code> 为归一化窗口地址，<code>class</code> / <code>title</code> 用于图标与标题，<code>monitor</code> 为窗口归属显示器；daemon 维护列表顺序，新条目追加右侧，窗口标题变化原地更新。</li>
+  <li><code>StateDelta.minimized</code> 为完整列表快照；列表变化时广播全部窗口，各窗口按 <code>monitor</code> 过滤。</li>
+  <li><code>NotificationRecord</code>：由 <code>bnote::Notice</code> 投影，保留 id、应用名、图标三态、标题、正文、动作、<code>action_icons</code>、紧急度、请求超时、<code>transient</code> / <code>resident</code>、<code>sound_file</code> / <code>sound_name</code> / <code>suppress_sound</code>；窗口只消费共享模型，不接触 bnote 类型。</li>
+  <li><code>NotificationStatus</code>：<code>Ready</code> / <code>Unavailable { message }</code>；通知服务启动成功为 <code>Ready</code>，启动失败或运行中终止为 <code>Unavailable</code>，变化时推送全部窗口。</li>
+  <li>通知关闭原因：<code>Dismissed</code>（用户关闭 / 组清理 / 动作确认）/ <code>Expired</code>（<code>transient</code> 超时）；窗口请求映射为 bnote <code>CloseReason</code>；客户端 <code>CloseNotification</code> 由 bnote 自行回发 <code>CloseRequest</code>。</li>
+</ul>
+
+<h3 id="sec-4-tests">4.20. tests.rs <a href="#sec-1">↑ 文件树</a></h3>
+<pre><code>#[test] fn protocol_roundtrip();
+#[test] fn parse_control_line_accepts_commands();
+#[test] fn daemon_alive_reads_pid();</code></pre>
+
+<h2 id="sec-5">5. 关键流程调用栈（伪码）</h2>
+
+<h3 id="sec-5-1">5.1. 启动</h3>
+<h4 id="sec-5-1-1">5.1.1. daemon</h4>
+<pre><code>启动（bread / bread daemon → __daemon）
+├── protocol::pid_file()（存活则拒绝，并写入自身 PID）
+├── hyprland::watch(tx)（socket2 只读监听线程）
+├── tray::start(tx)（breadpan 组装；失败降级 None）
+├── notify::start(tx)（bnote 装配；失败 → NotificationStatus(Unavailable)）
+├── ipc::serve_control(control_path, tx)
+├── ipc::serve_windows(window_path, tx)
+├── system::start(tx)（UPower / NetworkManager / BlueZ / MPRIS）
+├── Daemon::resync()
+│    ├── hyprland::monitors()
+│    ├── hyprland::workspaces()
+│    ├── hyprland::workspace_rules()
+│    ├── clear_urgent_on_active_transition()
+│    ├── rebuild_workspace_slices()
+│    ├── Daemon::resync_minimized()
+│    ├── spawn_window(mon)
+│    └── push_workspace_slices()
+└── Daemon::run_loop()
+     ├── rx.recv_timeout(TICK)
+     │    └── Daemon::handle(ev)
+     └── 超时且 pending_resync → Daemon::resync()</code></pre>
+<h4 id="sec-5-1-2">5.1.2. 窗口进程</h4>
+<pre><code>启动（窗口进程，daemon spawn）
+├── bar::run(monitor, socket)
+│    └── WindowApp::create(app, monitor, socket)
+│         ├── IpcClient::connect(socket, monitor, ui_tx)（Hello 握手 + reader 线程）
+│         ├── find_monitor(name)
+│         ├── PopupManager::install(window)
+│         ├── WorkspaceWidget::new(ipc)
+│         ├── InfoCenterWidget::new(ipc, monitor, window, popup)
+│         ├── DockWidget::new(ipc, monitor)
+│         ├── TrayWidget::new(ipc, ui, window, popup)
+│         ├── CenterWidget::new(ipc, window, popup)
+│         ├── glib::timeout_add_local(UI_DRAIN, drain)
+│         └── glib::timeout_add_seconds_local(2, alive_check)
+├── app.run_with_args(&amp;[])
+└── WindowApp::apply_snapshot(snapshot)（首帧，含 CSS 加载）</code></pre>
+
+<h3 id="sec-5-2">5.2. 窗口进程生命周期</h3>
+<h4 id="sec-5-2-1">5.2.1. 上线（显示器增加）</h4>
+<pre><code>Hyprland monitoradded(v2)
+└── Daemon::on_hyprland(ev)
+     └── Daemon::resync()
+          ├── hyprland::monitors()
+          ├── hyprland::workspaces()
+          ├── hyprland::workspace_rules()
+          └── spawn_window(monitor)
+               └── windows::spawn(tx, monitor, window_path)
+窗口 Hello
+└── Daemon::on_window_request(id, request, out)
+     └── ipc::hello_reply(out, id, snapshot_for(monitor))（先快照推送、后应答受理）</code></pre>
+<h4 id="sec-5-2-2">5.2.2. 退出路径①：daemon 终止窗口进程</h4>
+<pre><code>Daemon::kill_window(monitor)（exit / close / 显示器移除）
+├── drop(WindowProc.out)（断开下行）
+├── child.kill()
+└── std::thread::spawn(wait_child)（独立线程收割，避免僵尸残留）</code></pre>
+<h4 id="sec-5-2-3">5.2.3. 退出路径②：窗口自主退出（daemon 消失）</h4>
+<pre><code>窗口定时（2s）
+├── protocol::daemon_alive()
+│    └── false → app.quit()
+└── IpcClient::request(request)
+     ├── 失败 → 重连一次后重试
+     └── 仍失败 → Err（daemon 存亡由周期检查裁决）</code></pre>
+<h4 id="sec-5-2-4">5.2.4. 崩溃重启</h4>
+<pre><code>windows::spawn 探测线程发现子进程退出
+└── DaemonEvent::ChildExited { monitor }
+     └── Daemon::on_child_exited(monitor)
+          ├── 主动终止 → 返回
+          ├── 不在 desired → 返回
+          ├── 超限 → 返回（从 desired 移除）
+          └── spawn_window(monitor)（崩溃重启）</code></pre>
+
+<h3 id="sec-5-3">5.3. 控制指令</h3>
+<pre><code>Daemon::on_control(cmd)
+├── Open { name, monitor } → Daemon::open_windows(name, monitor)
+├── Close { name, monitor } → Daemon::kill_window(monitor)
+├── OpenAll → Daemon::open_windows(name, None)
+├── CloseAll → Daemon::kill_window(monitor)
+├── Reload → Daemon::broadcast(Push::Reload)
+└── Exit
+     ├── Daemon::kill_window(monitor)
+     ├── TrayHandle::shutdown()
+     ├── NotificationService::shutdown()
+     ├── protocol::shutdown_files()
+     └── std::process::exit(0)</code></pre>
+
+<h3 id="sec-5-4">5.4. 托盘交互与菜单（窗口 ↔ daemon）</h3>
+<pre><code>IpcClient::request(Request::TrayInteract { item, input })
+└── tray::interact(handle, item, input)（专用线程）
+IpcClient::request(Request::TrayMenuRead { item })
+└── tray::menu_read(handle, item)
+IpcClient::request(Request::TrayMenuExpand { item, entry })
+└── tray::menu_expand(handle, item, entry)
+IpcClient::request(Request::TrayMenuActivate { item, entry })
+└── tray::menu_activate(handle, item, entry)
+Push::MenuChanged → TrayWidget::menu_changed(item)
+popup::hover_switch(manager, anchor, switch)（悬停切换，世代校验）</code></pre>
+<ul class="note">
+  <li><code>Outcome::Menu</code> 由窗口打开根弹窗，子层经 <code>TrayMenuExpand</code> 按需展开；叶子行经 <code>TrayMenuActivate</code> 激活并关闭菜单。</li>
+</ul>
+
+<h3 id="sec-5-5">5.5. 通知到达</h3>
+<pre><code>NotificationService 事件线程
+└── NoticeReceiver::recv()
+     └── NoticeEvent::Notify { notice }
+          └── DaemonEvent::Notification(to_record(notice))
+               └── Daemon::on_notification(record)
+                    ├── notifications.upsert(record)
+                    ├── notify::play_sound(&amp;record)
+                    ├── Daemon::broadcast(Push::Notification(record))
+                    │    └── WindowApp::handle_push(push)
+                    │         └── InfoCenterWidget::upsert_center(record)
+                    ├── hyprland::current_monitor()
+                    │    └── hyprctl -j monitors（取 focused；失败回退首个）
+                    └── Daemon::push_to(monitor, Push::NotificationPopup(record))
+                         └── WindowApp::handle_push(push)
+                              └── InfoCenterWidget::push_popup(record)
+                                   └── NotificationWindow::push(record)（重置计时 + rebuild）</code></pre>
+<ul class="note">
+  <li><code>current_monitor</code> 在每次通知到达时查询，保持“当前显示器”精确；查询失败回退首个显示器，无任何显示器时跳过贴栏弹窗，通知中心缓存不受影响。</li>
+  <li>提示音在到达时播放一次，与通知中心/贴栏弹窗是否显示无关；<code>suppress_sound</code> 为真或后端缺席时跳过。</li>
+</ul>
+
+<h3 id="sec-5-6">5.6. 通知关闭、清理与动作</h3>
+
+<h4 id="sec-5-6-1">5.6.1. 单条关闭</h4>
+<pre><code>窗口/计时器 → Request::NotificationClose { id, reason }
+└── Daemon::close_notification(id, reason)
+     ├── notifications.remove(id)
+     ├── NotificationService::close(id, bnote::CloseReason::{Dismissed|Expired})
+     └── Daemon::broadcast(Push::NotificationRemoved(id))
+          └── WindowApp::handle_push(push)
+               └── InfoCenterWidget::remove_notification(id)</code></pre>
+<pre><code>客户端 CloseNotification（bnote 自动回发 NotificationClosed）
+└── NoticeEvent::Close { id }
+     └── DaemonEvent::NotificationClosed(id)
+          └── Daemon::on_notification_closed(id)
+               ├── notifications.remove(id)
+               └── Daemon::broadcast(Push::NotificationRemoved(id))</code></pre>
+
+<h4 id="sec-5-6-2">5.6.2. 组关闭与全部清理</h4>
+<pre><code>中心组关闭 → Request::NotificationCloseGroup { app_name }
+└── Daemon::close_notification_group(app_name)
+     ├── notifications.collect_ids(app_name)
+     ├── NotificationService::close(id, Dismissed) × N
+     ├── notifications.remove(id) × N
+     └── broadcast(Push::NotificationCleared(Some(app_name)))
+
+全部清理 → Request::NotificationClear
+└── Daemon::clear_notifications()
+     ├── NotificationService::close(id, Dismissed) × N
+     ├── notifications.clear()
+     └── broadcast(Push::NotificationCleared(None))</code></pre>
+
+<h4 id="sec-5-6-3">5.6.3. 左键动作、激活令牌与关闭</h4>
+<pre><code>窗口左键/动作按钮
+├── InfoCenterWidget::activation_token()
+│    └── gdk::Display::default()
+│         └── Display::app_launch_context()
+│              └── AppLaunchContext::startup_notify_id(None, &amp;[])
+└── IpcClient::request(Request::NotificationActivate { id, action_key, activation_token })
+     └── Daemon::activate_notification(id, action_key, activation_token)
+          ├── 记录不存在 → 返回
+          ├── 有动作 → NotificationService::invoke_action(id, key, activation_token)
+          │    ├── activation_token 存在 → SessionHandle::activation_token(id, token)
+          │    └── SessionHandle::invoke_action(id, key)
+          ├── 有动作且 resident → 返回（保留条目）
+          └── 无动作或非 resident → Daemon::close_notification(id, Dismissed)</code></pre>
+<ul class="note">
+  <li>左键的 <code>action_key</code> 为 <code>None</code>，取 <code>default</code> 或唯一动作；动作按钮带对应 key。</li>
+  <li>有动作时触发后关闭该条；<code>resident</code> 记录保留。无可用动作时左键仅关闭该条。</li>
+  <li>令牌在 bar 的点击回调中先生成、再随请求投递；缺失或回发失败时只记日志并跳过 <code>ActivationToken</code>，<code>ActionInvoked</code> 仍照常发出。</li>
+  <li><code>resident</code> 只影响动作后是否关闭，不改变令牌生成与回发顺序。</li>
+  <li>通知协议没有可映射到具体应用/窗口的字段；bread 不直接聚焦来源应用，只回发令牌，由发送方自行激活其窗口。</li>
+</ul>
+
+<h3 id="sec-5-7">5.7. 通知服务状态与重试</h3>
+<pre><code>bnote::Session::start(config)
+├── Ok(service) → Daemon::on_notification_status(Ready)
+└── Err(err) → Daemon::on_notification_status(Unavailable { message: unavailable_message(err) })
+
+Daemon::on_notification_status(status)
+└── Daemon::broadcast(Push::State { notification: status })
+     └── WindowApp::handle_push(push)
+          └── InfoCenterWidget::set_notification_status(status)
+
+用户点击刷新 → Request::NotificationRetry
+└── Daemon::retry_notification()
+    ├── notification.take() — Some(service) 时 service.shutdown()
+    └── NotificationService::start(tx)
+        ├── Ok → Daemon::on_notification_status(Ready)
+        └── Err(err) → Daemon::on_notification_status(Unavailable { message: unavailable_message(err) })
+
+NoticeEvent::Fatal { message }
+└── DaemonEvent::NotificationStatus(Unavailable { message })
+     └── Daemon::on_notification_status(status)</code></pre>
+<ul class="note">
+  <li>错误文案：标题「通知中心暂时不可用」；正文取 <code>NotificationStatus::Unavailable.message</code>（NameTaken 为「另一个通知服务正在运行，bread 无法接管 org.freedesktop.Notifications。」，Fatal 为 bnote 报告的原因）；刷新按钮位于正文下方。</li>
+  <li>不自动重试、不排队、不替换已有通知服务；重试完全由用户点击刷新按钮触发。</li>
+  <li>运行中 Fatal 只更新通知服务状态并隐藏贴栏通知，通知缓存保留；重试成功后恢复列表展示。</li>
+</ul>
+
+<h3 id="sec-5-8">5.8. 通知中心开关</h3>
+<pre><code>title_label.connect_clicked(...)（绑定标题点击）
+└── InfoCenterWidget::toggle_center()
+     ├── 判断：已打开 → PopupManager::close_group("info")
+     └── 判断：未打开 → PopupManager::open(center, "info")
+          └── NotificationWindow::set_center_open(true)
+
+center.connect_closed(...)（绑定关闭信号）
+└── NotificationWindow::set_center_open(false)</code></pre>
+<ul class="note">
+  <li>打开时通知中心 popover 抓取输入，贴栏通知窗口隐藏但保留记录与计时；关闭后只恢复未过期的贴栏记录。</li>
+  <li>打开、关闭与分组展开/收缩只改本地视图，不改通知缓存，也不补发已超时的贴栏卡片。</li>
+</ul>
+
+<h3 id="sec-5-9">5.9. 最小化托盘</h3>
+<pre><code>启动 / 配置重载 / 显示器插拔
+└── Daemon::resync_minimized()
+     ├── hyprland::clients()
+     ├── 过滤 workspace.name == MINIMIZED_WORKSPACE
+     ├── 合并已有顺序，新窗口追加右侧
+     └── Daemon::push_minimized()
+          └── Daemon::broadcast(Push::State { minimized: Some(..) })
+               └── WindowApp::handle_push(push)
+                    └── DockWidget::set_items(items)
+
+movewindowv2 / openwindow / closewindow / monitorremoved / configreloaded
+└── Daemon::on_hyprland(ev)
+     └── Daemon::resync_minimized()
+          ├── hyprland::clients()
+          └── Daemon::push_minimized()
+
+windowtitlev2
+└── Daemon::on_hyprland(WindowTitle { addr, title })
+     ├── 更新 minimized 中同地址条目标题
+     └── Daemon::push_minimized()
+
+minimized&gt;&gt;地址,1
+└── Daemon::on_hyprland(ev)
+     └── Daemon::minimize_window(addr)
+          ├── hyprland::move_to_workspace(addr, MINIMIZED_WORKSPACE)
+          └── Daemon::resync_minimized()
+
+minimized&gt;&gt;地址,0
+└── Daemon::on_hyprland(ev)
+     └── Daemon::restore_minimized(addr)
+          ├── hyprland::active_workspace_name(monitor)
+          ├── hyprland::move_to_workspace(addr, target)
+          └── hyprland::focus_window(addr)
+
+底部触发条进入
+└── DockWidget::show_panel()
+     └── 设置 panel layer surface 可见
+
+panel / trigger 离开
+└── DockWidget::schedule_hide()
+     └── glib::timeout_add_local_once(DOCK_HIDE_DELAY_MS, hide_panel)
+
+条目左键 → IpcClient::request(Request::MinimizedRestore { address })
+└── Daemon::restore_minimized(address)
+     ├── hyprland::active_workspace_name(record.monitor)
+     ├── hyprland::move_to_workspace(address, target)
+     └── hyprland::focus_window(address)
+
+条目中键 / 关闭键 → IpcClient::request(Request::MinimizedClose { address })
+└── Daemon::close_minimized(address)
+     └── hyprland::close_window(address)</code></pre>
+<ul class="note">
+  <li>最小化集合以 Hyprland <code>special:minimized</code> 工作区为准；<code>minimized</code> 事件只是外部 taskbar 的辅助触发，普通 CSD 最小化请求不产生该事件。</li>
+  <li>恢复只把窗口移到其显示器当前活动工作区并聚焦，不保留原工作区；窗口离开最小化工作区后由 <code>movewindowv2</code> 驱动列表移除。</li>
+  <li>关闭请求成功与否以 <code>closewindow</code> 事件为准；请求失败不回滚列表，窗口仍保留在托盘中。</li>
+  <li>列表顺序由 daemon 的 <code>minimized</code> 向量维护；resync 保留已有顺序，新窗口按 <code>clients()</code> 顺序追加右侧。</li>
+</ul>
+
+</main>
+</body>
+</html>

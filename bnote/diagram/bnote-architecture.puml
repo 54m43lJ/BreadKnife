@@ -1,0 +1,12 @@
+@startuml bnote-architecture
+skinparam componentStyle rectangle
+
+component "客户端\n（notify-send 等通知发送方）" as client
+queue "D-Bus 会话总线" as bus
+component "bnote" as lib
+component "宿主\n（bread daemon 消息中心）" as host
+
+client <--> bus : 方法与信号
+bus <--> lib : org.freedesktop.Notifications
+lib <--> host : 宿主 API\n事件流（异步） + 命令（同步）
+@enduml

@@ -30,7 +30,7 @@ jobs:
         run: |
           # docs2markdown 默认输出 GitHub Flavored Markdown (ghfm)
           # 第二个参数直接指定输出文件为 README.md
-          uvx docs2markdown README.html README.md
+          uvx docs2markdown ABOUT.html README.md
 
       - name: Verify only README.md is modified
         run: |
@@ -56,5 +56,5 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           # GITHUB_TOKEN 的推送不会再次触发工作流（GitHub 防递归机制），无死循环风险
-          commit_message: "docs: 由 README.html 自动生成 README.md [skip ci]"
+          commit_message: "docs: 由 ABOUT.html 自动生成 README.md [skip ci]"
           file_pattern: README.md   # 双保险：只 git add README.md

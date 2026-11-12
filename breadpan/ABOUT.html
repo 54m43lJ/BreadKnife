@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>breadpan ABOUT</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>breadpan</h1>
+<blockquote>
+  SNI 托盘协议栈单库：登记中心（Watcher）内置，开箱即用。
+  消费方只面对五件事——Item 数据打包获取、Item 事件流、Item 交互、菜单读取、
+  打包生成可渲染的 GTK 对象。
+</blockquote>
+
+<h2>WHAT &amp; WHY</h2>
+
+<h3>IDEAL</h3>
+<p>
+  展示系统托盘，必须完整实现 SNI 与 DBusMenu 两个协议：Item 发现与跟踪、属性同步、
+  菜单一致性、图标回退——协议细节繁重且易错；裸 Hyprland 等环境连登记中心都没有。
+  breadpan 把登记中心与展示逻辑收进同一个库，协议词汇不出库——
+  消费方代码里只有「取数据、收事件、发交互、读菜单、拿渲染对象」。
+</p>
+
+<h3>GOAL</h3>
+<ul>
+  <li><strong>一次启动即用</strong>：<code>Tray::start</code> 一行，登记中心就位、存量 Item 就绪；</li>
+  <li><strong>零协议词汇</strong>：SNI/DBusMenu 细节不出现在消费方代码里；</li>
+  <li><strong>数据即取即最新</strong>：登记簿记只存最小集，其余信息现场读取，交付即最新；</li>
+  <li><strong>原子一致</strong>：首事件即完整快照，其后增量事件无重叠无缺口；</li>
+  <li><strong>异步交付</strong>：事件流走单实例通道，主线程 await 消费，不阻塞 UI；</li>
+  <li><strong>渲染直出</strong>：图标一次性转成可绘制对象，直接上屏。</li>
+</ul>
+
+<h3>NON-GOAL</h3>
+<p>能力级边界以本节为权威。</p>
+<table>
+  <tr><th>不做</th><th>说明</th></tr>
+  <tr><td>不缓存 SNI 详情</td><td>登记簿记仅存最小集；属性/图标/菜单等详情一律 DBus 即时读取，变更以轻量事件通告、不推数据</td></tr>
+  <tr><td>不拥有任何 UI</td><td>无窗口/布局/事件循环；菜单渲染与弹出定位归消费方</td></tr>
+  <tr><td>不对进程外 Host 负责</td><td>自包含设计：逻辑 Host 是进程内下游；总线上 Host 相关成员仅保留兼容桩（受理即忘 / 恒真），零簿记</td></tr>
+  <tr><td>不做外部 Watcher 客户端模式</td><td>多个 Watcher 不能共存——拒绝与终局语义见 <a href="USER.html#sec-3-7">USER §3.7</a>、<a href="USER.html#sec-4-2">§4.2</a></td></tr>
+  <tr><td>不做 XEmbed/X11 传统托盘</td><td>场景钉死 Wayland + SNI（传统规范原文：<a href="https://specifications.freedesktop.org/systemtray-spec/latest/">Freedesktop System Tray Specification</a>）</td></tr>
+  <tr><td>不提供移除/强制退出 Item 的通路</td><td>移除权专属服务名消失；官方未定义任何强制退出方法，pid 仅能从服务名的 PID 段解析</td></tr>
+  <tr><td>不泄漏 tokio 运行时</td><td>运行时为库内私有，消费方无需装配；公开面无 async fn——异步只出现在事件通道消费端，入口与交互方法均为同步签名</td></tr>
+</table>
+<ul class="note">
+  <li>字段级透传取舍（AttentionMovieName、菜单 shortcut、vendor 属性等）见
+  <a href="USER.html#sec-4-3">USER §4.3 数据模型</a>。</li>
+</ul>
+
+<h2>用户交互</h2>
+<ul>
+  <li>启动：<code>Tray::start(config)</code> 返回 <code>(TrayHandle, 事件通道)</code>；登记中心随启动就位。</li>
+  <li>订阅：消费方异步消费事件流，逐事件更新 UI。</li>
+  <li>取数：<code>items()</code> / <code>item()</code> 现场读取 Item 数据。</li>
+  <li>交互：左键/中键/右键/滚轮各有同步方法；菜单条目点击经 <code>menu_activate</code>。</li>
+  <li>菜单：<code>menu()</code> 拉取根层，<code>menu_expand</code> 按需展开子层。</li>
+  <li>呈现：<code>icon_paintable(icon)</code> 输出可绘制对象；渲染与交互呈现由消费方负责。</li>
+</ul>
+<ul class="note">
+  <li>完整签名与返回语义见 <a href="USER.html#sec-4-1">USER §4.1</a>；运行示例见 <a href="BUILD.html">BUILD.html</a>。</li>
+</ul>
+
+<h2>Credits</h2>
+<ul>
+  <li><a href="https://github.com/dbus2/zbus">zbus</a> — pure Rust DBus implementation（Rust，MIT）。</li>
+  <li><a href="https://tokio.rs/">tokio</a> — 库内异步运行时（Rust，MIT）。</li>
+  <li><a href="https://gtk.org/">GTK4</a> — 渲染直出的对象模型（C，LGPL-2.1）。</li>
+</ul>
+
+<footer>
+  文档：ABOUT ·
+  <a href="USER.html">USER</a> ·
+  <a href="CORE.html">CORE</a> ·
+  <a href="PROVIDER.html">PROVIDER</a> ·
+  <a href="BUILD.html">BUILD</a>
+</footer>
+
+</main>
+</body>
+</html>

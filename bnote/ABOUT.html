@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>bnote</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>bnote</h1>
+
+<h2 id="sec-1">1. WHAT &amp; WHY</h2>
+<h3>IDEAL</h3>
+<p>bread 的通知守护要正确实现 <code>org.freedesktop.Notifications</code> 的全部协议行为——方法应答、信号回发、hints 归一、能力协商。这些细节繁杂且与业务无关，不应散落在 daemon 业务代码里。</p>
+<h3>GOAL</h3>
+<p>一个独立封装该协议的库：内部自持连接与运行时，宿主只面向异步通知事件流与同步回发命令，不见任何 D-Bus 协议细节；协议行为与官方规范逐条对应，可独立测试。</p>
+<h3>非目标</h3>
+<ul>
+  <li>无图形界面：不做通知的展示与交互。</li>
+  <li>无通知生命周期策略：不做通知队列、超时、常驻与优先级决策——全部归宿主。</li>
+  <li>不做 D-Bus 激活：不安装 <code>org.freedesktop.Notifications.service</code>，也不提供 stub；bread 未运行时不会被通知调用拉起。</li>
+</ul>
+
+<h2 id="sec-2">2. 用户交互</h2>
+<ul>
+  <li>本库无图形界面；「用户」即宿主进程。</li>
+  <li>宿主调用 <code>Session::start</code> 获得 <code>SessionHandle</code> 与 <code>NoticeReceiver</code>：事件用 <code>recv().await</code> 异步消费，关闭、动作、激活令牌用 <code>SessionHandle</code> 同步回发。</li>
+  <li><code>Session::start</code>、<code>SessionHandle</code> 的命令与 <code>shutdown</code> 阻塞是契约的一部分；GTK 程序或其它同步宿主自行把调用放到工作线程。事件接收不轮询、不靠超时循环。</li>
+  <li>客户端 <code>CloseNotification</code> 由本库直接回发 <code>NotificationClosed</code>；宿主只根据 <code>NoticeEvent::Close</code> 移除 UI。</li>
+  <li><code>NoticeReceiver</code> 是单消费者；丢弃它会终止整个会话，宿主应重建新实例。</li>
+  <li>总线名被占用时 <code>Session::start</code> 返回 <code>Error::NameTaken</code>；宿主可稍后再次调用 <code>Session::start</code> 重试，本库不排队、不替换。</li>
+</ul>
+
+<h2 id="sec-3">3. Credits</h2>
+<ul>
+  <li>D-Bus 实现：<a href="https://github.com/dbus2/zbus">zbus</a>（Rust，MIT）。</li>
+  <li>异步运行时：<a href="https://tokio.rs/">tokio</a>（Rust，MIT）。</li>
+</ul>
+
+<footer>
+  文档：ABOUT ·
+  <a href="USER.html">USER</a> ·
+  <a href="CORE.html">CORE</a> ·
+  <a href="PROVIDER.html">PROVIDER</a> ·
+  <a href="BUILD.html">BUILD</a>
+</footer>
+
+</main>
+</body>
+</html>

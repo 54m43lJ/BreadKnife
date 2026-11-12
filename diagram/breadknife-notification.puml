@@ -1,12 +1,18 @@
 @startuml breadknife-notification
-participant "任意应用" as app
-participant DBus
-participant "bread daemon" as daemon
-participant "窗口进程" as win
+participant "通知发送方" as app
+participant "D-Bus 会话总线" as bus
+participant "breadknife（bread）" as bread
 
-app -> DBus: Notify
-DBus -> daemon: 通知参数（org.freedesktop.Notifications）
-daemon -> daemon: 组装并缓存通知记录
-daemon -> win: 推送（全部窗口）
-win -> win: 计数刷新；当前显示器弹窗
+app -> bus: Notify
+bus -> bread: 通知参数
+bread -> bread: 内部处理（归一、缓存、推送、弹窗）
+app -> bus: CloseNotification
+bus -> bread: 关闭请求
+bread -> bus: NotificationClosed
+bus -> app: NotificationClosed
+== 动作回发 ==
+bread -> bus: ActivationToken
+bus -> app: ActivationToken
+bread -> bus: ActionInvoked
+bus -> app: ActionInvoked
 @enduml

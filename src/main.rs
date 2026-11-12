@@ -119,9 +119,9 @@ fn start_daemon(control: &str) {
     };
     let mut command = std::process::Command::new(exe);
     command
-        .arg("__daemon")
         .arg("--socket")
         .arg(control)
+        .arg("__daemon")
         .stdout(std::process::Stdio::null());
     // stderr 保持继承：日志仍可达启动终端
     match command.spawn() {

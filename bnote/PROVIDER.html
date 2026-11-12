@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>bnote — 依赖契约</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+
+<h1>bnote 依赖契约</h1>
+<p>bnote 绑定的底层是 D-Bus 会话总线上的 <code>org.freedesktop.Notifications</code> 服务：连接由本库内部建立并持有，装配时注册并实现该服务；客户端的方法调用经总线进入，三个信号经总线回发。协议完整定义以 <a href="reference/index.html">reference/</a> 为唯一权威，本文只登记本库实现的面；宿主侧契约见 <a href="USER.html">USER.html</a>。</p>
+
+<h2 id="sec-1">1. 术语</h2>
+<table>
+  <tr><th>术语</th><th>定义</th></tr>
+  <tr><td>D-Bus 会话总线</td><td>底层消息总线，本库与其客户端之间的方法调用与信号中介</td></tr>
+  <tr><td>服务名</td><td><code>org.freedesktop.Notifications</code>；本库装配时在总线上注册占用</td></tr>
+  <tr><td>客户端</td><td>经总线调用方法、接收信号的发送方（notify-send、应用等）</td></tr>
+  <tr><td>hints</td><td><code>Notify</code> 携带的附加键值对（紧急度、图像数据等），本库负责解析归一</td></tr>
+</table>
+
+<h2 id="sec-2">2. 通用约定</h2>
+
+<h2 id="sec-3">3. 边界流程</h2>
+
+<h3 id="sec-3-1">3.1. 时序：协议边界</h3>
+<div class="diagram"><img src="diagram/bnote-protocol.svg" alt="时序：客户端 — 会话总线 — bnote 的方法应答与信号回发"></div>
+<ul class="note">
+  <li>方法应答四条、信号回发三条，均以规范对应小节为权威（见 §4）。</li>
+  <li>归一化发生在方法应答内侧，映射见 §4.3。</li>
+</ul>
+
+<h2 id="sec-4">4. 接口</h2>
+
+<h3 id="sec-4-1">4.1. 方法应答</h3>
+<pre><code>服务名：org.freedesktop.Notifications
+对象路径：/org/freedesktop/Notifications
+接口：org.freedesktop.Notifications（装配时注册，常驻应答）
+
+Notify(app_name: String, replaces_id: u32, app_icon: String,
+       summary: String, body: String, actions: Vec&lt;String&gt;,
+       hints: HashMap&lt;String, zbus::zvariant::OwnedValue&gt;, expire_timeout: i32) -&gt; u32
+
+CloseNotification(id: u32)
+GetCapabilities()               -&gt; Vec&lt;String&gt;
+GetServerInformation()          -&gt; (name: String, vendor: String,
+                                    version: String, spec_version: String)</code></pre>
+<table>
+  <tr><th>方法</th><th>说明</th></tr>
+  <tr><td><code>Notify</code></td><td>提交通知，应答其 id；<code>replaces_id</code> 归一见 §4.3</td></tr>
+  <tr><td><code>CloseNotification</code></td><td>客户端请求关闭；关闭后按规范回发 <code>NotificationClosed</code></td></tr>
+  <tr><td><code>GetCapabilities</code></td><td>能力协商；清单由宿主装配时声明，能力契约见 <a href="#sec-4-5">§4.5</a></td></tr>
+  <tr><td><code>GetServerInformation</code></td><td>服务器信息；四元组由宿主装配时声明</td></tr>
+</table>
+<table>
+  <tr><th>D-Bus 签名</th><th>语义</th><th>Rust 形态</th></tr>
+  <tr><td><code>s</code></td><td>字符串</td><td><code>String</code> / <code>&amp;str</code></td></tr>
+  <tr><td><code>u</code></td><td>UINT32</td><td><code>u32</code></td></tr>
+  <tr><td><code>i</code></td><td>INT32</td><td><code>i32</code></td></tr>
+  <tr><td><code>as</code></td><td>字符串数组</td><td><code>Vec&lt;String&gt;</code></td></tr>
+  <tr><td><code>a{sv}</code></td><td>字符串 → 变体字典</td><td><code>HashMap&lt;String, zbus::zvariant::OwnedValue&gt;</code></td></tr>
+  <tr><td><code>(ssss)</code></td><td>四元组</td><td><code>(String, String, String, String)</code></td></tr>
+  <tr><td><code>uu</code> / <code>us</code></td><td>信号参数对</td><td><code>(u32, u32)</code> / <code>(u32, String)</code></td></tr>
+  <tr><td><code>susssasa{sv}i</code></td><td><code>Notify</code> 参数组合</td><td>见 §4.1 签名</td></tr>
+</table>
+
+<h3 id="sec-4-2">4.2. 信号回发</h3>
+<pre><code>NotificationClosed(id: u32, reason: u32)
+ActionInvoked(id: u32, action_key: String)
+ActivationToken(id: u32, token: String)</code></pre>
+<table>
+  <tr><th>信号</th><th>触发</th></tr>
+  <tr><td><code>NotificationClosed</code></td><td>通知被关闭（过期 / 用户 / 客户端请求），原因码归一见 §4.3</td></tr>
+  <tr><td><code>ActionInvoked</code></td><td>宿主转达用户对动作的点击</td></tr>
+  <tr><td><code>ActivationToken</code></td><td>宿主转达启动激活令牌</td></tr>
+</table>
+
+<h3 id="sec-4-3">4.3. 参数归一与信号编码</h3>
+
+<h4>入站</h4>
+<table>
+  <tr><th>协议元素</th><th>归一目标</th><th>规则</th></tr>
+  <tr><td><code>replaces_id</code></td><td><code>Notice.id</code></td><td>非 0 沿用；0 由本库新分配；交付宿主的 id 恒非 0（<a href="reference/9.dbus-protocol.html#command-notify">规范 §Notify</a>）</td></tr>
+  <tr><td><code>app_name</code></td><td><code>Notice.app_name</code></td><td>原样</td></tr>
+  <tr><td><code>summary</code></td><td><code>Notice.summary</code></td><td>原样</td></tr>
+  <tr><td><code>body</code></td><td><code>Notice.body</code></td><td>原样</td></tr>
+  <tr><td><code>actions</code> 参数</td><td><code>Notice.actions</code></td><td>按（key, label）成对解析；奇数个 → D-Bus <code>InvalidArgs</code></td></tr>
+  <tr><td>hint <code>action-icons</code></td><td><code>Notice.action_icons</code></td><td>BOOLEAN；缺失、类型不符或 false → false</td></tr>
+  <tr><td>hint <code>urgency</code></td><td><code>Notice.urgency</code></td><td>byte 0/1/2 → Low / Normal / Critical；缺失、未知值或类型不符 → Normal</td></tr>
+  <tr><td>hint <code>transient</code></td><td><code>Notice.transient</code></td><td>BOOLEAN；缺失、类型不符或 false → false</td></tr>
+  <tr><td>hint <code>resident</code></td><td><code>Notice.resident</code></td><td>BOOLEAN；缺失、类型不符或 false → false</td></tr>
+  <tr><td>hint <code>sound-file</code></td><td><code>Notice.sound_file</code></td><td>STRING；缺失、类型不符或空串 → <code>None</code></td></tr>
+  <tr><td>hint <code>sound-name</code></td><td><code>Notice.sound_name</code></td><td>STRING；缺失、类型不符或空串 → <code>None</code></td></tr>
+  <tr><td>hint <code>suppress-sound</code></td><td><code>Notice.suppress_sound</code></td><td>BOOLEAN；缺失、类型不符或 false → false</td></tr>
+  <tr><td><code>app_icon</code> 与 hints <code>image-data</code> / <code>image-path</code> / <code>icon_data</code></td><td><code>Notice.icon</code></td><td>按规范优先级取一个：<code>image-data</code> &gt; <code>image-path</code> &gt; <code>app_icon</code> &gt; <code>icon_data</code>；<code>app_icon</code> / <code>image-path</code> 非空 → <code>NoticeIcon::Name</code>（主题名或 <code>file://</code> URI）；<code>image-data</code> / <code>icon_data</code> 为 8-bit、通道数由 <code>has_alpha</code> 决定 → <code>NoticeIcon::Pixels</code>（RGB/RGBA，按 rowstride 压紧）；全空 → <code>NoticeIcon::None</code></td></tr>
+  <tr><td><code>expire_timeout</code> 参数</td><td><code>Notice.expire_timeout_ms</code></td><td>-1（及其它负值）→ <code>None</code>（按宿主默认）；0 → <code>Some(0)</code>（常驻）；正数 → <code>Some(ms)</code>（<a href="reference/9.dbus-protocol.html#command-notify">规范 §Notify</a>）</td></tr>
+</table>
+<ul class="note">
+  <li>未知 hint 键忽略；不支持的 <code>image-data</code> / <code>icon_data</code> 不报错，按上述优先级回退；<code>image-data</code> 的 <code>bits_per_sample</code> 必须为 8，<code>channels</code> 必须为 <code>has_alpha ? 4 : 3</code>，否则忽略该 hint。格式与优先级见 <a href="reference/5.icons-and-images.html#icons-and-images-formats">规范 §5</a>，hints 表见 <a href="reference/8.hints.html#id-1.9.7">规范 §8</a>。</li>
+</ul>
+
+<h4>出站</h4>
+<table>
+  <tr><th>内部数据</th><th>协议元素</th><th>规则</th></tr>
+  <tr><td><code>CloseReason::Expired</code></td><td><code>NotificationClosed.reason</code></td><td>1</td></tr>
+  <tr><td><code>CloseReason::Dismissed</code></td><td><code>NotificationClosed.reason</code></td><td>2</td></tr>
+  <tr><td><code>CloseReason::CloseRequest</code></td><td><code>NotificationClosed.reason</code></td><td>3；客户端 <code>CloseNotification</code> 时由本库自动发出</td></tr>
+  <tr><td>（规范保留）</td><td><code>NotificationClosed.reason</code></td><td>4 = undefined/reserved；本库不产生</td></tr>
+  <tr><td><code>Notice.id</code></td><td><code>NotificationClosed.id</code> / <code>ActionInvoked.id</code> / <code>ActivationToken.id</code></td><td>原样</td></tr>
+  <tr><td><code>Action.key</code></td><td><code>ActionInvoked.action_key</code></td><td>原样</td></tr>
+  <tr><td><code>activation_token</code> 的 token 参数</td><td><code>ActivationToken.token</code></td><td>原样</td></tr>
+</table>
+<ul class="note">
+  <li>原因码 4（undefined/reserved）由规范保留、本库不产生；规范定义见 <a href="reference/9.dbus-protocol.html#signal-notification-closed">§9.2.1</a>。</li>
+  <li>归一目标的数据对象定义见 <a href="USER.html#sec-4-3">USER §4.3</a>。</li>
+</ul>
+
+<h3 id="sec-4-4">4.4. 错误应答</h3>
+<pre><code>org.freedesktop.DBus.Error.InvalidArgs(message)
+org.freedesktop.DBus.Error.Failed(message)</code></pre>
+<table>
+  <tr><th>错误名</th><th>含义 / 客户端动作</th></tr>
+  <tr><td><code>org.freedesktop.DBus.Error.InvalidArgs</code></td><td><code>Notify</code> / <code>CloseNotification</code> 参数不合法（actions 非成对、<code>CloseNotification</code> 的 id 不存在或为 0 等）；修正后重试。未知 id 的 <code>CloseNotification</code> 使用空消息体</td></tr>
+  <tr><td><code>org.freedesktop.DBus.Error.Failed</code></td><td>服务端内部失败或会话已停机（<code>NotificationClosed</code> 发射失败、<code>Notify</code> 事件投递失败）；记录并重试或降级</td></tr>
+</table>
+<ul class="note">
+  <li>线上只有 D-Bus 错误名，没有 Rust 的 <code>Error::InvalidArgs</code> 概念；宿主侧 <code>Error</code> 是另一套 API，见 <a href="USER.html#sec-4-2">USER §4.2</a>。</li>
+  <li>未知 hints、未知 urgency 值或不支持的 <code>image-data</code> 不返回错误：前者忽略，urgency 回退 Normal，图像 hint 按 §4.3 回退。</li>
+  <li><code>CloseNotification</code> 的宿主 <code>NoticeEvent::Close</code> 是辅助通知：事件投递失败不回滚已经完成的关闭，也不改变 D-Bus 结果；关闭结果以 id 失效和 <code>NotificationClosed</code> 为准。</li>
+  <li>错误名沿用 D-Bus 标准错误；规范未定义通知专用错误，权威定义见 <a href="https://dbus.freedesktop.org/doc/dbus-specification.html#message-protocol-messages-error">D-Bus 规范 · Errors</a>。</li>
+</ul>
+
+<h3 id="sec-4-5">4.5. 标准能力清单</h3>
+<p>能力由宿主在 <code>SessionConfig.capabilities</code> 中声明，bnote 原样交付 <code>GetCapabilities</code>；语义以 <a href="reference/9.dbus-protocol.html#command-get-capabilities">规范 §9.1.1</a> 为准。下表定义 bread 宿主声明的能力契约。</p>
+<table>
+  <tr><th>能力</th><th>说明</th></tr>
+  <tr><td><code>action-icons</code></td><td>通知带 <code>action-icons</code> hint 时，动作 key 作为图标名渲染，label 作为 tooltip / 无障碍文本；图标未命中回退文字。</td></tr>
+  <tr><td><code>actions</code></td><td>渲染动作按钮并执行；默认文字，<code>action-icons</code> hint + 能力支持时用图标。左键触发 default / 唯一动作后关闭该条（<code>resident</code> 除外）。</td></tr>
+  <tr><td><code>body</code></td><td>显示正文。</td></tr>
+  <tr><td><code>body-hyperlinks</code></td><td>正文中的超链接可点击。</td></tr>
+  <tr><td><code>body-images</code></td><td>正文中的图片内联显示。</td></tr>
+  <tr><td><code>body-markup</code></td><td>解析规范允许的标记文本；不支持的标记按纯文本降级。</td></tr>
+  <tr><td><code>icon-static</code></td><td>单帧图标；与 <code>icon-multi</code> 互斥。</td></tr>
+  <tr><td><code>persistence</code></td><td>内存保留至 daemon / 桌面会话结束；<code>transient</code> 绕过，<code>resident</code> 动作后保留；不落盘、不跨重启。</td></tr>
+  <tr><td><code>sound</code></td><td>播放 <code>sound-file</code> / <code>sound-name</code>；<code>suppress-sound</code> 抑制；宿主后端为 <code>canberra-gtk-play</code>，缺席时不声明该能力。</td></tr>
+</table>
+<ul class="note">
+  <li>bnote 只校验能力串格式与互斥，不解释能力语义；本表约束的是 bread 宿主的声明，不是库的强制白名单。</li>
+  <li><code>SessionConfig.capabilities</code> 返回本表声明的能力；未列出的能力（含 <code>icon-multi</code>）与 <code>x-vendor-*</code> 扩展不声明。</li>
+  <li><code>icon-static</code> / <code>icon-multi</code> 互斥，不得同时声明；本契约声明 <code>icon-static</code>。</li>
+  <li><code>icon-multi</code> 本期不实现：<code>NoticeIcon</code> 只承载单帧；多帧需要协议参数、模型与渲染链路扩展，留待后续版本。</li>
+  <li><code>action-icons</code> 依赖 bnote 暴露同名 hint 并完成解析；<code>action_icons</code> / <code>transient</code> / <code>resident</code> / <code>sound_file</code> / <code>sound_name</code> / <code>suppress_sound</code> 已由 bnote 投影到 <code>Notice</code>。</li>
+  <li><code>body-markup</code> / <code>body-hyperlinks</code> / <code>body-images</code> 均声明；渲染细节与降级见 <a href="../USER.html#sec-5-2-5">USER §5.2.5</a>。</li>
+  <li><code>persistence</code> 的保留语义与 <code>transient</code> / <code>resident</code> 见 <a href="USER.html#sec-4-3">USER §4.3</a>。</li>
+  <li>能力名称、语义与互斥规则以 <a href="reference/9.dbus-protocol.html#command-get-capabilities">规范 §9.1.1</a> 为准。</li>
+</ul>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>7. Urgency Levels — Desktop Notifications Specification</title>
+</head>
+<body>
+<p>Cleaned offline copy, styling removed. Authoritative text: <a href="https://specifications.freedesktop.org/notification-spec/latest/urgency-levels.html">https://specifications.freedesktop.org/notification-spec/latest/urgency-levels.html</a></p>
+<hr>
+<div id="urgency-levels"><h2>7 Urgency Levels </h2><p>
+   Notifications have an urgency level associated with them. This defines
+   the importance of the notification. For example, "Joe Bob signed on"
+   would be a low urgency. "You have new mail" or "A USB device was unplugged"
+   would be a normal urgency. "Your computer is on fire" would be a critical
+   urgency.
+  </p><p>Urgency levels are defined as follows:</p><div id="id-1.8.4"><h6>Table 3: Urgency Levels </h6><table><colgroup><col><col></colgroup><thead><tr><th>Type</th><th>Description</th></tr></thead><tbody><tr><td>0</td><td>Low</td></tr><tr><td>1</td><td>Normal</td></tr><tr><td>2</td><td>Critical</td></tr></tbody></table></div><p>
+   Developers must use their own judgement when deciding the urgency of a
+   notification. Typically, if the majority of programs are using the same
+   level for a specific type of urgency, other applications should follow
+   them.
+  </p><p>
+   For low and normal urgencies, server implementations may display the
+   notifications how they choose. They should, however, have a sane
+   expiration timeout dependent on the urgency level.
+  </p><p>
+   Critical notifications should not automatically expire, as they are
+   things that the user will most likely want to know about. They should
+   only be closed when the user dismisses them, for example, by clicking on
+   the notification.
+  </p></div>
+</body>
+</html>

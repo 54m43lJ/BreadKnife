@@ -170,7 +170,7 @@ fn handle_event(handle: &TrayHandle, cards: &Cards, ev: TrayEvent) {
 fn repl(handle: &TrayHandle, cards: &Cards, t: &[&str]) -> bool {
     match t[0] {
         "help" | "h" => print_help(),
-        "list" | "l" => list_items(cards),
+        "list" | "l" => list_items(handle, cards),
         "info" => with_target(handle, cards, t.get(1), |id| match handle.item(id) {
             Some(item) => print_item(&item),
             None => println!("no data for {id}"),
@@ -300,7 +300,7 @@ fn print_help() {
     );
 }
 
-fn list_items(cards: &Cards) {
+fn list_items(handle: &breadpan::TrayHandle, cards: &Cards) {
     let cards = cards.lock().unwrap();
     if cards.is_empty() {
         println!("no items registered");
@@ -315,7 +315,7 @@ fn list_items(cards: &Cards) {
             Some(i) => (
                 i.title.clone().unwrap_or_else(|| "-".into()),
                 format!("{:?}", i.status),
-                i.alive,
+                handle.is_alive(id),
             ),
             None => ("-".into(), "?".into(), false),
         };
@@ -353,7 +353,12 @@ fn print_item(item: &TrayItem) {
     println!("  overlay_icon   : {}", opt_icon(&item.overlay_icon));
     println!("  attention_icon : {}", opt_icon(&item.attention_icon));
     if let Some(t) = &item.tooltip {
-        println!("  tooltip        : {:?} / {:?}", t.title, t.description);
+        println!(
+            "  tooltip        : icon={} title={:?} description={:?}",
+            opt_icon(&t.icon),
+            t.title,
+            t.description
+        );
     } else {
         println!("  tooltip        : -");
     }

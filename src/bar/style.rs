@@ -23,10 +23,10 @@ pub fn load(path: &str) -> Result<(), String> {
 /// reload 指令路径：先卸载旧 provider 再按同一路径重读（改色即见）。
 pub fn reload(path: &str) -> Result<(), String> {
     CURRENT.with(|c| {
-        if let Some(old) = c.borrow_mut().take() {
-            if let Some(display) = gtk::gdk::Display::default() {
-                gtk::style_context_remove_provider_for_display(&display, &old);
-            }
+        if let Some(old) = c.borrow_mut().take()
+            && let Some(display) = gtk::gdk::Display::default()
+        {
+            gtk::style_context_remove_provider_for_display(&display, &old);
         }
     });
     load(path)

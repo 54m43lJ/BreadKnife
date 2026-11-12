@@ -46,12 +46,14 @@ pub(crate) async fn read_layer(
         )
         .await?;
 
-    // 子层节点（depth=1 时子树为空数组）
-    let children: Vec<NodeRaw> = node
-        .2
-        .into_iter()
-        .filter_map(|v| Value::from(v).try_into().ok())
-        .collect();
+    // 子层节点（depth=1 时子树为空数组）；任一条目结构非法即协议错误。
+    let mut children: Vec<NodeRaw> = Vec::with_capacity(node.2.len());
+    for value in node.2 {
+        let child: NodeRaw = Value::from(value)
+            .try_into()
+            .map_err(|e| TrayError::Protocol(format!("invalid dbusmenu child node: {e}")))?;
+        children.push(child);
+    }
 
     // GetGroupProperties：条目属性查询（布局属性为底、组属性覆盖）。
     let ids: Vec<i32> = children.iter().map(|(id, _, _)| *id).collect();

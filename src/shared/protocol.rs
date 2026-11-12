@@ -1,5 +1,5 @@
 //! IPC 消息类型（请求 / 应答 / 推送）与线格式（帧编码）。
-//! 消息契约见 ARCHITECTURE.html §4.4；路径契约见 §4.2 与 §3.3。
+//! 消息契约见 USER.html §4 与 CORE.html §4.18；路径契约见 CORE.html §4.18。
 
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -8,8 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::shared::model::{
-    InteractionOutcome, MenuSnapshot, NotificationRecord, StateDelta, TrayUpdate,
-    WindowSnapshot,
+    InteractionOutcome, MenuSnapshot, NotificationRecord, StateDelta, TrayUpdate, WindowSnapshot,
 };
 
 /// 单帧上限：位图图标经 base64 跨 JSON 时的护栏。
@@ -35,19 +34,73 @@ pub enum MediaOp {
     Prev,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NotificationDismissReason {
+    Dismissed,
+    Expired,
+}
+
 /// 窗口 → daemon（请求，均有应答）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Request {
     /// 窗口接入握手：登记连接归属的显示器，daemon 随即推送全量快照。
-    Hello { monitor: String },
-    TrayInteract { item: String, input: InteractInput },
-    TrayMenuRead { item: String },
-    TrayMenuExpand { item: String, entry: i32 },
-    TrayMenuActivate { item: String, entry: i32 },
-    WorkspaceSwitch { target: String },
-    MediaControl { op: MediaOp },
-    VolumeSet { value: u32 },
-    BrightnessSet { value: u32 },
+    Hello {
+        monitor: String,
+    },
+    TrayInteract {
+        item: String,
+        input: InteractInput,
+    },
+    TrayMenuRead {
+        item: String,
+    },
+    TrayMenuExpand {
+        item: String,
+        entry: i32,
+    },
+    TrayMenuActivate {
+        item: String,
+        entry: i32,
+    },
+    WorkspaceSwitch {
+        target: String,
+    },
+    MinimizedRestore {
+        address: String,
+    },
+    MinimizedClose {
+        address: String,
+    },
+    MediaControl {
+        op: MediaOp,
+    },
+    VolumeSet {
+        value: u32,
+    },
+    BrightnessSet {
+        value: u32,
+    },
+    NotificationRetry,
+    /// 用户 dismiss / 超时：从贴栏弹窗移除，默认保留在通知中心。
+    NotificationDismiss {
+        id: u32,
+        reason: NotificationDismissReason,
+    },
+    /// 通知中心清理单条：从中心与弹窗彻底移除。
+    NotificationRemove {
+        id: u32,
+    },
+    /// 贴栏弹窗全部 dismiss（中心保留）。
+    NotificationDismissAll,
+    NotificationClearGroup {
+        app_name: String,
+    },
+    NotificationClear,
+    NotificationActivate {
+        id: u32,
+        action_key: Option<String>,
+        activation_token: Option<String>,
+    },
 }
 
 /// daemon → 窗口（请求应答）。
@@ -64,22 +117,37 @@ pub enum Response {
 pub enum Push {
     /// 首连全量快照。
     Snapshot(WindowSnapshot),
-    /// 增量：工作区（定向）/ 活动窗口 / 系统状态。
+    /// 增量：工作区（定向）/ 活动窗口 / 系统状态 / 通知状态 / 最小化列表。
     State(StateDelta),
-    /// 托盘项增 / 删 / 改。
+    /// 托盘项增 / 删 / 改 / 重键。
     Tray(TrayUpdate),
     /// 弹窗打开期间的菜单刷新触发（弹窗未开该 Item 的窗口忽略）。
-    MenuChanged { item: String },
+    MenuChanged {
+        item: String,
+    },
+    /// 全部窗口：通知中心缓存。
     Notification(NotificationRecord),
+    /// 仅当前显示器：贴栏弹窗。
+    NotificationPopup(NotificationRecord),
+    /// 贴栏弹窗移除（中心保留，dismiss 语义）。
+    NotificationDismissed(u32),
+    NotificationRemoved(u32),
+    NotificationCleared(Option<String>),
     /// 按 daemon 跟踪的路径重读 CSS。
     Reload,
 }
 
-/// 控制指令（§4.2 行协议的服务端解析结果）。
+/// 控制指令（USER §4.2 行协议的服务端解析结果）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum ControlCommand {
-    Open { name: String, monitor: Option<String> },
-    Close { name: String, monitor: Option<String> },
+    Open {
+        name: String,
+        monitor: Option<String>,
+    },
+    Close {
+        name: String,
+        monitor: Option<String>,
+    },
     OpenAll,
     CloseAll,
     Exit,
@@ -90,6 +158,7 @@ pub enum ControlCommand {
 
 /// 统一帧：请求 / 应答携带关联 id（推送 id 恒 0）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Frame {
     Request { id: u64, request: Request },
@@ -109,19 +178,22 @@ pub fn read_frame(stream: &mut UnixStream) -> io::Result<Frame> {
     stream.read_exact(&mut len)?;
     let len = u32::from_le_bytes(len) as usize;
     if len == 0 || len > MAX_FRAME {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame length out of range"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "frame length out of range",
+        ));
     }
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf)?;
     serde_json::from_slice(&buf).map_err(|e| io::Error::other(e.to_string()))
 }
 
-// ── 路径（§4.2 控制接口、§3.3 进程形态）──
+// ── 路径（控制接口、进程形态）──
 
 pub fn runtime_dir() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir())
+        .unwrap_or_else(std::env::temp_dir)
 }
 
 pub fn default_control_socket() -> PathBuf {
@@ -141,6 +213,14 @@ pub fn pid_file() -> PathBuf {
     runtime_dir().join("bread.pid")
 }
 
+/// 清理默认运行时文件（PID 文件、控制套接字、窗口套接字）。
+pub fn shutdown_files() {
+    let control = default_control_socket();
+    let _ = std::fs::remove_file(pid_file());
+    let _ = std::fs::remove_file(&control);
+    let _ = std::fs::remove_file(window_socket_for(&control));
+}
+
 /// daemon 存活探测：读 PID 文件后核对 /proc（窗口自主退出路径用）。
 pub fn daemon_alive() -> bool {
     let Ok(pid) = std::fs::read_to_string(pid_file()) else {
@@ -153,14 +233,14 @@ pub fn daemon_alive() -> bool {
     Path::new(&format!("/proc/{pid}")).exists()
 }
 
-// ── 控制行协议解析（§4.2：一行一条指令）──
+// ── 控制行协议解析（一行一条指令）──
 
 pub fn parse_control_line(line: &str) -> Option<ControlCommand> {
     let tokens: Vec<&str> = line.split_whitespace().collect();
     let monitor = |tokens: &[&str]| -> Option<Option<String>> {
         match tokens {
             [.., "-m", mon] => Some(Some(mon.to_string())),
-            _ if tokens.iter().any(|t| *t == "-m") => None, // -m 缺参
+            _ if tokens.contains(&"-m") => None, // -m 缺参
             _ => Some(None),
         }
     };
@@ -169,10 +249,14 @@ pub fn parse_control_line(line: &str) -> Option<ControlCommand> {
         ["close-all"] => Some(ControlCommand::CloseAll),
         ["exit"] => Some(ControlCommand::Exit),
         ["reload"] => Some(ControlCommand::Reload),
-        ["open", name, rest @ ..] => monitor(rest)
-            .map(|m| ControlCommand::Open { name: name.to_string(), monitor: m }),
-        ["close", name, rest @ ..] => monitor(rest)
-            .map(|m| ControlCommand::Close { name: name.to_string(), monitor: m }),
+        ["open", name, rest @ ..] => monitor(rest).map(|m| ControlCommand::Open {
+            name: name.to_string(),
+            monitor: m,
+        }),
+        ["close", name, rest @ ..] => monitor(rest).map(|m| ControlCommand::Close {
+            name: name.to_string(),
+            monitor: m,
+        }),
         _ => None,
     }
 }

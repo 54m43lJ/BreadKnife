@@ -18,7 +18,6 @@
 //! 「先收集目标、释放借用、再逐个关闭」。
 
 use std::cell::{Cell, RefCell};
-use std::io::{Read, Write};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -75,8 +74,7 @@ impl PopupManager {
         let m = mgr.clone();
         click.connect_pressed(move |_g, _n, _x, _y| {
             m.press_closed.borrow_mut().clear();
-            let closed: Vec<String> =
-                m.open.borrow().iter().map(|(_, g)| g.clone()).collect();
+            let closed: Vec<String> = m.open.borrow().iter().map(|(_, g)| g.clone()).collect();
             m.close_all();
             *m.press_closed.borrow_mut() = closed;
         });
@@ -163,10 +161,10 @@ impl PopupManager {
                 .name("hover-poll".into())
                 .spawn(move || {
                     while !stop.load(Ordering::Relaxed) {
-                        if let Some(pos) = cursor_pos() {
-                            if tx.send(pos).is_err() {
-                                break;
-                            }
+                        if let Some(pos) = cursor_pos()
+                            && tx.send(pos).is_err()
+                        {
+                            break;
                         }
                         std::thread::sleep(HOVER_POLL);
                     }
@@ -328,18 +326,15 @@ pub fn hover_switch<F: Fn(u64) + 'static>(
     });
 }
 
-/// 合成器指针位置（Hyprland 命令套接字 `j/cursorpos`；轮询专用，失败返回 None）。
+/// 合成器指针位置（`hyprctl -j cursorpos`；只读查询，不写 `.socket.sock`）。
 fn cursor_pos() -> Option<(f64, f64)> {
-    let sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok()?;
-    let runtime = std::env::var("XDG_RUNTIME_DIR").ok()?;
-    let mut sock = std::os::unix::net::UnixStream::connect(format!(
-        "{runtime}/hypr/{sig}/.socket.sock"
-    ))
-    .ok()?;
-    sock.set_read_timeout(Some(Duration::from_millis(200))).ok()?;
-    sock.write_all(b"j/cursorpos").ok()?;
-    let mut resp = String::new();
-    sock.read_to_string(&mut resp).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&resp).ok()?;
-    Some((v.get("x")?.as_f64()?, v.get("y")?.as_f64()?))
+    let output = std::process::Command::new("hyprctl")
+        .args(["-j", "cursorpos"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    Some((value.get("x")?.as_f64()?, value.get("y")?.as_f64()?))
 }

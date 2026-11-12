@@ -1,5 +1,5 @@
 //! bar 窗口进程（View，GTK4）：装配与 GTK 主循环；层壳窗口实例；数据分发。
-//! 启动调用栈见 CODE.html §4.1.2。
+//! 启动调用栈见 CORE.html §5.1.2。
 
 pub mod ipc;
 pub mod modules;
@@ -11,16 +11,17 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 use gtk::prelude::*;
-use gtk::{gdk, glib, Application};
+use gtk::{Application, gdk, glib};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 
 use crate::shared::model::WindowSnapshot;
 use crate::shared::protocol as wire;
 use ipc::IpcClient;
 use modules::center::CenterWidget;
+use modules::dock::DockWidget;
+use modules::info::InfoCenterWidget;
 use modules::popup::PopupManager;
 use modules::tray::TrayWidget;
-use modules::window_info::WindowInfoWidget;
 use modules::workspace::WorkspaceWidget;
 
 const BAR_HEIGHT: i32 = 30;
@@ -29,10 +30,7 @@ const UI_DRAIN: std::time::Duration = std::time::Duration::from_millis(40);
 
 /// 窗口进程入口：连接 IPC → 取快照 → GTK 主循环。
 pub fn run(monitor: &str, socket: &Path) -> Result<(), String> {
-    let app = Application::new(
-        Some(crate::APP_ID),
-        gtk::gio::ApplicationFlags::NON_UNIQUE,
-    );
+    let app = Application::new(Some(crate::APP_ID), gtk::gio::ApplicationFlags::NON_UNIQUE);
     let monitor = monitor.to_string();
     let socket = socket.to_path_buf();
     {
@@ -50,21 +48,40 @@ pub fn run(monitor: &str, socket: &Path) -> Result<(), String> {
 
 /// UI 任务：推送 + 异步回执（工作线程投递，GTK 主线程执行）。
 /// 只携带纯数据（锚定部件由 TrayInner 的登记表按 item/entry 反查）。
+#[allow(clippy::large_enum_variant)]
 pub enum UiTask {
     Push(wire::Push),
-    TrayInteractDone { item: String, result: Result<wire::Response, String> },
-    TrayExpandDone { item: String, entry: i32, result: Result<wire::Response, String> },
-    TrayActivateDone { item: String, result: Result<wire::Response, String> },
-    TrayMenuReadDone { item: String, result: Result<wire::Response, String> },
+    TrayInteractDone {
+        item: String,
+        result: Result<wire::Response, String>,
+    },
+    TrayExpandDone {
+        item: String,
+        entry: i32,
+        result: Result<wire::Response, String>,
+    },
+    TrayActivateDone {
+        item: String,
+        result: Result<wire::Response, String>,
+    },
+    TrayMenuReadDone {
+        item: String,
+        result: Result<wire::Response, String>,
+    },
     /// 菜单跟踪悬停切换：token 为悬停驻留世代（过期回执丢弃）。
-    TrayHoverMenu { item: String, token: u64, result: Result<wire::Response, String> },
+    TrayHoverMenu {
+        item: String,
+        token: u64,
+        result: Result<wire::Response, String>,
+    },
 }
 
 pub struct WindowApp {
     _app: Application,
     css_path: RefCell<String>,
     workspace: WorkspaceWidget,
-    info: WindowInfoWidget,
+    info: InfoCenterWidget,
+    dock: Rc<DockWidget>,
     tray: TrayWidget,
     center: CenterWidget,
 }
@@ -83,6 +100,7 @@ impl WindowApp {
             .build();
 
         // 层壳窗口：锚定 Top|Left|Right
+        window.add_css_class("bread-bar");
         window.init_layer_shell();
         window.set_layer(Layer::Top);
         window.set_anchor(Edge::Left, true);
@@ -106,9 +124,29 @@ impl WindowApp {
         let popup = PopupManager::install(window.upcast_ref());
 
         let workspace = WorkspaceWidget::new(ipc.clone());
-        let info = WindowInfoWidget::new(window.upcast_ref(), popup.clone());
-        let tray = TrayWidget::new(ipc.clone(), ui_tx.clone(), window.upcast_ref(), popup.clone());
+        let info = InfoCenterWidget::new(ipc.clone(), monitor, window.upcast_ref(), popup.clone());
+        let dock = DockWidget::new(ipc.clone(), monitor);
+        let tray = TrayWidget::new(
+            ipc.clone(),
+            ui_tx.clone(),
+            window.upcast_ref(),
+            popup.clone(),
+        );
         let center = CenterWidget::new(ipc.clone(), window.upcast_ref(), popup.clone());
+
+        // 通知中心刷新按钮 → daemon 手动重试。
+        {
+            let ipc = ipc.clone();
+            info.set_notification_retry(Rc::new(move || {
+                let ipc = ipc.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = ipc.request(wire::Request::NotificationRetry) {
+                        eprintln!("[info] notification retry failed: {e}");
+                    }
+                });
+            }));
+        }
+
         let layout = gtk::CenterBox::new();
         layout.set_start_widget(Some(&workspace.container));
         layout.set_center_widget(Some(&info.container));
@@ -125,6 +163,7 @@ impl WindowApp {
             css_path: RefCell::new(String::new()),
             workspace,
             info,
+            dock,
             tray,
             center,
         });
@@ -138,7 +177,7 @@ impl WindowApp {
             glib::ControlFlow::Continue
         });
 
-        // daemon 存活周期检查：确认已退出 → 自主退出（退出路径②，CODE §4.2.3）
+        // daemon 存活周期检查：确认已退出 → 自主退出（退出路径②）
         let app_watch = app.clone();
         glib::timeout_add_seconds_local(2, move || {
             if !wire::daemon_alive() {
@@ -156,21 +195,19 @@ impl WindowApp {
     fn handle_task(&self, task: UiTask) {
         match task {
             UiTask::Push(push) => self.handle_push(push),
-            UiTask::TrayInteractDone { item, result } => {
-                self.tray.on_interact_done(&item, result)
-            }
-            UiTask::TrayExpandDone { item, entry, result } => {
-                self.tray.on_expand_done(&item, entry, result)
-            }
-            UiTask::TrayActivateDone { item, result } => {
-                self.tray.on_activate_done(&item, result)
-            }
-            UiTask::TrayMenuReadDone { item, result } => {
-                self.tray.on_menu_read_done(&item, result)
-            }
-            UiTask::TrayHoverMenu { item, token, result } => {
-                self.tray.on_hover_menu_done(&item, token, result)
-            }
+            UiTask::TrayInteractDone { item, result } => self.tray.on_interact_done(&item, result),
+            UiTask::TrayExpandDone {
+                item,
+                entry,
+                result,
+            } => self.tray.on_expand_done(&item, entry, result),
+            UiTask::TrayActivateDone { item, result } => self.tray.on_activate_done(&item, result),
+            UiTask::TrayMenuReadDone { item, result } => self.tray.on_menu_read_done(&item, result),
+            UiTask::TrayHoverMenu {
+                item,
+                token,
+                result,
+            } => self.tray.on_hover_menu_done(&item, token, result),
         }
     }
 
@@ -188,16 +225,26 @@ impl WindowApp {
                 if let Some(system) = &delta.system {
                     self.center.set_system(system);
                 }
+                if let Some(status) = &delta.notification {
+                    self.info.set_notification_status(status);
+                }
+                if let Some(minimized) = &delta.minimized {
+                    self.dock.set_items(minimized);
+                }
             }
             Tray(update) => self.tray.apply(update),
             MenuChanged { item } => self.tray.menu_changed(&item),
-            Notification(record) => self.info.notify(record),
+            Notification(record) => self.info.upsert_center(record),
+            NotificationPopup(record) => self.info.push_popup(record),
+            NotificationDismissed(id) => self.info.dismiss_popup(id),
+            NotificationRemoved(id) => self.info.remove_notification(id),
+            NotificationCleared(app_name) => self.info.clear_notifications(app_name.as_deref()),
             Reload => {
                 let path = self.css_path.borrow().clone();
-                if !path.is_empty() {
-                    if let Err(e) = style::reload(&path) {
-                        eprintln!("[window] css reload failed: {e}");
-                    }
+                if !path.is_empty()
+                    && let Err(e) = style::reload(&path)
+                {
+                    eprintln!("[window] css reload failed: {e}");
                 }
             }
         }
@@ -206,11 +253,11 @@ impl WindowApp {
     fn apply_snapshot(&self, snapshot: &WindowSnapshot) {
         self.workspace.rebuild(&snapshot.workspaces);
         self.info.set_active(&snapshot.active);
+        self.info.set_records(&snapshot.notifications);
+        self.info.set_notification_status(&snapshot.notification);
+        self.dock.set_items(&snapshot.minimized);
         self.tray.rebuild(&snapshot.tray);
         self.center.set_system(&snapshot.system);
-        for record in &snapshot.notifications {
-            self.info.notify(record.clone());
-        }
         let css = self.css_path.borrow().clone();
         if css != snapshot.css_path {
             *self.css_path.borrow_mut() = snapshot.css_path.clone();

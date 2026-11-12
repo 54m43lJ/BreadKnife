@@ -7,6 +7,7 @@ use crate::dbus::bus::BusCenter;
 use crate::dbus::menu;
 use crate::dbus::{DBUSMENU_IFACE, ITEM_IFACE_FD, ITEM_IFACE_KDE};
 use crate::events::{InteractionOp, TrayEvent};
+use crate::props;
 use crate::tracker::ItemEntry;
 use crate::{InteractionOutcome, TrayError};
 
@@ -29,7 +30,8 @@ pub(crate) enum Input {
 ///   Introspect 说谎、探测调用会误触激活；左键出菜单是宿主侧既定策略，
 ///   菜单由宿主经 dbusmenu 渲染，不依赖 item 端激活）
 /// - middle_click：SecondaryActivate(x,y)
-/// - right_click：DBusMenu 在册 → Menu 流程；否则 ContextMenu(x,y)（SNI 原生 fallback）
+/// - right_click：DBusMenu 在册 → Menu 流程；未在册则补探一次 `Menu` 属性，
+///   仍无才 ContextMenu(x,y)（SNI 原生 fallback）
 /// - scroll_*：Scroll(∓steps, vertical / horizontal)，符号约定 up/left 为负
 ///
 /// Menu 流程现场取数并同步返回快照；VOID 调用受理即返回（回执经事件流）。
@@ -38,10 +40,13 @@ pub(crate) async fn route(
     id: &str,
     input: Input,
 ) -> Result<InteractionOutcome, TrayError> {
-    let entry = bus.entry_of(&id.to_string())?;
+    let mut entry = bus.entry_of(&id.to_string())?;
 
     // 左键独走同步路径：Activate 需就地知晓成败以决定是否回退 Menu 流程
     if let Input::Left(x, y) = input {
+        if entry.menu_only {
+            ensure_menu(bus, &mut entry).await;
+        }
         if entry.menu_only && entry.menu.is_some() {
             let snapshot = menu::read_layer(bus, &entry, 0).await?;
             return Ok(InteractionOutcome::Menu(snapshot));
@@ -58,18 +63,23 @@ pub(crate) async fn route(
             // 回退 Menu 流程：交付形态与 menu_only 左键一致（Outcome::Menu，无回执事件）。
             // 超时不回退——menu 与 Activate 同一主循环分发，Activate 超时则菜单亦不可读
             Err(e @ TrayError::Timeout { .. }) => Err(e),
-            Err(_) if entry.menu.is_some() => {
-                let snapshot = menu::read_layer(bus, &entry, 0).await?;
-                Ok(InteractionOutcome::Menu(snapshot))
+            Err(e) => {
+                if ensure_menu(bus, &mut entry).await {
+                    let snapshot = menu::read_layer(bus, &entry, 0).await?;
+                    Ok(InteractionOutcome::Menu(snapshot))
+                } else {
+                    Err(e)
+                }
             }
-            Err(e) => Err(e),
         };
     }
 
-    let menu_hit = matches!(input, Input::Right(..)) && entry.menu.is_some();
-    if menu_hit {
-        let snapshot = menu::read_layer(bus, &entry, 0).await?;
-        return Ok(InteractionOutcome::Menu(snapshot));
+    if matches!(input, Input::Right(..)) {
+        ensure_menu(bus, &mut entry).await;
+        if entry.menu.is_some() {
+            let snapshot = menu::read_layer(bus, &entry, 0).await?;
+            return Ok(InteractionOutcome::Menu(snapshot));
+        }
     }
 
     let op = match input {
@@ -102,9 +112,30 @@ pub(crate) async fn route(
     Ok(InteractionOutcome::Dispatched)
 }
 
+/// 交互时补探 `Menu` 属性：注册期探测可能早于 Item 属性就绪或瞬时失败，
+/// 导致路由标记缺失（blueman 实测右键落到不存在的 ContextMenu）。
+/// 探测成功即回写登记簿并返回 true。
+async fn ensure_menu(bus: &BusCenter, entry: &mut ItemEntry) -> bool {
+    if entry.menu.is_some() {
+        return true;
+    }
+    let (menu, menu_only) = props::probe_routing(bus, &entry.service, &entry.path).await;
+    let Some(menu) = menu else {
+        return false;
+    };
+    bus.tracker.write().unwrap().update_routing(
+        &entry.service,
+        Some(Some(menu.clone())),
+        Some(menu_only),
+    );
+    entry.menu = Some(menu);
+    entry.menu_only = menu_only;
+    true
+}
+
 /// 延续方法：提交 Outcome::Menu 弹出中的条目点击（dbusmenu Event("clicked")）。
 /// VOID 受理即返回 InteractionOutcome::Dispatched；调用结果经 InteractionResult 事件交付。
-pub(crate) fn menu_activate(
+pub(crate) async fn menu_activate(
     bus: &BusCenter,
     id: &str,
     menu_item_id: i32,

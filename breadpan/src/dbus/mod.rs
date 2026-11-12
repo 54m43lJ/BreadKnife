@@ -12,13 +12,14 @@ pub(crate) mod watcher;
 use std::collections::HashMap;
 use std::future::poll_fn;
 use std::pin::pin;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use tokio::sync::{mpsc, watch};
 use zbus::export::futures_core::Stream;
 use zbus::fdo;
 use zbus::message::{Message, Type as MessageType};
-use zbus::zvariant::OwnedValue;
+use zbus::zvariant::{ObjectPath, OwnedValue};
 use zbus::{MatchRule, MessageStream};
 
 use crate::events::TrayEvent;
@@ -48,19 +49,28 @@ pub(crate) fn split_service_arg(arg: &str, sender: Option<&str>) -> Option<(Stri
     if arg.starts_with('/') {
         // 纯对象路径（Ayatana 风格）：服务名 = 注册方唯一名
         let sender = sender?;
+        ObjectPath::try_from(arg).ok()?;
         return Some((sender.to_string(), arg.to_string()));
     }
-    match arg.split_once('/') {
-        Some((name, path)) if !name.is_empty() && !path.is_empty() => {
-            let path = if path.starts_with('/') {
-                path.to_string()
-            } else {
-                format!("/{path}")
-            };
-            Some((name.to_string(), path))
+    if let Some((name, path)) = arg.split_once('/') {
+        if name.is_empty() || path.is_empty() {
+            return None;
         }
-        _ if !arg.is_empty() => Some((arg.to_string(), DEFAULT_ITEM_PATH.to_string())),
-        _ => None,
+        // 知名名 / 唯一名由总线校验；对象路径必须是合法 ObjectPath。
+        zbus::names::BusName::try_from(name).ok()?;
+        let path = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{path}")
+        };
+        ObjectPath::try_from(path.as_str()).ok()?;
+        return Some((name.to_string(), path));
+    }
+    if arg.is_empty() {
+        None
+    } else {
+        zbus::names::BusName::try_from(arg).ok()?;
+        Some((arg.to_string(), DEFAULT_ITEM_PATH.to_string()))
     }
 }
 
@@ -79,6 +89,8 @@ pub(crate) async fn register_item(
             "unusable RegisterStatusNotifierItem argument: {service_arg:?}"
         )));
     };
+    // 到达序号在首次 await 前固定：并发报到的首见序与完成先后无关。
+    let seq = bus.arrival_seq.fetch_add(1, Ordering::Relaxed);
     let unique: String = bus
         .call(
             DBUS_SERVICE,
@@ -97,19 +109,30 @@ pub(crate) async fn register_item(
         alive: true,
         menu,
         menu_only,
+        seq: 0,
     };
-    let upsert = bus.tracker.write().unwrap().upsert(entry);
+    let upsert = bus.tracker.write().unwrap().upsert_at(entry, seq);
     if let Upsert::Renamed { old, new } = &upsert {
-        // 同一对象 id 重键，不发 Removed/Added
+        // 同一对象 id 重键，不发 Removed/Added；迁移待通告集合，旧 id 不再出现在后续事件。
+        if bus.pending.lock().unwrap().remove(old) {
+            bus.pending.lock().unwrap().insert(new.clone());
+        }
+        if bus.pending_menu.lock().unwrap().remove(old) {
+            bus.pending_menu.lock().unwrap().insert(new.clone());
+        }
         bus.events.send(TrayEvent::NameChanged {
             old: old.clone(),
             new: new.clone(),
         });
     }
-    // 快照栅栏：快照收集前入册的 Item 由快照承载（静默），其后才广播 + 入队 Added
+    // 快照栅栏：快照收集前入册的 Item 由快照承载（静默），其后才广播 + 入队 Added。
+    // Added 必须在同一临界区先入队，避免被并发的 NameChanged / Removed 越过。
     if matches!(upsert, Upsert::Inserted) && announce && bus.is_snapshot_done() {
-        iface::emit_registered(bus, &service).await;
-        bus.events.send(TrayEvent::Added(service));
+        bus.events.send(TrayEvent::Added(service.clone()));
+        let bus2 = bus.clone();
+        bus.spawn(async move {
+            iface::emit_registered(&bus2, &service).await;
+        });
     }
     Ok(matches!(upsert, Upsert::Inserted))
 }
@@ -126,10 +149,15 @@ async fn discover_existing(bus: &BusCenter) -> Vec<String> {
             narrations.push(format!("reverse discovery: ListNames failed: {e}"));
             Vec::new()
         });
-    let candidates: Vec<String> = names
+    let mut candidates: Vec<String> = names
         .into_iter()
-        .filter(|n| n.starts_with("org.kde.StatusNotifierItem-"))
+        .filter(|n| {
+            n.starts_with("org.kde.StatusNotifierItem-")
+                || n.starts_with("org.freedesktop.StatusNotifierItem-")
+        })
         .collect();
+    // 固定启动首见序：存量 Item 按服务名升序入册。
+    candidates.sort();
     narrations.push(format!(
         "reverse discovery: {} candidate name(s)",
         candidates.len()
@@ -190,7 +218,6 @@ async fn queue_snapshot(bus: &BusCenter) -> Vec<String> {
             Err(e) => narrations.push(format!("snapshot task failed: {e}")),
         }
     }
-    items.sort_by(|a, b| a.id.cmp(&b.id));
     let snapshot_ids: std::collections::HashSet<String> =
         items.iter().map(|i| i.id.clone()).collect();
     bus.events.send(TrayEvent::Snapshot { items });
@@ -387,14 +414,21 @@ async fn name_owner_changed_task(bus: BusCenter) {
         for entry in removed {
             let bus2 = bus.clone();
             let service = entry.service;
+            // 清理待通告集合：Removed 之后不得再出现 Changed / MenuChanged。
+            bus.pending.lock().unwrap().remove(&service);
+            bus.pending_menu.lock().unwrap().remove(&service);
             let for_emit = service.clone();
-            bus.spawn(async move {
-                iface::emit_unregistered(&bus2, &for_emit).await;
-            });
             if bus.is_snapshot_done() {
-                bus.events.send(TrayEvent::Removed(service));
+                let bus3 = bus2.clone();
+                bus.spawn(async move {
+                    iface::emit_unregistered(&bus3, &for_emit).await;
+                    bus3.events.send(TrayEvent::Removed(service));
+                });
             } else {
                 // 启动期死亡：快照投递后按快照内容冲刷
+                bus.spawn(async move {
+                    iface::emit_unregistered(&bus2, &for_emit).await;
+                });
                 bus.defer_removed(service);
             }
         }
@@ -411,6 +445,19 @@ async fn item_signals_task(bus: BusCenter, iface: &'static str) {
         .unwrap()
         .build();
     pump_signal_stream(rule, bus.clone(), |bus, msg| {
+        let header = msg.header();
+        let member = header.member().map(|m| m.as_str()).unwrap_or_default();
+        if !matches!(
+            member,
+            "NewStatus"
+                | "NewIcon"
+                | "NewTitle"
+                | "NewToolTip"
+                | "NewOverlayIcon"
+                | "NewAttentionIcon"
+        ) {
+            return;
+        }
         let (Some(sender), Some(path)) = signal_source(&msg) else {
             return;
         };
@@ -471,6 +518,11 @@ async fn dbusmenu_signals_task(bus: BusCenter) {
         .unwrap()
         .build();
     pump_signal_stream(rule, bus.clone(), |bus, msg| {
+        let header = msg.header();
+        let member = header.member().map(|m| m.as_str()).unwrap_or_default();
+        if !matches!(member, "LayoutUpdated" | "ItemsPropertiesUpdated") {
+            return;
+        }
         let (Some(sender), Some(path)) = signal_source(&msg) else {
             return;
         };
@@ -498,11 +550,15 @@ async fn debounce_task(bus: BusCenter) {
         tick.tick().await;
         let changed: Vec<crate::TrayItemId> = bus.pending.lock().unwrap().drain().collect();
         for id in changed {
-            bus.events.send(TrayEvent::Changed(id));
+            if bus.tracker.read().unwrap().get(&id).is_some() {
+                bus.events.send(TrayEvent::Changed(id));
+            }
         }
         let menu: Vec<crate::TrayItemId> = bus.pending_menu.lock().unwrap().drain().collect();
         for id in menu {
-            bus.events.send(TrayEvent::MenuChanged(id));
+            if bus.tracker.read().unwrap().get(&id).is_some() {
+                bus.events.send(TrayEvent::MenuChanged(id));
+            }
         }
     }
 }

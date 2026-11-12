@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>9. D-Bus Protocol — Desktop Notifications Specification</title>
+</head>
+<body>
+<p>Cleaned offline copy, styling removed. Authoritative text: <a href="https://specifications.freedesktop.org/notification-spec/latest/protocol.html">https://specifications.freedesktop.org/notification-spec/latest/protocol.html</a></p>
+<hr>
+<div id="protocol"><h2>9 D-Bus Protocol </h2><p>
+   The following messages <em>must</em> be supported by all
+   implementations.
+  </p><div id="commands"><h3>9.1 Message commands </h3><div id="command-get-capabilities"><h4>9.1.1 <code>org.freedesktop.Notifications.GetCapabilities</code> </h4><table><tr><td><code>as
+       <strong>org.freedesktop.Notifications.GetCapabilities</strong>
+      (</code></td><td><code>void)</code>;</td><td> </td></tr></table> <p>
+     This message takes no parameters.
+    </p><p>
+     It returns an array of strings. Each string describes an optional
+     capability implemented by the server. The following values are
+     defined by this spec:
+    </p><div id="id-1.10.3.2.5"><h6>Table 5: Server Capabilities </h6><table><colgroup><col><col></colgroup><tbody><tr><td><code>"action-icons"</code></td><td>
+         Supports using icons instead of text for displaying actions.
+         Using icons for actions must be enabled on a per-notification
+         basis using the "action-icons" hint.
+        </td></tr><tr><td><code>"actions"</code></td><td>
+         The server will provide the specified actions to the user. Even if
+         this cap is missing, actions may still be specified by the client,
+         however the server is free to ignore them.
+        </td></tr><tr><td><code>"body"</code></td><td>
+         Supports body text. Some implementations may only show the
+         summary (for instance, onscreen displays, marquee/scrollers)
+        </td></tr><tr><td><code>"body-hyperlinks"</code></td><td>
+         The server supports hyperlinks in the notifications.
+        </td></tr><tr><td><code>"body-images"</code></td><td>
+         The server supports images in the notifications.
+        </td></tr><tr><td><code>"body-markup"</code></td><td>
+         Supports markup in the body text. If marked up text is sent
+         to a server that does not give this cap, the markup will show
+         through as regular text so must be stripped clientside.
+        </td></tr><tr><td><code>"icon-multi"</code></td><td>
+         The server will render an animation of all the frames in a given
+         image array. The client may still specify multiple frames even if
+         this cap and/or <code>"icon-static"</code> is missing, however
+         the server is free to ignore them and use only the primary frame.
+        </td></tr><tr><td><code>"icon-static"</code></td><td>
+         Supports display of exactly 1 frame of any given image array.
+         This value is mutually exclusive with
+         <code>"icon-multi"</code>, it is a protocol error for the
+         server to specify both.
+        </td></tr><tr><td><code>"persistence"</code></td><td>
+         The server supports persistence of notifications.
+         Notifications will be retained until they are acknowledged or
+         removed by the user or recalled by the sender.  The presence
+         of this capability allows clients to depend on the server to
+         ensure a notification is seen and eliminate the need for
+         the client to display a reminding function (such as a status
+         icon) of its own.
+        </td></tr><tr><td><code>"sound"</code></td><td>
+         The server supports sounds on notifications. If returned, the
+         server must support the <code>"sound-file"</code> and
+         <code>"suppress-sound"</code> hints.
+        </td></tr></tbody></table></div><p>
+     New vendor-specific caps may be specified as long as they start with
+     <code>"x-<em>vendor</em>"</code>. For instance,
+     <code>"x-gnome-foo-cap"</code>. Capability names must not
+     contain spaces. They are limited to alpha-numeric characters and dashes
+     (<code>"-"</code>).
+    </p></div><div id="command-notify"><h4>9.1.2 <code>org.freedesktop.Notifications.Notify</code> </h4><table><tr><td><code>UINT32
+       <strong>org.freedesktop.Notifications.Notify</strong>
+      (</code></td><td>STRING <var>app_name</var>, </td></tr><tr><td> </td><td>UINT32 <var>replaces_id</var>, </td></tr><tr><td> </td><td>STRING <var>app_icon</var>, </td></tr><tr><td> </td><td>STRING <var>summary</var>, </td></tr><tr><td> </td><td>STRING <var>body</var>, </td></tr><tr><td> </td><td>as <var>actions</var>, </td></tr><tr><td> </td><td>a{sv} <var>hints</var>, </td></tr><tr><td> </td><td>INT32 <var>expire_timeout</var><code>)</code>;</td></tr></table> <p>
+     Sends a notification to the notification server.
+    </p><div id="id-1.10.3.3.4"><h6>Table 6: Notify Parameters </h6><table><colgroup><col><col><col></colgroup><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><em>app_name</em></td><td>STRING</td><td>
+         The optional name of the application sending the notification.
+         Can be blank.
+        </td></tr><tr><td><em>replaces_id</em></td><td>UINT32</td><td>
+         The optional notification ID that this notification replaces. The
+         server must atomically (ie with no flicker or other visual cues)
+         replace the given notification with this one. This allows clients to
+         effectively modify the notification while it's active. A value of
+         value of 0 means that this notification won't replace any
+         existing notifications.
+        </td></tr><tr><td><em>app_icon</em></td><td>STRING</td><td>
+         The optional program icon of the calling application. See <a href="5.icons-and-images.html" title="5. Icons and Images">Icons and Images</a>.
+         Can be an empty string, indicating no icon.
+        </td></tr><tr><td><em>summary</em></td><td>STRING</td><td>The summary text briefly describing the notification.</td></tr><tr><td><em>body</em></td><td>STRING</td><td>The optional detailed body text. Can be empty.</td></tr><tr><td><em>actions</em></td><td>as</td><td>
+         Actions are sent over as a list of pairs. Each even element in
+         the list (starting at index 0) represents the identifier for the
+         action. Each odd element in the list is the localized string
+         that will be displayed to the user.
+        </td></tr><tr><td><em>hints</em></td><td>a{sv}</td><td>
+         Optional hints that can be passed to the server from the client
+         program. Although clients and servers should never assume each other
+         supports any specific hints, they can be used to pass along
+         information, such as the process PID or window ID, that the server
+         may be able to make use of. See <a href="8.hints.html" title="8. Hints">Hints</a>. Can be
+         empty.
+        </td></tr><tr><td><em>expire_timeout</em></td><td>INT32</td><td>
+         <p>
+          The timeout time in milliseconds since the display of the notification at
+          which the notification should automatically close.
+         </p>
+         <p>
+          If -1, the notification's expiration time is dependent on the
+          notification server's settings, and may vary for the type of
+          notification.
+
+          If 0, never expire.
+         </p>
+        </td></tr></tbody></table></div><p>
+     If <em>replaces_id</em> is 0, the return value is a
+     UINT32 that represent the notification. It is unique, and will not be
+     reused unless a <code>MAXINT</code> number of notifications
+     have been generated. An acceptable implementation may just use an
+     incrementing counter for the ID. The returned ID is always greater than
+     zero. Servers must make sure not to return zero as an ID.
+    </p><p>
+     If <em>replaces_id</em> is not 0, the returned value
+     is the same value as <em>replaces_id</em>.
+    </p></div><div id="command-close-notification"><h4>9.1.3 <code>org.freedesktop.Notifications.CloseNotification</code> </h4><table><tr><td><code>void
+       <strong>org.freedesktop.Notifications.CloseNotification</strong>
+      (</code></td><td>UINT32 <var>id</var><code>)</code>;</td></tr></table> <p>
+     Causes a notification to be forcefully closed and removed from the user's
+     view. It can be used, for example, in the event that what the
+     notification pertains to is no longer relevant, or to cancel a
+     notification with no expiration time.
+    </p><p>
+     The <code>NotificationClosed</code> signal is emitted by this
+     method.
+    </p><p>
+     If the notification no longer exists, an empty D-Bus Error message is
+     sent back.
+    </p></div><div id="command-get-server-information"><h4>9.1.4 <code>org.freedesktop.Notifications.GetServerInformation</code> </h4><table><tr><td><code>
+       void
+       <strong>org.freedesktop.Notifications.GetServerInformation</strong>
+      (</code></td><td>out STRING <var>name</var>, </td></tr><tr><td> </td><td>out STRING <var>vendor</var>, </td></tr><tr><td> </td><td>out STRING <var>version</var>, </td></tr><tr><td> </td><td>out STRING <var>spec_version</var><code>)</code>;</td></tr></table> <p>
+     This message returns the information on the server. Specifically,
+     the server name, vendor, and version number.
+    </p><div id="id-1.10.3.5.4"><h6>Table 7: GetServerInformation Return Values </h6><table><colgroup><col><col></colgroup><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><em>name</em></td><td>STRING</td><td>The product name of the server.</td></tr><tr><td><em>vendor</em></td><td>STRING</td><td>
+         The vendor name. For example, "KDE," "GNOME,"
+         "freedesktop.org," or "Microsoft."
+        </td></tr><tr><td><em>version</em></td><td>STRING</td><td>The server's version number.</td></tr><tr><td><em>spec_version</em></td><td>STRING</td><td>The specification version the server is compliant with.</td></tr></tbody></table></div></div></div><div id="signals"><h3>9.2 Signals </h3><div id="signal-notification-closed"><h4>9.2.1 <code>org.freedesktop.Notifications.NotificationClosed</code> </h4><table><tr><td><code>
+       <strong>org.freedesktop.Notifications.NotificationClosed</strong>
+      (</code></td><td>UINT32 <var>id</var>, </td></tr><tr><td> </td><td>UINT32 <var>reason</var><code>)</code>;</td></tr></table> <p>
+     A completed notification is one that has timed out, or has been
+     dismissed by the user.
+    </p><div id="id-1.10.4.2.4"><h6>Table 8: NotificationClosed Parameters </h6><table><colgroup><col><col></colgroup><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><em>id</em></td><td>UINT32</td><td>The ID of the notification that was closed.</td></tr><tr><td><em>reason</em></td><td>UINT32</td><td>
+         <p>The reason the notification was closed.</p>
+         <p>1 - The notification expired.</p>
+         <p>2 - The notification was dismissed by the user.</p>
+         <p>3 - The notification was closed by a call to
+               <code>CloseNotification</code>.</p>
+         <p>4 - Undefined/reserved reasons.</p>
+        </td></tr></tbody></table></div><p>
+     The ID specified in the signal is invalidated
+     <em>before</em> the signal is sent and may not be used
+     in any further communications with the server.
+    </p></div><div id="signal-action-invoked"><h4>9.2.2 <code>org.freedesktop.Notifications.ActionInvoked</code> </h4><table><tr><td><code>
+       <strong>org.freedesktop.Notifications.ActionInvoked</strong>
+      (</code></td><td>UINT32 <var>id</var>, </td></tr><tr><td> </td><td>STRING <var>action_key</var><code>)</code>;</td></tr></table> <p>
+     This signal is emitted when one of the following occurs:
+    </p><ul><li><p>
+       The user performs some global "invoking" action upon a notification.
+       For instance, clicking somewhere on the notification itself.
+      </p></li><li><p>
+       The user invokes a specific action as specified in the original
+       Notify request. For example, clicking on an action button.
+      </p></li></ul><div id="id-1.10.4.3.5"><h6>Table 9: ActionInvoked Parameters </h6><table><colgroup><col><col></colgroup><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><em>id</em></td><td>UINT32</td><td>
+         The ID of the notification emitting the ActionInvoked signal.
+        </td></tr><tr><td><em>action_key</em></td><td>STRING</td><td>
+         The key of the action invoked. These match the keys sent over
+         in the list of actions.
+        </td></tr></tbody></table></div><div id="id-1.10.4.3.6"><h6>Note</h6><p>
+      Clients should not assume the server will generate this signal. Some
+      servers may not support user interaction at all, or may not support
+      the concept of being able to "invoke" a notification.
+     </p></div></div><div id="signal-activation-token"><h4>9.2.3 <code>org.freedesktop.Notifications.ActivationToken</code> </h4><table><tr><td><code>
+       <strong>org.freedesktop.Notifications.ActivationToken</strong>
+      (</code></td><td>UINT32 <var>id</var>, </td></tr><tr><td> </td><td>STRING <var>activation_token</var><code>)</code>;</td></tr></table> <p>
+     This signal can be emitted before a <code>ActionInvoked</code>
+     signal. It carries an activation token that can be used to activate a
+     toplevel.
+    </p><div id="id-1.10.4.4.4"><h6>Table 10: ActivationToken Parameters </h6><table><colgroup><col><col></colgroup><thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><em>id</em></td><td>UINT32</td><td>
+         The ID of the notification emitting the <code>ActionInvoked</code>
+         signal.
+        </td></tr><tr><td><em>activation_token</em></td><td>STRING</td><td>
+         An activation token. This can be either an X11-style startup ID (see
+         <a href="https://specifications.freedesktop.org/startup-notification-spec/latest/">Startup notification protocol (https://specifications.freedesktop.org/startup-notification-spec/latest/)</a>)
+         or a
+         <a href="https://gitlab.freedesktop.org/wayland/wayland-protocols/-/tree/main/staging/xdg-activation">Wayland xdg-activation (https://gitlab.freedesktop.org/wayland/wayland-protocols/-/tree/main/staging/xdg-activation)</a>
+         token.
+        </td></tr></tbody></table></div><div id="id-1.10.4.4.5"><h6>Note</h6><p>
+      Clients should not assume the server will generate this signal. Some
+      servers may not support user interaction at all, or may not support
+      the concept of being able to generate an activation token for a
+      notification.
+     </p></div></div></div></div>
+</body>
+</html>

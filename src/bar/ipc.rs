@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::bar::UiTask;
-use crate::shared::protocol::{read_frame, write_frame, Frame, Request, Response};
+use crate::shared::protocol::{Frame, Request, Response, read_frame, write_frame};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(35);
 
@@ -70,10 +70,14 @@ impl IpcClient {
         let sent = {
             let mut guard = self.stream.lock().unwrap();
             match guard.as_mut() {
-                Some(stream) => {
-                    write_frame(stream, &Frame::Request { id, request: request.clone() })
-                        .map_err(|e| e.to_string())
-                }
+                Some(stream) => write_frame(
+                    stream,
+                    &Frame::Request {
+                        id,
+                        request: request.clone(),
+                    },
+                )
+                .map_err(|e| e.to_string()),
                 None => Err("not connected".into()),
             }
         };
@@ -126,7 +130,9 @@ impl IpcClient {
         *self.stream.lock().unwrap() = Some(stream);
 
         // Hello 握手（同步应答；全量快照随后经 UI 队列到达并整体重建）
-        match self.attempt(&Request::Hello { monitor: self.monitor.clone() })? {
+        match self.attempt(&Request::Hello {
+            monitor: self.monitor.clone(),
+        })? {
             Response::Ok => Ok(()),
             Response::Error(e) => Err(format!("hello rejected: {e}")),
             other => Err(format!("unexpected hello reply: {other:?}")),

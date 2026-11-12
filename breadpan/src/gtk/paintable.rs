@@ -31,9 +31,14 @@ pub fn icon_paintable(icon: &IconSource) -> gdk::Paintable {
     }
 }
 
-/// 占位图标：image-missing（Icon Naming Spec 保留名，主题规范保证存在）。
+/// 占位图标：主题命中则 image-missing，否则 1×1 透明纹理（不 panic）。
 fn missing_icon() -> gdk::Paintable {
-    lookup_theme_icon(MISSING_ICON).expect("image-missing is guaranteed by the icon theme spec")
+    lookup_theme_icon(MISSING_ICON).unwrap_or_else(transparent_paintable)
+}
+
+fn transparent_paintable() -> gdk::Paintable {
+    let empty = glib::Bytes::from_owned([0u8, 0, 0, 0]);
+    gdk::MemoryTexture::new(1, 1, gdk::MemoryFormat::A8r8g8b8, &empty, 4).upcast()
 }
 
 /// Icon Theme Spec 命中判定（含继承主题链）。
@@ -58,12 +63,19 @@ fn lookup_theme_icon(name: &str) -> Option<gdk::Paintable> {
 /// 色彩处理（与 gdk 内存格式的字节序对齐）在此完成；SNI 位图为未预乘数据，
 /// 对应 gdk 的非预乘 A8R8G8B8 内存格式，由渲染器负责合成。
 fn pixmap_to_paintable(p: &Pixmap) -> gdk::Paintable {
-    let stride = p.width as usize * 4;
-    let complete = p.width > 0 && p.height > 0 && p.argb.len() >= stride * p.height as usize;
+    if p.width > i32::MAX as u32 || p.height > i32::MAX as u32 {
+        return transparent_paintable();
+    }
+    let Some(stride) = (p.width as usize).checked_mul(4) else {
+        return transparent_paintable();
+    };
+    let Some(needed) = stride.checked_mul(p.height as usize) else {
+        return transparent_paintable();
+    };
+    let complete = p.width > 0 && p.height > 0 && p.argb.len() >= needed;
     if !complete {
         // 尺寸不完整的位图 → 1×1 全透明纹理（不 panic，渲染为空）
-        let empty = glib::Bytes::from_owned([0u8, 0, 0, 0]);
-        return gdk::MemoryTexture::new(1, 1, gdk::MemoryFormat::A8r8g8b8, &empty, 4).upcast();
+        return transparent_paintable();
     }
     let bytes = glib::Bytes::from_owned(p.argb.clone());
     gdk::MemoryTexture::new(
