@@ -154,6 +154,8 @@ pub(crate) struct ItemTracker {
 impl ItemTracker {
     /// 报到入册：双注册并入的落点（§5.3.1）
     pub(crate) fn upsert(&amp;mut self, entry: ItemEntry) -&gt; Upsert;
+    /// 按到达序号入册：Inserted 使用 seq，Refreshed / Renamed 保留原值（§5.3.1）
+    pub(crate) fn upsert_at(&amp;mut self, entry: ItemEntry, seq: u64) -&gt; Upsert;
     /// 死亡清理：按（服务名或属主唯一名）命中移除，返回被移除者
     pub(crate) fn unregister(&amp;mut self, name: &amp;str) -&gt; Vec&lt;ItemEntry&gt;;
     /// 同名换主：属主唯一名重绑定（条目保留、id 不变；不在册 → false，§5.3.2）
@@ -177,7 +179,8 @@ impl ItemTracker {
     pub(crate) fn clear(&amp;mut self) -&gt; Vec&lt;ItemEntry&gt;;
 }</code></pre>
 <ul class="note">
-  <li><code>seq</code> 在首次 <code>upsert</code> 插入时由 <code>next_seq</code> 分配；<code>Refreshed</code> 与 <code>Renamed</code> 保留原值，<code>unregister</code> 后重新报到按新条目追加。列表输出统一按 <code>seq</code> 升序（USER §2）。</li>
+  <li><code>seq</code> 在首次插入时分配：<code>upsert_at(entry, seq)</code> 的 <code>Inserted</code> 使用传入序号，<code>Refreshed</code> 与 <code>Renamed</code> 保留原值，<code>unregister</code> 后重新报到按新条目追加。列表输出统一按 <code>seq</code> 升序（USER §2）。</li>
+  <li>报到路径在首次 <code>await</code> 前用 <code>BusCenter.arrival_seq</code>（<code>AtomicU64</code>）领取到达序号，再传给 <code>upsert_at</code>；zbus 并发派发的方法即使完成顺序不同，首见序仍按到达顺序确定。启动反向发现按服务名排序后顺序注册，沿用同一路径。</li>
 </ul>
 
 <h3 id="sec-4-props">4.5. props.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -235,6 +238,10 @@ async fn properties_changed_task(bus: BusCenter, iface: &amp;'static str);
 async fn dbusmenu_signals_task(bus: BusCenter);
 /// 固定窗口节流冲刷（§5.2）
 async fn debounce_task(bus: BusCenter);</code></pre>
+<ul class="note">
+  <li>SNI 信号白名单：只接受 <code>NewStatus</code> / <code>NewIcon</code> / <code>NewTitle</code> / <code>NewToolTip</code> / <code>NewOverlayIcon</code> / <code>NewAttentionIcon</code>；同接口的厂商自定义信号一律忽略。</li>
+  <li>成员名从 <code>msg.header().member()</code> 读取，先把 header 绑定到局部变量以避免临时值生命周期问题；未命中的成员直接返回，不修改 <code>pending</code>。</li>
+</ul>
 
 <h4 id="sec-4-dbus-bus">4.6.2. bus.rs（库内总线域句柄：连接 + 运行时入口 + 共享簿记；Clone 廉价）</h4>
 <pre><code>pub(crate) struct BusParts {   // 组装件：簿记/通道/配置在连接建立前先行构造
@@ -365,6 +372,8 @@ pub(crate) fn parse_mnemonic(raw: &amp;str) -&gt; String;</code></pre>
 /// 语义输入路由（§5.5.1 §5.5.2）
 pub(crate) async fn route(bus: &amp;BusCenter, id: &amp;str,
                           input: Input) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
+/// 交互期菜单补探：无 menu 时重探 Menu / ItemIsMenu，成功回写登记簿并更新 entry（§5.5.1 §5.5.2）
+async fn ensure_menu(bus: &amp;BusCenter, entry: &amp;mut ItemEntry) -&gt; bool;
 /// 延续方法：dbusmenu Event(menu_item_id, "clicked", Value::I32(0), ts: u32) 提交；
 /// VOID 受理即返回 InteractionOutcome::Dispatched；回执入队 InteractionResult（§5.5.2）
 pub(crate) async fn menu_activate(bus: &amp;BusCenter, id: &amp;str, menu_item_id: i32) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
@@ -485,9 +494,10 @@ debounce_task(bus)
 ├── header.sender()
 └── dbus::register_item(bus, service, sender, announce=true)
      ├── split_service_arg(service, sender)
+     ├── bus.arrival_seq.fetch_add(1)          // 首次 await 前领取到达序号
      ├── bus.call(GetNameOwner(service))
      ├── props::probe_routing(service, path)
-     └── ItemTracker::upsert(ItemEntry)
+     └── ItemTracker::upsert_at(ItemEntry, seq)
           ├── service 升级？ → events.send(NameChanged{old, new})
           └── 新建且 announce 且栅栏已置位？
                ├── events.send(Added(id))
@@ -497,7 +507,8 @@ debounce_task(bus)
   <li>两前缀接口挂同一路径（见 <a href="#sec-4-dbus-iface">§4.6.4</a>）；前缀策略见 <a href="PROVIDER.html#sec-2">PROVIDER §2</a>。</li>
   <li>报到参数三形态：<code>"name"</code> → 默认路径；<code>"name/path"</code> → 就地切分；<code>"/path"</code> → 服务名取注册方唯一名。解析失败以 <code>TrayError::Protocol</code> 拒绝受理。</li>
   <li><code>GetNameOwner</code> 失败回退 service 本身，不阻塞报到。</li>
-  <li><code>upsert</code> 以两轮 lookup 自愈并入：① 注册名 == service；② 发送者唯一名 == unique。命中则原地刷新，未命中新建。</li>
+  <li><code>upsert_at</code> 以两轮 lookup 自愈并入：① 注册名 == service；② 发送者唯一名 == unique。命中则原地刷新，未命中新建；只有 <code>Inserted</code> 使用到达序号，刷新与重键保留原 <code>seq</code>。</li>
+  <li>到达序号必须在 <code>GetNameOwner</code> 等首次 <code>await</code> 之前领取；若等解析 / 探测完成后再分配，并发报到的首见序会退化为完成序。</li>
   <li>未置位栅栏或 <code>announce=false</code> 时静默入册：无广播、无 <code>Added</code>，由快照承载。</li>
 </ul>
 
@@ -517,6 +528,8 @@ debounce_task(bus)
   <li>同名换主：条目保留、id 不变；属主唯一名重绑定，新属主的信号归属随 rebind 续接；路由字段就地重探。</li>
   <li>死亡清理：按服务名或属主唯一名双条件命中；唯一名消失 → 该连接全部条目一并下线（含双注册并入的单一 id）。</li>
   <li>栅栏前事实静默：重绑定已生效，快照即最新，不补投；<code>Removed</code> 在栅栏前进入 <code>bus.defer_removed</code> 缓冲。</li>
+  <li>重绑定与死亡清理在运行时任务中异步执行，信号泵线程不得同步等待 <code>tracker</code> 写锁；否则同线程任务持有读守卫时会互相死锁。</li>
+  <li>读守卫不得跨越后续写锁或 <code>await</code>：所有“读后可能写”的路径先把结果取出（如 <code>let found = { bus.tracker.read().unwrap().find(...) };</code>），让读守卫在块尾释放后再分支。删除 / 重键也先释放登记锁，再清理 <code>pending</code> / <code>pending_menu</code>。</li>
 </ul>
 
 <h3 id="sec-5-4">5.4. 菜单现场读取（Menu 流程，interact 与 menu()/menu_expand() 共用）</h3>
@@ -544,6 +557,7 @@ debounce_task(bus)
 └── 快照栅栏已置位？ → pending_menu.insert(id)   // §5.2 窗口合并</code></pre>
 <ul class="note">
   <li>未命中直接丢弃；不代为重拉，是否重取由消费方决定；栅栏前丢弃（消费方尚无菜单可重取）。</li>
+  <li>dbusmenu 信号白名单：只接受 <code>LayoutUpdated</code> / <code>ItemsPropertiesUpdated</code>；<code>ItemActivationRequested</code> 等其它同接口成员直接忽略，不修改 <code>pending_menu</code>。</li>
 </ul>
 
 <h3 id="sec-5-5">5.5. 输入路由与回执</h3>
@@ -573,14 +587,16 @@ debounce_task(bus)
 │    └── bus.cmd(interact::route)
 ├── bus.entry_of(id)
 │    └── 不在册 → ItemNotFound
-├── right_click 且 DBusMenu 在册？ → menu::read_layer(...)   // §5.4.1
-├── right_click 且无菜单 → interact::invoke_xy(entry, ContextMenu, (x, y))
+├── right_click → interact::ensure_menu(entry)   // 无菜单时补探 Menu / ItemIsMenu
+│    ├── 有菜单 → menu::read_layer(...)   // §5.4.1
+│    └── 仍无菜单 → interact::invoke_xy(entry, ContextMenu, (x, y))
 ├── middle_click → interact::invoke_xy(entry, SecondaryActivate, (x, y))
 ├── scroll_* → interact::invoke_scroll(entry, ∓steps, vertical / horizontal)
 └── events.send(InteractionResult{op, result})</code></pre>
 <ul class="note">
   <li><code>invoke_*</code> 寻址 fallback：kde 优先、fd 回退（见 PROVIDER §2）。</li>
   <li>VOID 调用（含延续方法 <code>menu_activate</code>）受理即返回，回执经事件异步交付。</li>
+  <li><code>ensure_menu</code>：登记条目 <code>menu = None</code> 时在交互期重探 <code>Menu</code> / <code>ItemIsMenu</code>，成功即回写登记簿；右键补探后仍无菜单才走 <code>ContextMenu</code>。左键的 <code>menu_only</code> 路径与 Activate 失败回退同样先补探。</li>
 </ul>
 
 <h3 id="sec-5-6">5.6. 存活探测循环</h3>

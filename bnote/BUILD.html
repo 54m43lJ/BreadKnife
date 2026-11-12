@@ -31,9 +31,14 @@
 <h2>2. 开发命令</h2>
 <pre><code>cargo build
 cargo build --release
-cargo test                                            # 协议集成测试
+cargo test                                            # 协议集成测试；桌面总线被占用时跳过
 dbus-run-session -- cargo test                        # 隔离 session bus 全量运行（推荐）
 cargo run --example server                            # 交互式测试服务器</code></pre>
+<ul class="note">
+  <li>在桌面会话直接运行 <code>cargo test</code> 时，若 <code>org.freedesktop.Notifications</code> 已被 dunst 等守护持有，协议集成用例会打印跳过提示并以 <code>NameTaken</code> 跳过，不 panic、不抢占用户会话。</li>
+  <li>需要全量运行协议用例时必须使用 <code>dbus-run-session -- cargo test</code> 提供隔离 session bus；未设置 <code>DBUS_SESSION_BUS_ADDRESS</code> 时协议用例同样跳过。</li>
+  <li>协议用例在进程内用静态锁串行化，避免多个用例互相争名；这些跳过规则不影响普通构建与单元测试。</li>
+</ul>
 
 <h2>3. 安装指南</h2>
 

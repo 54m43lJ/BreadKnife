@@ -107,7 +107,7 @@
    - `breadpan/CORE.html` §5.3.1 未改动，继续保留参数解析与 `upsert` 流程。
    - 仅改文档；错误映射与 `breadpan/src/dbus/iface.rs`、幂等入册与首次插入广播逻辑与 `breadpan/src/dbus/mod.rs` 现有实现一致。
 
-### 2. 通知命令失败后的状态迁移没有具体接口
+### 2. 通知命令失败后的状态迁移没有具体接口 [已解决]
 
 1. 问题描述
    根 `CORE.html` §4.6 注记要求命令线程对 `Timeout` / `Stopped` 按 bnote 建议处置（重试或重建），但没有说明 daemon 如何把这一失败反馈给通知中心，也没有重建入口。
@@ -123,7 +123,12 @@
 | `CORE.html` | §4.6 `daemon/notify.rs` | 增 | 明确命令线程失败路径：Stopped → NotificationStatus::Unavailable 并退出；Timeout → 记日志等待刷新；令牌失败不阻断动作回发。 |
 | `USER.html` | §5.2.6 通知中心 | 不动 | 不可用态与刷新按钮已定义，保持现状。 |
 
-### 3. 系统状态只写“订阅”，没有具体接口与刷新策略
+4. 实际操作
+   - `CORE.html` §4.6 把原“命令线程失败记录日志”注记改为分层描述：`Stopped` 上报 `NotificationStatus::Unavailable { message }` 并退出命令线程，重建只由刷新按钮的 `Request::NotificationRetry` 触发；`Timeout` / 其它错误只记日志、保留会话，UI 乐观更新并由下一次快照校正；两种情况都不自动重试。
+   - `CORE.html` §4.6 补充 `invoke_action` 的令牌失败语义：非 `Stopped` 只跳过令牌回发，`ActionInvoked` 仍照常发送；`Stopped` 按命令线程停止路径处理。
+   - `USER.html` §5.2.6 未改动，不可用态与刷新按钮继续作为窗口侧契约。
+
+### 3. 系统状态只写“订阅”，没有具体接口与刷新策略 [已解决]
 
 1. 问题描述
    根 `CORE.html` §4.5 写 `start(tx)` 订阅 UPower / NetworkManager / BlueZ / MPRIS，但没有列明各服务的属性名、信号名、刷新节拍与失败回退。实现如果只按文档无法确定该监听哪些 PropertiesChanged，也无法判断启动时是否需要主动拉取一次。
@@ -139,7 +144,13 @@
 | `CORE.html` | §4.5 `daemon/system.rs` | 改 | 补充当前实现的采样节拍与降级规则；或列出要订阅的具体接口/属性，明确信号驱动与轮询兜底的关系。 |
 | `PROVIDER.html` | §4.2 系统 DBus 服务 | 不动 | 保留服务与缺席行为表，具体属性名归 CORE。 |
 
-### 4. 特殊工作区显示时“底层普通工作区”的取法未定义
+4. 实际操作
+   - `CORE.html` §4.5 新增注记，写明当前采样基线：私有 tokio 运行时周期轮询，音量 / 亮度 `FAST_POLL = 5s`，电池 / 网络 / 蓝牙 `SLOW_POLL = 30s`；当前不订阅 `PropertiesChanged`，轮询是唯一数据源，后续信号增量只作为叠加且保留轮询兜底。
+   - `CORE.html` §4.5 列明各服务消费口径：UPower `DisplayDevice` 的 `Percentage` / `State`；NetworkManager `PrimaryConnectionType` 及类型映射；BlueZ `GetManagedObjects` 的 `Adapter1.Powered` / `Device1.Connected`；MPRIS 只在 `media_control` 请求时经 session bus 访问 Player，不参与周期采样；音量后端 `pamixer → wpctl → pactl`，亮度 `brightnessctl -c backlight` → `ddcutil`。
+   - `CORE.html` §4.5 补充降级规则：总线 / 服务 / 工具缺席时对应字段保持 `None`，不阻塞其它项；仅在值变化时发送 `DaemonEvent::System`，daemon 再对整份状态去重后广播 `StateDelta.system`。
+   - `PROVIDER.html` §4.2 未改动，继续保留服务清单与缺席行为表。
+
+### 4. 特殊工作区显示时“底层普通工作区”的取法未定义 [已解决]
 
 1. 问题描述
    根 `CORE.html` §4.3 要求 `active_workspace_name` 在特殊工作区显示时返回底层普通工作区，但没有说明从 `monitors` 还是 `workspaces` 取值、多个普通工作区时如何选择。
@@ -155,7 +166,12 @@
 | `CORE.html` | §4.3 `daemon/hyprland.rs` | 增 | 明确特殊工作区回退算法：monitors.activeWorkspace 优先；为 special 时取同屏首个非 special 工作区；无则 None。 |
 | `USER.html` | §5.2.7 最小化托盘 | 不动 | 恢复目标“该屏当前活动工作区”已定义，具体取法归 CORE。 |
 
-### 5. dbusmenu 非法布局节点的错误语义未写
+4. 实际操作
+   - `CORE.html` §4.3 的 `active_workspace_name` 签名行补充注释：优先取 `monitors.active_ws`；为 `special:` 时取同屏首个非 `special` 工作区，无则 `None`。
+   - `CORE.html` §4.3 注记展开完整回退算法：`monitors -j` 的 `active_ws.name` 优先；非 `special:` 直接返回；`special:` 时在 `workspaces -j` 中按该显示器找第一个非 `special:` 工作区；没有则 `None`。恢复窗口以该值为目标，移动失败则不移动。
+   - `USER.html` §5.2.7 未改动，恢复目标仍由窗口契约定义为“该屏当前活动工作区”。
+
+### 5. dbusmenu 非法布局节点的错误语义未写 [已解决]
 
 1. 问题描述
    `breadpan/PROVIDER.html` §4.1 只规定方法调用失败与 `InvalidArgs / Failed`，没有说明 `GetLayout` 返回的某个子节点结构非法时，是跳过该节点返回部分结果，还是整体失败。`CORE.html` §5.4.1 也未覆盖该分支。
@@ -170,7 +186,12 @@
 | `breadpan/PROVIDER.html` | §4.1 方法应答 / 错误应答 | 增 | 注明 GetLayout 子节点结构非法 → `TrayError::Protocol`，不返回部分快照。 |
 | `breadpan/USER.html` | §4.2 消息与错误 | 不动 | `Protocol` 已定义为属性缺失/类型不符的兜底错误，保持现状。 |
 
-### 6. 通知计时器与“中心打开 / 同 id 替换”的交互未完全写死
+4. 实际操作
+   - `breadpan/PROVIDER.html` §4.1 新增“菜单读取应答”注记：库内菜单读取对 `GetLayout` 的每个子节点按 `(i32, a{sv}, av)` 严格反序列化，任一子节点结构非法立即返回 `TrayError::Protocol`，不跳过节点、不返回部分 `MenuSnapshot`。
+   - `breadpan/PROVIDER.html` §4.1 补充调用方语义：把该错误作为整层菜单读取失败处理，不渲染半截菜单；`TrayError::Protocol` 的窗口侧含义仍由 `USER.html` §4.2 定义。
+   - `breadpan/USER.html` §4.2 未改动。
+
+### 6. 通知计时器与“中心打开 / 同 id 替换”的交互未完全写死 [已解决]
 
 1. 问题描述
    `USER.html` §5.2.5 写明了超时时长和中心打开时隐藏贴栏通知，但没有明确：同 id 替换是否重置计时并保留原位置；中心打开期间超时的贴栏记录是否从中心删除；`transient` 与非 `transient` 的差异落在哪一层。
@@ -186,9 +207,14 @@
 | `USER.html` | §5.2.5 通知弹窗 | 增 | 补充同 id 替换的重置/原位规则，以及中心打开期间超时只影响贴栏卡片、transient 才删中心条目。 |
 | `CORE.html` | §4.13 `bar/modules/info.rs` | 不动 | 生命周期与计时已在该节注记中描述，避免重复定义。 |
 
+4. 实际操作
+   - `USER.html` §5.2.5 的堆叠规则补充同 id 替换语义：贴栏栈原位更新并重置该条计时，不移动到栈顶；通知中心记录移到最前，按新消息时间排序。
+   - `USER.html` §5.2.5 的中心打开规则改为明确超时作用层：隐藏期间计时照常，超时只移除贴栏卡片；非 `transient` 条目保留在通知中心等待清理，`transient` 条目同时删除中心记录；关闭中心后只恢复仍存活且未过期的贴栏卡片。
+   - `CORE.html` §4.13 未改动，生命周期与计时的实现注记保持现状。
+
 ## 三、其它技术上踩的坑
 
-### 1. zbus 方法并发执行导致“首见序”按完成顺序错位
+### 1. zbus 方法并发执行导致“首见序”按完成顺序错位 [已解决]
 
 1. 问题描述
    zbus 默认把接口方法派发为独立任务；两个 `RegisterStatusNotifierItem` 即使按 A、B 到达，也可能 B 先完成 `GetNameOwner` / 路由探测并先入册。若在 `ItemTracker::upsert` 里才分配 `next_seq`，首见序会变成完成序。
@@ -204,7 +230,12 @@
 | `breadpan/CORE.html` | §4.4 `tracker.rs` | 增 | 增加 `upsert_at(entry, seq)` 与 `arrival_seq` 的说明：到达序号在首次 await 前领取。 |
 | `breadpan/CORE.html` | §5.3.1 报到 | 增 | 在 `GetNameOwner` 之前插入“领取到达序号”步骤。 |
 
-### 2. RwLock 读守卫跨 `if let` / `await` 造成写锁死等
+4. 实际操作
+   - `breadpan/CORE.html` §4.4 在 `ItemTracker` 增加 `upsert_at(entry, seq)` 签名，注明 `Inserted` 使用传入序号、`Refreshed` / `Renamed` 保留原值。
+   - `breadpan/CORE.html` §4.4 注记补充 `BusCenter.arrival_seq`（`AtomicU64`）：报到在首次 `await` 前领取到达序号，再交给 `upsert_at`；并发完成顺序不再影响首见序；启动反向发现按服务名排序后顺序注册。
+   - `breadpan/CORE.html` §5.3.1 调用栈在 `split_service_arg` 与 `GetNameOwner` 之间插入 `bus.arrival_seq.fetch_add(1)`，并把入册调用改为 `upsert_at(ItemEntry, seq)`；注记补充“到达序号必须在首次 await 前领取”。
+
+### 2. RwLock 读守卫跨 `if let` / `await` 造成写锁死等 [已解决]
 
 1. 问题描述
    信号任务里写 `if let Some(id) = bus.tracker.read().unwrap().find(...) { ... }` 时，读守卫可能活到整个 `if let` 块结束；若块内再取写锁，或信号泵线程同步等待写锁，而同线程上的任务正持有读守卫，就会死锁。把 `NameOwnerChanged` 的重绑定改成同步写锁后，生命周期测试直接超时。
@@ -220,7 +251,12 @@
 | `breadpan/CORE.html` | §5.3.2 NameOwnerChanged | 增 | 注明重绑定不得在信号泵线程同步阻塞；读守卫不得跨越后续写锁或 await。 |
 | `breadpan/CORE.html` | §4.6.2 `bus.rs` | 不动 | 共享簿记类型已定义，锁使用纪律在上条补充。 |
 
-### 3. Hyprland v2 事件载荷取错 token，且特殊工作区事件名写错
+4. 实际操作
+   - `breadpan/CORE.html` §5.3.2 新增注记：重绑定与死亡清理必须在运行时任务中异步执行，信号泵线程不得同步等待 `tracker` 写锁，避免同线程读守卫与写锁互相死锁。
+   - `breadpan/CORE.html` §5.3.2 补充锁使用纪律：读守卫不得跨越后续写锁或 `await`，读后可能写的路径先用显式块取出结果再分支；删除 / 重键先释放登记锁，再清理 `pending` / `pending_menu`。
+   - `breadpan/CORE.html` §4.6.2 未改动，共享簿记类型保持现状。
+
+### 3. Hyprland v2 事件载荷取错 token，且特殊工作区事件名写错 [已解决]
 
 1. 问题描述
    `monitoraddedv2` / `monitorremovedv2` 的载荷是 `MONITORID,MONITORNAME,DESCRIPTION`；早期解析取第一个 token，拿到的是数字 id，热插拔时会 spawn/kill 名为 `"0"` 的窗口。另 `activespecial` / `activespecialv2` 被误写成 `activespecialworkspace`，特殊工作区切换不会触发重同步。
@@ -235,7 +271,12 @@
 | `PROVIDER.html` | §4.1 Hyprland IPC | 增 | 在事件表补充 v2 载荷顺序与 `activespecial*` / `moveworkspace*` / `renameworkspace` 事件名。 |
 | `CORE.html` | §4.3 `HyprlandEvent` | 不动 | 事件枚举已覆盖，载荷细节归 PROVIDER。 |
 
-### 4. layer-shell 窗口位置与全局 CSS 作用域
+4. 实际操作
+   - `PROVIDER.html` §4.1 事件表拆分显示器事件：v1 `monitoradded` / `monitorremoved` 取第一个 token；v2 `monitoraddedv2` / `monitorremovedv2` 载荷为 `MONITORID,MONITORNAME,DESCRIPTION`，取第二个 token 作为显示器名。
+   - `PROVIDER.html` §4.1 增补 `activespecial` / `activespecialv2`（特殊工作区切换）与 `moveworkspace` / `moveworkspacev2` / `renameworkspace`（工作区移动 / 重命名）均触发全量重同步。
+   - `CORE.html` §4.3 未改动，`HyprlandEvent` 枚举保持现状，载荷细节由 PROVIDER 承载。
+
+### 4. layer-shell 窗口位置与全局 CSS 作用域 [已解决]
 
 1. 问题描述
    贴栏通知最初按 Bottom 锚定，实际跑到了屏幕底部；文档要求“任务栏正下方”。同时 CSS 全局 `window { min-height: 30px; border-bottom: ... }` 会作用到通知窗口、dock 面板与触发条，导致多余底边和高度。
@@ -251,7 +292,12 @@
 | `USER.html` | §5.2.5 通知弹窗 | 增 | 明确贴栏弹窗锚定任务栏下缘（Top + 30px），而非屏幕底部。 |
 | `CORE.html` | §4.13 / §4.14 | 不动 | 几何数值已定义，锚定实现细节由本条补充，避免重复。 |
 
-### 5. GTK 回调的 `'static` 要求与文档中的 `&self` 结构不一致
+4. 实际操作
+   - `USER.html` §5.2.5 新增定位注记：贴栏弹窗锚定任务栏下缘而非屏幕底部；层壳使用 Top 边，top margin 相对任务栏让出的可用区。
+   - 间距按当前实现 `POPUP_TOP_GAP = 5px` 写入，未照抄当时修订建议中的 30px；30px 是早期临时值，后续已调整为 5px，文档按现值描述避免回退。
+   - `CORE.html` §4.13 / §4.14 未改动，几何与窗口分类仍由 CORE 承载。
+
+### 5. GTK 回调的 `'static` 要求与文档中的 `&self` 结构不一致 [已解决]
 
 1. 问题描述
    CORE 把 `WindowApp`、`InfoCenterWidget`、`DockWidget`、`TrayWidget` 等写成普通结构体字段与 `&self` 方法；但 GTK 信号闭包要求 `'static`，需要 `Rc<Self>` / `Rc<RefCell<_>>`，并且闭包捕获前要显式 clone。`Popover::popdown()` 还会同步触发 `closed`，若此时持有 `RefCell` 借用会重入 panic。
@@ -267,7 +313,11 @@
 | `CORE.html` | §4.9 / §4.13 / §4.14 / §4.16 | 增 | 加通用注记：窗口模块字段为语义示意，GTK 生命周期下以 `Rc` / `RefCell` / `Mutex` 实现；回调方法可按需使用 `self: &Rc<Self>`。 |
 | `CORE.html` | §4.15 `popup.rs` | 不动 | 借用纪律已在文件注记中描述，保持现状。 |
 
-### 6. clap `trailing_var_arg` 吞掉后台化参数
+4. 实际操作
+   - `CORE.html` §4.9 / §4.13 / §4.14 / §4.16 各新增同一条通用注记：字段类型为语义示意，GTK 生命周期下可变状态以 `Rc` / `RefCell` / `Mutex` 持有；需要被信号闭包捕获的回调方法可使用 `self: &Rc<Self>`，捕获前先 clone 句柄。
+   - `CORE.html` §4.15 未改动，`popdown` / `RefCell` 借用纪律继续由该节现有注记承载。
+
+### 6. clap `trailing_var_arg` 吞掉后台化参数 [已解决]
 
 1. 问题描述
    `bread __daemon --socket X` 中 `--socket` 位于子命令之后，被 `trailing_var_arg = true` 收进 `cmd`；子进程的 `Args.socket` 仍是 `None`，后台 daemon 忽略自定义套接字。
@@ -282,7 +332,12 @@
 | `CORE.html` | §4.1 `main.rs` | 增 | 注明后台化 spawn 的参数顺序：`--socket` 必须在 `__daemon` 之前。 |
 | `BUILD.html` | §4 补充说明 | 不动 | `-s/--socket` 的用户说明不变。 |
 
-### 7. 协议测试在桌面总线上的 `NameTaken` 竞争
+4. 实际操作
+   - `CORE.html` §4.1 新增注记：后台化 spawn 固定使用 `bread --socket X __daemon`，`--socket` 必须在 `__daemon` 之前，先由 clap 解析为全局 `Args.socket`。
+   - 注记同时说明原因：`cmd` 使用 `trailing_var_arg = true`，放在子命令之后的选项会被收进 `cmd`，后台 daemon 会退回默认套接字。
+   - `BUILD.html` §4 未改动，`-s/--socket` 的用户说明保持现状。
+
+### 7. 协议测试在桌面总线上的 `NameTaken` 竞争 [已解决]
 
 1. 问题描述
    `bnote` 协议测试需要占用 `org.freedesktop.Notifications`。直接在桌面会话跑 `cargo test` 时，dunst 等守护已持有该名，测试全部以 `NameTaken` 失败；若强制抢名又会干扰用户会话。
@@ -298,7 +353,12 @@
 | `bnote/BUILD.html` | §2 开发命令 | 增 | 注明普通 `cargo test` 在桌面总线被占用时会跳过协议用例；隔离全量运行必须用 `dbus-run-session -- cargo test`。 |
 | `BUILD.html` | §2 开发命令 | 不动 | 根项目只保留库测试的隔离命令，细节归 bnote BUILD。 |
 
-### 8. zbus 接口级信号匹配会收到厂商自定义信号
+4. 实际操作
+   - `bnote/BUILD.html` §2 的 `cargo test` 行补充“桌面总线被占用时跳过”，并在命令块后新增注记：普通 `cargo test` 遇到 `org.freedesktop.Notifications` 被 dunst 等占用时打印跳过提示并以 `NameTaken` 跳过，不 panic、不抢名。
+   - `bnote/BUILD.html` §2 注明隔离全量运行必须使用 `dbus-run-session -- cargo test`；未设置 `DBUS_SESSION_BUS_ADDRESS` 时协议用例同样跳过；协议用例用进程内静态锁串行化。
+   - `BUILD.html` §2 未改动，根项目继续只列出库测试的隔离命令。
+
+### 8. zbus 接口级信号匹配会收到厂商自定义信号 [已解决]
 
 1. 问题描述
    只按接口名订阅 `org.kde.StatusNotifierItem` 或 `com.canonical.dbusmenu` 时，任何同接口的自定义信号都会进入处理闭包，被误记为 `Changed` / `MenuChanged`；`dbusmenu` 的 `ItemActivationRequested` 也会混入。
@@ -314,7 +374,13 @@
 | `breadpan/CORE.html` | §4.6.1 / §5.4.2 | 增 | 列出允许的 SNI `New*` 与 dbusmenu 成员白名单，明确其它信号忽略。 |
 | `breadpan/USER.html` | §4.3 | 不动 | 厂商扩展不保证透传的边界已定义。 |
 
-### 9. GTK 主题投影被当成菜单行的下边框
+4. 实际操作
+   - `breadpan/CORE.html` §4.6.1 新增 SNI 信号白名单注记：只接受 `NewStatus` / `NewIcon` / `NewTitle` / `NewToolTip` / `NewOverlayIcon` / `NewAttentionIcon`，同接口厂商自定义信号忽略。
+   - `breadpan/CORE.html` §4.6.1 补充成员名读取方式：从 `msg.header().member()` 读取，先把 header 绑定到局部变量；未命中的成员直接返回，不修改 `pending`。
+   - `breadpan/CORE.html` §5.4.2 新增 dbusmenu 白名单：只接受 `LayoutUpdated` / `ItemsPropertiesUpdated`；`ItemActivationRequested` 等其它同接口成员忽略，不修改 `pending_menu`。
+   - `breadpan/USER.html` §4.3 未改动。
+
+### 9. GTK 主题投影被当成菜单行的下边框 [已解决]
 
 1. 问题描述
    dbusmenu 自绘菜单的每一行都是透明 `GtkButton`，紧密堆叠后看起来每条下面都挂着一条细线。通用 `button` 规则只重置了 `background` / `border` / `border-radius`，没有重置主题设置的 `box-shadow`；Adwaita（`0 1px 2px`）与 Breeze（`0 1px 1px`）都会给按钮加投影，落在 `fg` 浅色菜单底上就被读成了行下边框。
@@ -329,7 +395,12 @@
 | `USER.html` | §5.2.1 任务栏窗口与按钮 | 改 | 按钮外观补“无投影”：透明底、无边框、无投影、圆角 6px、padding 0，明确主题投影也须清零。 |
 | `USER.html` | §5.2.3 托盘与托盘菜单 | 不动 | “分隔线 1px”已限定分隔只来自菜单项，行间不加边框的语义可由按钮外观条款推出。 |
 
-### 10. 工作区条整条重建，快速连点吞掉点击
+4. 实际操作
+   - `USER.html` §5.2.1 的按钮外观补充“无投影”：透明底、无边框、无投影、圆角 6px、padding 0，并注明主题默认的 `box-shadow` 也须清零。
+   - `USER.html` §5.2.3 未改动；菜单行不画线仍由分隔只来自 `Separator` 节点的既有条款表达。
+   - 仅改文档；`src/assets/bread.css` 的通用 `button` 规则已包含 `box-shadow: none`，未改代码。
+
+### 10. 工作区条整条重建，快速连点吞掉点击 [已解决]
 
 1. 问题描述
    工作区条每次状态推送都清空容器并重建全部 `GtkButton`。快速连点不同工作区时，前一次点击触发的 Resync 推送会在后一次点击的按下与松开之间销毁按钮，松开事件落到新按钮上，`clicked` 不再配对，后续点击就被吞掉；同时按压缩放态与悬停浮层也随之丢失。
@@ -345,7 +416,13 @@
 | `CORE.html` | §4.12 `bar/modules/workspace.rs` | 改 | `buttons` 改为 `RefCell<BTreeMap<i64, WsButton>>`；`rebuild` 语义改为“按 id 增量对账（复用/更新/增删），集合与顺序未变时不重排”，并注明整条重建会在按下/松开之间销毁按钮而丢失 `clicked`。 |
 | `USER.html` | §5.2.2 Workspace 按钮 | 增 | 补一条可验收行为：快速连续点击不同工作区时每次点击都应生效，不因状态推送吞点击。 |
 
-### 11. 重同步去抖窗口 200ms 偏高，工作区切换更新有滞后
+4. 实际操作
+   - `CORE.html` §4.12 的 `buttons` 改为 `Rc<RefCell<BTreeMap<i64, WsButton>>>`，并补充 `WsButton` / `WsTip`：按钮、基底、叠加点与浮层数据都保留可原地更新的句柄。
+   - `CORE.html` §4.12 注记明确 `rebuild` 按 id 增量对账：删除消失项、复用并原地更新仍存在的按钮、只新建新增项；仅集合或顺序变化时重排，活跃 / 紧急推送不移动按钮；整条重建会在按下与松开之间销毁按钮并丢失 `clicked`。
+   - `CORE.html` §4.12 注记补充点击回调从浮层数据单元格读取当前工作区名，不固化创建时的名字。
+   - `USER.html` §5.2.2 增加可验收行为：快速连续点击不同工作区时每次点击都应生效，状态推送不得在按下与松开之间重建按钮而吞掉 `clicked`。
+
+### 11. 重同步去抖窗口 200ms 偏高，工作区切换更新有滞后 [已解决]
 
 1. 问题描述
    工作区状态本来就由 `.socket2.sock` 事件驱动，并非轮询；但工作区事件被折叠为 `Resync` 后，要等 `recv_timeout(TICK)` 超时才处理，`TICK = 200ms` 让切换后的高亮最多晚一个滴答，体感像轮询。核心问题只是去抖窗口过长，不需要拆分事件类型。
@@ -360,7 +437,12 @@
 | `CORE.html` | §4.2 `daemon/mod.rs` | 改 | `run_loop` 注释补 `TICK = 50ms`：滴答仅作重同步去抖窗口，`recv_timeout` 是阻塞等待事件而非轮询。 |
 | `CORE.html` | §5.1.1 daemon 启动 | 不动 | 调用栈的 `rx.recv_timeout(TICK)` 与“超时且 `pending_resync` → `resync()`”保持现状，仅数值变化。 |
 
-### 12. tooltip 配色与工作区浮层共用一套容器规则
+4. 实际操作
+   - `CORE.html` §4.2 的 `run_loop` 注释补上 `TICK = 50ms`，并注明该滴答仅作重同步去抖窗口，`recv_timeout` 是阻塞等待事件而非周期轮询。
+   - `CORE.html` §5.1.1 未改动，`rx.recv_timeout(TICK)` 与“超时且 `pending_resync` → `resync()`”保持现状。
+   - 仅改文档；`src/daemon/mod.rs` 的 `TICK` 已是 50ms，未改代码。
+
+### 12. tooltip 配色与工作区浮层共用一套容器规则 [已解决]
 
 1. 问题描述
    `tooltip` 规则同时承担普通 tooltip 与工作区悬停浮层的外观：浮层通过 `set_custom` 塞进 tooltip 容器，配色只能跟着 tooltip 走，内容再套样式会出现双重内边距/描边的风险；而浮层语义上并不是 tooltip，需要独立定义。
@@ -375,7 +457,12 @@
 | `USER.html` | §5.2.2 Workspace 按钮 | 不动 | 浮层配色（`surface` / `fg` / `gold` / 圆角 8px）已在现有条款中，样式实现分离不改变契约。 |
 | `USER.html` | §2 通用约定 | 不动 | 按要求不新增“浮层不属于 tooltip”的规则，只保留 `bread.css` 中的样式定义。 |
 
-### 13. 工作区基底与紧急/活跃对比色改取 fg / purple
+4. 实际操作
+   - 两项文档动作均为“不动”，因此 `USER.html` §5.2.2 与 §2 未改动：浮层配色（`surface` / `fg` / `gold` / 圆角 8px）已在 §5.2.2 现有条款中，本次样式实现分离不改变窗口契约。
+   - `src/assets/bread.css` 已按实现分离：`tooltip` 容器与内部 `box` 透明、无内边距，普通 tooltip 外观落在 `tooltip > box > label`；`.ws-tip` 独立定义完整外观，两者共用同一套色板但不共享选择器。
+   - 未改代码；本次仅将该项标记为已解决并记录实际处理方式。
+
+### 13. 工作区基底与紧急/活跃对比色改取 fg / purple [已解决]
 
 1. 问题描述
    原实现的基底色为 `purple`、紧急态取 `fg`，活跃叠点取 `fg`；用户要求基底改 `fg`，紧急与活跃的对比色统一用 `purple`，紧急态仍保持两色互换。`cream` 在深色任务栏上过亮，不作为最终基色。
@@ -390,7 +477,12 @@
 | `USER.html` | §5.2.2 Workspace 按钮 | 改 | 基底常态 `fg`、活跃叠点 `purple`；紧急基底 `purple`、叠点 `fg`。 |
 | `ABOUT.html` | 「界面交互」工作区矩阵 note | 改 | 背景色改 `fg`、对比色改 `purple`；紧急态仍为两色互换。 |
 
-### 14. 托盘背景块与 hover 配色
+4. 实际操作
+   - `USER.html` §5.2.2 更新配色：常态基底（圆点与长方形）取 `fg`，活跃叠点取 `purple`；紧急基底取 `purple`，紧急基底上的活跃叠点取 `fg`；无窗口且活跃的视觉改为单个 `purple` 圆点。
+   - `ABOUT.html`「界面交互」工作区矩阵注记更新为背景色 `fg`、前景色（对比色）`purple`，紧急态两色互换（长方形 `purple`、叠点 `fg`）。
+   - 同步更新 `style.css` 的工作区示意控件颜色，使文档图示与文字契约一致；过渡仍为 150ms ease，形态与尺寸未变。
+
+### 14. 托盘背景块与 hover 配色 [已解决]
 
 1. 问题描述
    `cream` 作托盘底色在任务栏上过亮；改用 `fg` 后，普通 hover 若直接落到通用 `surface` 会破坏底色层次，需要一个半透明叠加。背景块最初只留 2px 上下 margin，顶部空间过紧；对称加大后又显得几何居中、视觉重心偏高。
@@ -405,7 +497,12 @@
 |--------|------|------|------|
 | `USER.html` | §5.2.3 托盘与托盘菜单 | 改 | 托盘区域与图标按钮底色改 `fg`；hover 用 35% `muted` 叠加；背景块上 5px、下 3px，保持默认填充对齐。 |
 
-### 15. 注册期 Menu 探测失败导致 blueman 右键落到 ContextMenu
+4. 实际操作
+   - `USER.html` §5.2.3 明确托盘区域与图标按钮底色为 `fg`，并补充背景块采用上 5px、下 3px 的非对称外边距，保持默认填充对齐（`valign = Fill`），视觉重心略低于几何中心。
+   - `USER.html` §5.2.3 的图标按钮条款补充 Hover：用 35% `muted` 半透明叠加在 `fg` 基底上；失联图标仍按 35% 不透明度置灰。
+   - `src/assets/bread.css` 已包含 `.tray-box` / `.tray-btn` 的 `fg` 底色、非对称 margin 与 `alpha(@muted, 0.35)` hover，未改代码。
+
+### 15. 注册期 Menu 探测失败导致 blueman 右键落到 ContextMenu [已解决]
 
 1. 问题描述
    blueman 的 SNI 对象实现了 `Menu` 属性与 `com.canonical.dbusmenu`，但不实现 `ContextMenu` 方法。注册期 `probe_routing` 若瞬时失败或早于属性就绪，登记条目 `menu = None`；右键按路由表落到 `ContextMenu`，两个前缀都失败后报 “No such method ContextMenu / No such interface org.freedesktop.StatusNotifierItem”。
@@ -421,7 +518,13 @@
 | `breadpan/CORE.html` | §4.6.7 `interact.rs` / §5.5.2 | 改 | 增加 `ensure_menu` 签名与流程：无菜单时交互期补探 `Menu`，成功回写登记簿；右键在补探后仍无菜单才 `ContextMenu`。 |
 | `breadpan/USER.html` | §3.6 交互方法 | 改 | `right_click` 注释补“注册期探测缺失时交互时补探一次”；`TrayItem.menu` 说明注明该值为现场读取，注册期探测失败不永久生效。 |
 
-### 16. 音量只认 pamixer、亮度误读键盘 LED，导致拿不到数据
+4. 实际操作
+   - `breadpan/CORE.html` §4.6.7 增加 `ensure_menu(bus, entry) -> bool` 签名：无菜单时重探 `Menu` / `ItemIsMenu`，成功回写登记簿并更新条目。
+   - `breadpan/CORE.html` §5.5.2 调用栈改为右键先 `ensure_menu`，有菜单走 `menu::read_layer`，补探后仍无菜单才 `ContextMenu`；注记补充左键的 `menu_only` 与 Activate 失败回退同样先补探。
+   - `breadpan/USER.html` §3.6 的 `right_click` 注释补充“注册期探测缺失时交互期补探一次，仍无菜单才 ContextMenu fallback”；§3.5 与 `TrayItem.menu` 的字段说明注明该值为现场读取，注册期探测失败不永久生效，交互时会补探。
+   - 仅改文档；`breadpan/src/dbus/interact.rs` 现有 `ensure_menu` 与补探逻辑未改动。
+
+### 16. 音量只认 pamixer、亮度误读键盘 LED，导致拿不到数据 [已解决]
 
 1. 问题描述
    环境没有 `pamixer`，音量读取直接返回 `None`；亮度读取执行 `brightnessctl -m` 时取第一行（可能是键盘 LED 设备）并解析最后一个字段（max），成功返回了错误值，`ddcutil` 外接显示器回退因此永远不会执行。表现为音量和亮度都没有可用数据。
@@ -439,7 +542,14 @@
 | `BUILD.html` | §1 依赖表“可选系统工具” | 改 | 补充 `wpctl`（PipeWire）/ `pactl`（PulseAudio）为音量后端回退。 |
 | `CORE.html` | §4.5 `daemon/system.rs` | 改 | `set_volume` 注释改为后端链；补充亮度读取的后端顺序与 `backlight` 过滤语义。 |
 
-### 17. 贴栏通知顶部空白过大
+4. 实际操作
+   - `PROVIDER.html` §4.3 外部工具表把音量拆为 `pamixer` / `wpctl` / `pactl` 三行，注明按 `pamixer → wpctl → pactl` 回退，全部缺席才灰置音量滑块；`brightnessctl` 行注明读取只用 `-c backlight` 并取百分比字段，`ddcutil` 行注明无内置面板时的读取回退。
+   - `PROVIDER.html` §4.3 注记补充音量读取 / 设置的后端顺序 `pamixer → wpctl → pactl`、亮度读取的 `backlight` 过滤，以及亮度设置同时尝试 `brightnessctl` 与 `ddcutil`、两者都失败才报错。
+   - `BUILD.html` §1 可选系统工具补充 `wpctl`（PipeWire）/ `pactl`（PulseAudio）作为音量后端回退。
+   - `CORE.html` §4.5 更新 `set_volume` / `set_brightness` 注释，并把音量与亮度后端链、`backlight` 过滤语义写入注记。
+   - 仅改文档；`src/daemon/system.rs` 现有后端链与解析实现未改动。
+
+### 17. 贴栏通知顶部空白过大 [已解决]
 
 1. 问题描述
    `NotificationWindow` 用层壳 `Edge::Top` margin 30 定位贴栏通知；层壳 margin 相对任务栏让出的可用区，而不是屏幕顶边，因此实际形成“任务栏 31px + margin 30px”的 30px 空白，用户只想要约 5px。
@@ -453,7 +563,12 @@
 | `USER.html` | §5.2.5 通知弹窗 | 改 | 明确“任务栏底边到通知窗顶部 5px”，并注明层壳 top margin 取 5（相对可用区）。 |
 | `CORE.html` | §4.13 `bar/modules/info.rs` | 改 | 记录 `POPUP_TOP_GAP` 常量及层壳 margin 语义，避免再次按屏幕顶边推算。 |
 
-### 18. 通知中心组标题箭头不随收缩状态变化、面板高度不回落
+4. 实际操作
+   - `USER.html` §5.2.5 的定位条款改为明确“任务栏底边到通知窗顶部为 5px”，层壳 Top margin 取 `POPUP_TOP_GAP = 5`，相对任务栏让出的可用区而非屏幕顶边。
+   - `CORE.html` §4.13 增加 `POPUP_TOP_GAP` 常量（推荐值 5），并在注记中说明 `set_margin(Edge::Top, POPUP_TOP_GAP)` 的可用区语义，附实测任务栏 h=31 / 通知窗 y=36，避免再按屏幕顶边累加。
+   - 仅改文档；`src/bar/modules/info.rs` 已使用 `POPUP_TOP_GAP = 5`，未改代码。
+
+### 18. 通知中心组标题箭头不随收缩状态变化、面板高度不回落 [已解决]
 
 1. 问题描述
    组标题箭头用 `expanded`（“展开全部”状态）决定方向，普通预览态的展开/收缩不会改变箭头；组收起后内容虽被移除，但 popover 在可见状态下保持旧高度，不会自动回落。仅 queue resize 不足以更新已可见的 xdg_popup，必须重新 present。
@@ -468,7 +583,13 @@
 | `USER.html` | §5.2.6 通知中心 | 改 | 明确组标题箭头与展开/收缩一致（收起 `▸`、展开 `▾`），面板高度随组状态实时变化。 |
 | `CORE.html` | §4.13 `bar/modules/info.rs` | 改 | `CenterView` 保存 popover / scroll / max_height；`rebuild` 末尾以 `fit_height()` 同步滚动区与弹窗高度。 |
 
-### 19. 堆叠通知之间多出一条分隔线
+4. 实际操作
+   - `USER.html` §5.2.6 的聚合标题条款补充：组标题箭头与展开/收缩一致（收起 `▸`、展开 `▾`），面板高度随组状态实时变化。
+   - `CORE.html` §4.13 增加 `CenterView` 结构（保存 `content` / `popover` / `scroll` / `max_height`）与 `rebuild` / `fit_height` 方法签名。
+   - `CORE.html` §4.13 注记明确箭头方向由 `!collapsed.contains(app)` 决定，`expanded` 只用于“展开全部”；`fit_height()` 测量自然高度、设置滚动区最小高度并对可见 popover 重新 `present()`，避免已可见 xdg_popup 保持旧高度。
+   - 仅改文档；`src/bar/modules/info.rs` 现有箭头与 `fit_height` 实现未改动。
+
+### 19. 堆叠通知之间多出一条分隔线 [已解决]
 
 1. 问题描述
    `NotificationWindow::rebuild` 在每两张通知卡之间插入一个 `GtkSeparator`（`.notif-sep`，`gold` 1px），用户认为堆叠弹窗之间不应画线。
@@ -481,7 +602,11 @@
 |--------|------|------|------|
 | `USER.html` | §5.2.5 通知弹窗 | 改 | 删除“条间分隔线 1px”，改为“多条之间以 4px 间距分隔，不画线”。 |
 
-### 20. dismiss 语义与清理混淆，dismiss 后条目被移出通知中心
+4. 实际操作
+   - `USER.html` §5.2.5 删除“条间分隔线 1px”，改为“多条之间以 4px 间距分隔，不画线”。
+   - 仅改文档；`src/bar/modules/info.rs` 已不再插入 `GtkSeparator`，`src/assets/bread.css` 的 `.notif-card` 已使用 `margin: 0 0 4px 0`，未改代码。
+
+### 20. dismiss 语义与清理混淆，dismiss 后条目被移出通知中心 [已解决]
 
 1. 问题描述
    原 `NotificationClose` 同时承担“贴栏 dismiss”和“通知中心清理”两种动作：dismiss 时 daemon 直接把条目移出 `notifications` 并广播 `NotificationRemoved`，通知中心随之消失；用户要求 dismiss 只收起贴栏卡片，条目保留在中心等待清理。术语上“关闭通知”也应改为 dismiss。
@@ -500,7 +625,14 @@
 | `CORE.html` | §4.13 `info.rs` / §4.19 协议 | 改 | `NotificationRecord` 增 `dismissed`；Request 改为 `NotificationDismiss` / `NotificationRemove` / `NotificationDismissAll`；Push 增 `NotificationDismissed`。 |
 | `ABOUT.html` | 「界面交互」通知弹窗 | 改 | 行为措辞 close→dismiss，并补“dismiss 后保留通知中心等待清理”。 |
 
-### 21. 启动时不主动读取焦点窗口，标题区可能空白
+4. 实际操作
+   - `USER.html` §5.2.5：通知弹窗的“关闭”措辞统一改为 dismiss；补充 dismiss 与清理的分工（dismiss 只收贴栏卡片，清理才彻底移除），发送方 `CloseNotification` 按 dismiss 处理，超时只收贴栏卡片、`transient` 由 daemon 删除。
+   - `USER.html` §5.2.6：单条 / 组 / 全部按钮改称清理，明确属于 cleanup；补充“dismiss 的条目保留在中心并继续显示，直到 cleanup”。
+   - `CORE.html` §4.13 / §4.19 / §5.6：`NotificationRecord` 增加 `dismissed`；Request 改为 `NotificationDismiss` / `NotificationRemove` / `NotificationDismissAll` / `NotificationClearGroup` / `NotificationClear`；Push 增加 `NotificationDismissed`；`NotificationDismissReason` 替换旧 `NotificationCloseReason`；调用栈按 transient 删除、非 transient 置 `dismissed` 并广播 `NotificationDismissed` 重写。
+   - `ABOUT.html`「界面交互」通知弹窗与通知中心：行为措辞 close→dismiss，组 / 单条 / 全部按钮改称清理，并补充“dismiss 后条目保留在通知中心等待清理”。
+   - 仅改文档；`src/shared/protocol.rs`、`src/shared/model.rs` 与 `src/daemon/mod.rs` 的现有实现未改动。
+
+### 21. 启动时不主动读取焦点窗口，标题区可能空白 [已解决]
 
 1. 问题描述
    daemon 只在 `activewindow` / `activewindowv2` / `windowtitlev2` 事件到达时更新活动窗口；如果启动时已有焦点窗口，事件早已发生，`resync` 又不查询 `hyprctl activewindow`，窗口快照里的 `active` 就是默认空值，标题区空白直到下一次焦点事件。标题本身为空时也会直接显示空白。另一些拓扑变化（如把窗口移到别的工作区）不产生标题事件，窗口侧一旦漏推或显示为空，仅重同步且内容未变时也不会补发，标题永远不恢复。
@@ -516,7 +648,13 @@
 | `CORE.html` | §5.1.1 启动调用栈 | 改 | `resync()` 补“读取当前焦点窗口并广播 active”。 |
 | `USER.html` | §5.2.1 任务栏窗口与按钮 | 增 | 标题为空时回退显示应用 class，避免已聚焦窗口标题区空白。 |
 
-### 22. daemon 在无显示器时随启动终端退出
+4. 实际操作
+   - `CORE.html` §4.3 增加 `ActiveWindowInfo` 与 `active_window()` 签名，注明读取 `hyprctl -j activewindow` 的 `address` / `class` / `title`，字段允许空串，无焦点或解析失败返回 `None`。
+   - `CORE.html` §5.1.1 的 `Daemon::resync()` 调用栈插入 `hyprland::active_window()` 与无条件 `broadcast(StateDelta.active)`，覆盖启动前已有焦点与移动窗口等不产生标题事件的场景。
+   - `USER.html` §5.2.1 补充标题为空时回退显示应用 class，避免已聚焦窗口标题区空白。
+   - 仅改文档；`src/daemon/hyprland.rs` / `src/daemon/mod.rs` 现有主动读取与重发实现未改动。
+
+### 22. daemon 在无显示器时随启动终端退出 [已解决]
 
 1. 问题描述
    `bread daemon` 只做了简单的子进程派生，没有脱离启动终端会话；显示器断开导致终端会话结束时，daemon 会收到 SIGHUP 而退出。Hyprland 仍是显示器事件的唯一权威，daemon 只需保持存活并继续消费 `monitoradded` / `monitorremoved`。
@@ -537,8 +675,9 @@
    - `Cargo.toml` / `Cargo.lock` 增加 `libc` 依赖。
    - 未改动 `src/daemon/mod.rs` 与 `src/daemon/hyprland.rs`，显示器插拔继续以 Hyprland 事件为唯一来源。
    - 在隔离的 `XDG_RUNTIME_DIR` 下冒烟：无 Hyprland / 无显示器时 daemon 保持存活，`bread exit` 能正常清理退出。
+   - 文档动作已在同一实现提交中落地：`CORE.html` §1 运行形态注明后台化脱离终端会话、无显示器时 daemon 常驻；§3 SBOM 增加 `libc` / `setsid`；`BUILD.html` §3.1 注明 `bread daemon` 脱离终端会话；`ABOUT.html`「运行管理」注明无显示器时继续后台常驻。本次仅补记状态，无需再改上述文档。
 
-### 23. 通知中心组关闭按钮被展开手势吞掉
+### 23. 通知中心组关闭按钮被展开手势吞掉 [已解决]
 
 1. 问题描述
    通知中心的组标题同时承载展开/收起 `GestureClick` 与右侧关闭按钮。点击 `✕` 时，按下事件冒泡到组标题的 `pressed` 处理并触发 `rebuild()`；关闭按钮在 `released` 之前被销毁，`clicked` 不再派发，于是只看到分组展开/收起，`NotificationClearGroup` 请求没有发出。
@@ -557,3 +696,4 @@
    - `src/bar/modules/info.rs` 的 `group_header` 新增 `toggle` 容器（箭头 + 应用名），把展开/收起 `GestureClick` 从整个 `header` 移到 `toggle`；`✕` 保持独立 `clicked` 发送 `NotificationClearGroup`。
    - `cargo check` 通过。
    - `USER.html` / `CORE.html` 未改动；组关闭仍由 daemon 清理该应用全部通知并广播 `NotificationCleared(Some(app_name))`。
+   - 该条两项文档动作均为“不动”，本次只补记状态：`USER.html` §5.2.6 的组清理语义与 `CORE.html` §4.13 的实现注记保持现状。

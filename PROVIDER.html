@@ -40,7 +40,8 @@
 <p>事件流路径：<code>$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock</code>；契约：只订阅不回复。</p>
 <table>
   <tr><th>事件</th><th>契约</th></tr>
-  <tr><td><code>monitoradded</code> / <code>monitorremoved</code></td><td>创建 / 销毁对应显示器的任务栏</td></tr>
+  <tr><td><code>monitoradded</code> / <code>monitorremoved</code></td><td>v1 载荷 <code>MONITORNAME</code>，取第一个 token；创建 / 销毁对应显示器的任务栏</td></tr>
+  <tr><td><code>monitoraddedv2</code> / <code>monitorremovedv2</code></td><td>v2 载荷 <code>MONITORID,MONITORNAME,DESCRIPTION</code>，取第二个 token 作为显示器名；创建 / 销毁对应显示器的任务栏</td></tr>
   <tr><td><code>workspace&gt;&gt;X</code></td><td>更新工作区映射并推送工作区切片</td></tr>
   <tr><td><code>activewindow</code></td><td>更新并推送活动窗口</td></tr>
   <tr><td><code>urgent&gt;&gt;X</code></td><td>窗口请求关注 → 所在工作区紧急位置位（清除语义见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>）</td></tr>
@@ -48,6 +49,8 @@
   <tr><td><code>openwindow</code> / <code>closewindow</code></td><td>窗口打开 / 关闭 → 重同步最小化托盘</td></tr>
   <tr><td><code>windowtitlev2</code></td><td>更新最小化托盘条目标题</td></tr>
   <tr><td><code>minimized&gt;&gt;ADDR,0/1</code></td><td>外部 taskbar 请求最小化 / 恢复 → 将窗口移入 / 移出最小化工作区</td></tr>
+  <tr><td><code>activespecial</code> / <code>activespecialv2</code></td><td>特殊工作区切换 → 全量重同步</td></tr>
+  <tr><td><code>moveworkspace</code> / <code>moveworkspacev2</code> / <code>renameworkspace</code></td><td>工作区移动 / 重命名 → 全量重同步</td></tr>
   <tr><td><code>configreloaded</code></td><td>全量重同步：重扫显示器清单、重建映射、重读最小化集合并对齐任务栏</td></tr>
 </table>
 <table>
@@ -84,13 +87,16 @@
 <h3 id="sec-4-3">4.3. 外部工具</h3>
 <table>
   <tr><th>工具</th><th>用途</th><th>缺席行为</th></tr>
-  <tr><td><code>pamixer</code></td><td>音量读取与设置</td><td>音量滑块灰置</td></tr>
-  <tr><td><code>brightnessctl</code></td><td>内置面板亮度</td><td>亮度滑块灰置</td></tr>
-  <tr><td><code>ddcutil</code></td><td>外接显示器亮度（DDC/CI）</td><td>外接显示器亮度不可调</td></tr>
+  <tr><td><code>pamixer</code></td><td>音量读取与设置（首选后端）</td><td>回退 <code>wpctl</code> → <code>pactl</code>；全部缺席时音量滑块灰置</td></tr>
+  <tr><td><code>wpctl</code></td><td>音量读取与设置（PipeWire 回退）</td><td>回退 <code>pactl</code>；全部缺席时音量滑块灰置</td></tr>
+  <tr><td><code>pactl</code></td><td>音量读取与设置（PulseAudio 回退）</td><td>全部缺席时音量滑块灰置</td></tr>
+  <tr><td><code>brightnessctl</code></td><td>内置面板亮度；读取只用 <code>-c backlight</code>，从 <code>device,class,current,percent%,max</code> 取百分比字段</td><td>回退 <code>ddcutil</code>；无可用后端时亮度滑块灰置</td></tr>
+  <tr><td><code>ddcutil</code></td><td>外接显示器亮度（DDC/CI）；无内置面板时回退读取 <code>getvcp 10 --brief</code></td><td>外接显示器亮度不可调</td></tr>
   <tr><td><code>canberra-gtk-play</code></td><td>通知提示音（<code>sound-file</code> / <code>sound-name</code>）</td><td>不播放提示音，且不声明 <code>sound</code> 能力</td></tr>
   <tr><td><code>xdg-open</code></td><td>打开通知正文中的 <code>http</code> / <code>https</code> / <code>mailto</code> 链接</td><td>链接仅显示、不响应点击</td></tr>
 </table>
 <ul class="note">
+  <li>音量读取与设置按 <code>pamixer → wpctl → pactl</code> 顺序命中即止；亮度读取先 <code>brightnessctl -m -c backlight</code> 取百分比字段，无内置面板再回退 <code>ddcutil</code>；亮度设置同时尝试 <code>brightnessctl</code> 与 <code>ddcutil</code>，两者都失败才报错。</li>
   <li><code>body-hyperlinks</code> 的能力声明见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>，不随 <code>xdg-open</code> 缺席改变；缺少该工具只影响链接的打开动作，属运行环境降级。</li>
 </ul>
 

@@ -114,8 +114,9 @@
 </div>
 <ul class="note">
   <li>任务栏窗口：高 30px、四角无圆角，背景 <code>bg</code>，底边 1px 细线。</li>
-  <li>按钮：透明底、无边框、圆角 6px、padding 0；Hover 态填充 <code>surface</code>，文字色不变（通用规则见 <a href="#sec-2">§2</a>）。</li>
+  <li>按钮：透明底、无边框、无投影（主题默认的 <code>box-shadow</code> 也须清零）、圆角 6px、padding 0；Hover 态填充 <code>surface</code>，文字色不变（通用规则见 <a href="#sec-2">§2</a>）。</li>
   <li>内容布局为左（<a href="#sec-5-2-2">Workspace 按钮</a>）—中（活动窗口标题）—右（<a href="#sec-5-2-3">托盘</a>、<a href="#sec-5-2-4">控制中心入口</a>）三区。</li>
+  <li>标题区显示活动窗口标题；标题为空时回退显示应用 class，避免已聚焦窗口标题区空白。</li>
 </ul>
 
 <h4 id="sec-5-2-2">5.2.2. Workspace 按钮</h4>
@@ -145,9 +146,10 @@
 </div>
 <ul class="note">
   <li>从左至右：无窗口、无窗口且活跃、有窗口、有窗口且活跃、有窗口且紧急、有窗口且紧急且活跃。</li>
-  <li>基底：无窗口＝直径 4px 圆点，有窗口＝20×15px 长方形（圆角半径 10px），均取 <code>purple</code>；紧急＝长方形整体取 <code>fg</code>，仅限有窗口。</li>
-  <li>活跃叠点直径 4px 取 <code>fg</code>；紧急基底上叠点取 <code>purple</code>，紧急态即基底与叠点两色互换；无窗口且活跃时叠点与基底圆点等大重叠，视觉为单个 <code>fg</code> 圆点。</li>
+  <li>基底：无窗口＝直径 4px 圆点，有窗口＝20×15px 长方形（圆角半径 10px），均取 <code>fg</code>；紧急＝长方形整体取 <code>purple</code>，仅限有窗口。</li>
+  <li>活跃叠点直径 4px 取 <code>purple</code>；紧急基底上叠点取 <code>fg</code>，紧急态即基底与叠点两色互换；无窗口且活跃时叠点与基底圆点等大重叠，视觉为单个 <code>purple</code> 圆点。</li>
   <li>悬停工作区按钮显示窗口标题浮层：按 Hyprland 焦点历史排序（最近聚焦在前），最多 4 条；超出时第五条固定为「...」，不显示具体计数；无窗口显示「无窗口」。首期仅标题，截图预览为后续可选扩展。</li>
+  <li>快速连续点击不同工作区时，每次点击都应生效；状态推送不得在按下与松开之间重建按钮而吞掉 <code>clicked</code>。</li>
   <li>浮层宽 220px、<code>surface</code> 底 <code>fg</code> 字、1px <code>gold</code> 边框、圆角 8px、内边距 6px／水平 8px；工作区名 <code>gold</code> 加粗，窗口行 1 行省略。</li>
   <li>可见性矩阵见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>；状态过渡 150ms ease。</li>
 </ul>
@@ -174,8 +176,8 @@
   </div>
 </div>
 <ul class="note">
-  <li>托盘区域整体（含各图标按钮）与菜单同底色 <code>fg</code>；图标直接置于该底色上，不做按图标明暗反相的底色垫高。</li>
-  <li>图标按钮 22×22px、圆角 6px；失联图标置灰（不透明度 35%）。</li>
+  <li>托盘区域整体（含各图标按钮）与菜单同底色 <code>fg</code>；图标直接置于该底色上，不做按图标明暗反相的底色垫高。背景块采用上 5px、下 3px 的非对称外边距，保持默认填充对齐（<code>valign = Fill</code>），视觉重心略低于几何中心。</li>
+  <li>图标按钮 22×22px、圆角 6px；Hover 用 35% <code>muted</code> 半透明叠加在 <code>fg</code> 基底上；失联图标置灰（不透明度 35%）。</li>
   <li>图标按首见序（<a href="breadpan/USER.html#sec-1">breadpan USER §1</a>）从左到右排列：已有图标不因其它图标加入、移除或属性变化而移动，新图标追加在最右侧；同一 Item 的 id 重键保持原位。</li>
   <li>菜单容器圆角 8px、内边距 4px、无边框，以投影与任务栏分离；菜单行圆角 4px、水平内边距 10px、最小宽 120px。</li>
   <li>菜单文字取 <code>bg</code>；Hover 行 <code>purple</code> 填充配 <code>cream</code> 字（例外，见 <a href="#sec-2">§2</a>）；勾选标记 <code>gold</code>；子菜单箭头 <code>muted</code>；禁用行不透明度 45%。</li>
@@ -231,20 +233,22 @@
 </div>
 <ul class="note">
   <li>宽 300px，单条最高 400px；圆角 15px，边框 1px；内边距 12px／水平 8px。</li>
-  <li>标题居中、正文左对齐；过长行在中部截断显示省略号；关闭按钮固定在卡片右上角。</li>
+  <li>标题居中、正文左对齐；过长行在中部截断显示省略号；dismiss 按钮固定在卡片右上角。</li>
   <li>图标左置 32px：主题名按图标主题递归查找，<code>file://</code> URI 直接加载本地文件，位图直接显示；图标与文字间距 16px。</li>
-  <li>通知携带动作时，在正文下方按顺序显示动作按钮；默认文字，<code>action-icons</code> 时以动作 key 作为图标名、label 作为提示 / 无障碍文本，图标未命中回退文字。点击按钮触发对应动作并关闭该条（<code>resident</code> 除外）；左键点击卡片触发默认动作（无 <code>default</code> 时取唯一动作）并关闭（<code>resident</code> 除外），无可用动作时仅关闭。</li>
-  <li>点击动作按钮或卡片的默认动作时，通知发送方可执行窗口激活；无可用动作、关闭、清理与超时不触发。</li>
+  <li>通知携带动作时，在正文下方按顺序显示动作按钮；默认文字，<code>action-icons</code> 时以动作 key 作为图标名、label 作为提示 / 无障碍文本，图标未命中回退文字。点击按钮触发对应动作并 dismiss 该条（<code>resident</code> 除外）；左键点击卡片触发默认动作（无 <code>default</code> 时取唯一动作）并 dismiss（<code>resident</code> 除外），无可用动作时仅 dismiss。</li>
+  <li>点击动作按钮或卡片的默认动作时，通知发送方可执行窗口激活；无可用动作、dismiss、清理与超时不触发。</li>
   <li>正文按 <code>body-markup</code> 解析规范允许的标记，不支持的标记按纯文本降级；<code>body-hyperlinks</code> 仅让 <code>http</code> / <code>https</code> / <code>mailto</code> 链接可点击，经默认处理程序打开，其它协议按纯文本；<code>body-images</code> 仅加载本地 <code>file://</code> 与图标主题名，不访问网络，按比例缩放且不超过正文区宽度，加载失败降级为替代文本。</li>
   <li>普通与低优先级：<code>surface</code> 底 <code>fg</code> 字，应用名弱文字 <code>gold</code>；紧急：<code>red</code> 底 <code>cream</code> 字。</li>
-  <li>多条自任务栏正下方纵向堆叠，水平中心与标题区域中心对齐，新通知插入顶部（最新在最上，不按紧急度重排），条间分隔线 1px；同屏最多 10 条，超出显示隐藏计数。</li>
+  <li>多条自任务栏正下方纵向堆叠，水平中心与标题区域中心对齐，新通知插入顶部（最新在最上，不按紧急度重排），多条之间以 4px 间距分隔，不画线；同屏最多 10 条，超出显示隐藏计数。同 id 替换时贴栏栈原位更新并重置该条计时，不移动到栈顶；通知中心记录则移到最前（按新消息时间排序）。</li>
+  <li>定位：贴栏弹窗锚定任务栏下缘而非屏幕底部；任务栏底边到通知窗顶部为 5px。层壳使用 Top 边，top margin 取 <code>POPUP_TOP_GAP = 5</code>，相对任务栏让出的可用区，不是屏幕顶边。</li>
   <li>超时：通知请求 0 为常驻、正数按毫秒；未指定时低优先级 30s，普通与紧急常驻。到期即时移除卡片，不另设淡出动画；超时只让贴栏卡片消失。</li>
-  <li>持久化：通知条目在 bread 运行期间保留，不落盘、不跨重启；只有用户关闭/清理、发送方撤回或同 id 替换、动作触发（<code>resident</code> 除外）、退出 bread 才彻底移除。保留语义与能力声明见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>。</li>
+  <li>持久化：通知条目在 bread 运行期间保留，不落盘、不跨重启；dismiss 只收起贴栏卡片并保留通知中心条目，只有用户清理、<code>transient</code> 条目结束或退出 bread 才彻底移除；发送方 <code>CloseNotification</code> 也按 dismiss 处理，同 id 替换原位更新。保留语义与能力声明见 <a href="bnote/PROVIDER.html#sec-4-5">bnote/PROVIDER §4.5</a>。</li>
+  <li>dismiss 与清理：贴栏卡片的 ✕ / 中键 / 右键全部 / 动作触发都只 dismiss，条目保留在通知中心等待清理；只有通知中心的单条清理、组清理或全部清理才彻底移除。</li>
   <li><code>transient</code> 绕过持久化，超时即删除条目；<code>resident</code> 使动作触发后保留条目。</li>
   <li>提示音：<code>suppress-sound</code> 为真时不播放；否则优先 <code>sound-file</code>，其次 <code>sound-name</code>；宿主后端为 <code>canberra-gtk-play</code>，缺席时不播放且不声明 <code>sound</code> 能力。</li>
   <li>仅当前显示器弹出；当前显示器取 Hyprland 焦点显示器，查询失败时回退首个显示器。</li>
-  <li>通知中心打开期间贴栏通知隐藏但不关闭，计时照常；隐藏期间超时的贴栏卡片消失，通知中心条目保留（<code>transient</code> 除外），关闭通知中心后不再重新显示隐藏期间超时的贴栏卡片。</li>
-  <li>弹出位置、标题居中、关闭按钮与按键、超时行为见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>。</li>
+  <li>通知中心打开期间贴栏通知隐藏但不 dismiss，计时照常；超时只移除贴栏卡片，非 <code>transient</code> 条目保留在通知中心等待清理，<code>transient</code> 条目同时删除通知中心记录；关闭通知中心后只恢复仍存活且未过期的贴栏卡片。</li>
+  <li>弹出位置、标题居中、dismiss 按钮与按键、超时行为见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>。</li>
 </ul>
 
 <h4 id="sec-5-2-6">5.2.6. 通知中心</h4>
@@ -289,13 +293,14 @@
   <li>点击标题区域切换通知中心：面板打开时再次点击标题区域关闭；点击弹窗外或按 Escape 同样关闭。</li>
   <li>面板顶边紧贴任务栏底边，水平位置锚定标题区域中心（面板水平中心与标题区域水平中心对齐）；面板宽 40% 屏宽，高度随消息列表动态变化，上限 100% 屏高。</li>
   <li>达到 100% 屏高后不再增高，面板内部滚动；面板底 <code>bg</code>，圆角 10px、边框 1px、内边距 4px。</li>
-  <li>消息按应用聚合：聚合标题为应用名，点击可展开/收缩，收缩后只保留聚合标题；组按最后一条消息的时间从新到旧排序，最后推送通知的应用在最上；组内消息同样从新到旧排序，新消息在最前。</li>
-  <li>聚合标题右侧带关闭按钮，点击清空本组全部消息；聚合标题与清理按钮：<code>fg</code> 底 <code>bg</code> 字，圆角 6px，与托盘同语言。</li>
+  <li>消息按应用聚合：聚合标题为应用名，点击可展开/收缩，收缩后只保留聚合标题；组标题箭头与展开/收缩一致（收起 <code>▸</code>、展开 <code>▾</code>），面板高度随组状态实时变化。组按最后一条消息的时间从新到旧排序，最后推送通知的应用在最上；组内消息同样从新到旧排序，新消息在最前。</li>
+  <li>聚合标题右侧带清理按钮，点击清理本组全部消息（cleanup，与弹窗 dismiss 区分）；聚合标题与清理按钮：<code>fg</code> 底 <code>bg</code> 字，圆角 6px，与托盘同语言。</li>
   <li>组内超过 3 条时，默认只显示最新 3 条，余下折叠为一条「…」条目；点击「…」展开本组全部消息，展开期间隐藏其它组，点击该组聚合标题收起并恢复其它组。</li>
-  <li>每条消息：普通 <code>surface</code> 底 <code>fg</code> 字；紧急 <code>red</code> 底 <code>cream</code> 字（与通知弹窗一致）；圆角 8px；标题至多 1 行、正文至多 2 行，超出裁剪显示省略号，悬停卡片显示全文；关闭按钮与标题同行置右。</li>
-  <li>通知携带动作时，在正文下方按顺序显示动作按钮；默认文字，<code>action-icons</code> 时以动作 key 作为图标名、label 作为提示 / 无障碍文本，图标未命中回退文字。点击按钮触发对应动作并关闭该条（<code>resident</code> 除外）；左键点击卡片触发默认动作（无 <code>default</code> 时取唯一动作）并关闭（<code>resident</code> 除外），无可用动作时仅关闭；中键或关闭按钮关闭该条。</li>
+  <li>每条消息：普通 <code>surface</code> 底 <code>fg</code> 字；紧急 <code>red</code> 底 <code>cream</code> 字（与通知弹窗一致）；圆角 8px；标题至多 1 行、正文至多 2 行，超出裁剪显示省略号，悬停卡片显示全文；清理按钮与标题同行置右。</li>
+  <li>通知携带动作时，在正文下方按顺序显示动作按钮；默认文字，<code>action-icons</code> 时以动作 key 作为图标名、label 作为提示 / 无障碍文本，图标未命中回退文字。点击按钮触发对应动作并 dismiss 该条（<code>resident</code> 除外）；左键点击卡片触发默认动作（无 <code>default</code> 时取唯一动作）并 dismiss（<code>resident</code> 除外），无可用动作时仅 dismiss；中键或清理按钮清理该条。</li>
   <li>动作回发的窗口激活行为同 <a href="#sec-5-2-5">§5.2.5</a>。</li>
   <li>顶部一键清理全部按钮，位于右上角。</li>
+  <li>dismiss 与 cleanup：贴栏 dismiss 的条目保留在中心并继续显示，直到单条清理 / 组清理 / 全部清理才移除。</li>
   <li>不可用态：通知服务启动失败或运行中终止时，面板保持相同外框与定位，内容区居中显示「通知中心暂时不可用」、失败说明与刷新按钮；不显示清理按钮、应用分组与消息卡。</li>
   <li>手动重试：刷新按钮位于失败说明正文下方，点击后重新装配通知服务；成功则恢复保留的通知列表（无记录时为空态），仍失败则保留错误态。宿主不自动重试、不排队、不替换已有通知服务。</li>
   <li>弹出触发、悬停查看全文与左键/中键行为见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>。</li>

@@ -88,7 +88,7 @@
 <h3 id="sec-3-5">3.5. Menu 流程（逐层按需加载；click 路由与 menu()/menu_expand() 共用）</h3>
 <ul class="note">
   <li>AboutToShow 是 dbusmenu 规定的宿主常规步骤（接口原文中为 method，非信号）：展示前以目标层父条目 id 调用（根层为 0），应答为真表示布局已变——GetLayout 紧随其后取得当前布局，故应答不改变本流程；应答异常视为未变更继续拉取；</li>
-  <li>dbusmenu 对象路径取自 Item 登记信息（注册时读取 Menu 属性一次，随变更信号就地更新；TrayItem.menu 同源）；</li>
+  <li>dbusmenu 对象路径取自 Item 登记信息（注册时读取 Menu 属性一次，随变更信号就地更新；TrayItem.menu 同源于现场读取）。注册期探测失败不永久生效，交互时若仍无菜单会补探一次；</li>
   <li>不存在打开菜单即需全量多级布局的场景：每次仅取一层（GetLayout recursionDepth = 1），深层由消费方经 menu_expand 按需展开；</li>
   <li>click 路由与 menu()/menu_expand() 共用本流程。</li>
   <li>边界时序见 <a href="PROVIDER.html#sec-3-2">PROVIDER §3.2</a>。</li>
@@ -166,7 +166,7 @@ impl TrayHandle {
     /// 中键：SecondaryActivate
     pub fn middle_click(&amp;self, id: &amp;TrayItemId) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
     pub fn middle_click_at(&amp;self, id: &amp;TrayItemId, x: i32, y: i32) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
-    /// 右键：DBusMenu 在册 → Menu 流程；否则 ContextMenu fallback
+    /// 右键：DBusMenu 在册 → Menu 流程；注册期探测缺失时交互期补探一次，仍无菜单才 ContextMenu fallback
     pub fn right_click(&amp;self, id: &amp;TrayItemId) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
     pub fn right_click_at(&amp;self, id: &amp;TrayItemId, x: i32, y: i32) -&gt; Result&lt;InteractionOutcome, TrayError&gt;;
     /// 滚轮四向：Scroll(∓steps, vertical / horizontal)
@@ -324,7 +324,7 @@ pub struct TrayItem {
     pub overlay_icon: Option&lt;IconSource&gt;,
     pub attention_icon: Option&lt;IconSource&gt;,
     pub tooltip: Option&lt;ToolTip&gt;,
-    pub menu: Option&lt;String&gt;,   // SNI Menu 属性原文：dbusmenu 对象路径；None = 无 DBusMenu
+    pub menu: Option&lt;String&gt;,   // SNI Menu 属性原文：dbusmenu 对象路径；现场读取，注册期探测失败不永久生效
 }
 
 pub enum TrayCategory { ApplicationStatus, Communications, SystemServices, Hardware }
@@ -374,7 +374,7 @@ pub enum ToggleState { Off, On, Indeterminate }</code></pre>
   <tr><td>window_id</td><td>宿主窗口 id；不关心时为 0；I32 / U32 变体送达均可解析，无法解析 → 0</td><td>SNI §3.1 WindowId（UINT32）</td></tr>
   <tr><td>icon / overlay_icon / attention_icon</td><td>图标来源，二选一规则见 IconSource 字段表</td><td>SNI §3.1 IconName + IconPixmap / OverlayIcon* / AttentionIcon*</td></tr>
   <tr><td>tooltip</td><td>悬停提示；描述可含标记子集，原样透传</td><td>SNI §3.1 ToolTip · §7 标记子集</td></tr>
-  <tr><td>menu</td><td>SNI <code>Menu</code> 属性原文：com.canonical.dbusmenu 对象路径（以字符串形态送达亦可解析）；None = 无 DBusMenu（右键走 ContextMenu fallback）</td><td>SNI §3.1 Menu（OBJECT PATH）</td></tr>
+  <tr><td>menu</td><td>SNI <code>Menu</code> 属性原文：com.canonical.dbusmenu 对象路径（以字符串形态送达亦可解析）；该值为现场读取，注册期探测失败不永久生效，交互时会补探一次；补探后仍为 None 时右键走 ContextMenu fallback</td><td>SNI §3.1 Menu（OBJECT PATH）</td></tr>
 </table>
 
 <h4>ToolTip / IconSource / Pixmap 字段定义</h4>
