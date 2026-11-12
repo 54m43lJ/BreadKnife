@@ -150,7 +150,7 @@
    - `CORE.html` §4.5 补充降级规则：总线 / 服务 / 工具缺席时对应字段保持 `None`，不阻塞其它项；仅在值变化时发送 `DaemonEvent::System`，daemon 再对整份状态去重后广播 `StateDelta.system`。
    - `PROVIDER.html` §4.2 未改动，继续保留服务清单与缺席行为表。
 
-### 4. 特殊工作区显示时“底层普通工作区”的取法未定义
+### 4. 特殊工作区显示时“底层普通工作区”的取法未定义 [已解决]
 
 1. 问题描述
    根 `CORE.html` §4.3 要求 `active_workspace_name` 在特殊工作区显示时返回底层普通工作区，但没有说明从 `monitors` 还是 `workspaces` 取值、多个普通工作区时如何选择。
@@ -165,6 +165,11 @@
 |--------|------|------|------|
 | `CORE.html` | §4.3 `daemon/hyprland.rs` | 增 | 明确特殊工作区回退算法：monitors.activeWorkspace 优先；为 special 时取同屏首个非 special 工作区；无则 None。 |
 | `USER.html` | §5.2.7 最小化托盘 | 不动 | 恢复目标“该屏当前活动工作区”已定义，具体取法归 CORE。 |
+
+4. 实际操作
+   - `CORE.html` §4.3 的 `active_workspace_name` 签名行补充注释：优先取 `monitors.active_ws`；为 `special:` 时取同屏首个非 `special` 工作区，无则 `None`。
+   - `CORE.html` §4.3 注记展开完整回退算法：`monitors -j` 的 `active_ws.name` 优先；非 `special:` 直接返回；`special:` 时在 `workspaces -j` 中按该显示器找第一个非 `special:` 工作区；没有则 `None`。恢复窗口以该值为目标，移动失败则不移动。
+   - `USER.html` §5.2.7 未改动，恢复目标仍由窗口契约定义为“该屏当前活动工作区”。
 
 ### 5. dbusmenu 非法布局节点的错误语义未写
 
