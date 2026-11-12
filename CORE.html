@@ -349,6 +349,7 @@ impl WindowApp {
 <ul class="note">
   <li><code>Notification</code> → <code>InfoCenterWidget::upsert_center</code>；<code>NotificationPopup</code> → <code>push_popup</code>；<code>NotificationRemoved</code> / <code>NotificationCleared</code> → 同步通知中心与贴栏栈。</li>
   <li><code>State</code> / <code>Snapshot</code> 携带 <code>NotificationStatus</code>，据此更新中心不可用态并隐藏贴栏通知；携带的 <code>minimized</code> 列表喂给 <code>DockWidget</code>。</li>
+  <li>GTK 生命周期下的等价实现：字段类型为语义示意，可变状态以 <code>Rc</code> / <code>RefCell</code> / <code>Mutex</code> 持有；需要被信号闭包捕获的回调方法可使用 <code>self: &amp;Rc&lt;Self&gt;</code>，捕获前先 clone 句柄。</li>
 </ul>
 
 <h3 id="sec-4-bar-ipc">4.10. bar/ipc.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -455,6 +456,7 @@ pub const POPUP_LOW_TIMEOUT_MS: u64;       // 推荐值 30_000；仅 Low 未指�
   <li><code>remove_notification</code> / <code>clear_notifications</code> 同时更新中心列表与贴栏通知窗口；快照只填充通知中心，贴栏通知窗口不重放历史。</li>
   <li>服务不可用时中心显示失败说明与刷新按钮，贴栏通知窗口隐藏但保留记录。</li>
   <li>图标三态：<code>None</code> 隐藏；<code>Name</code> 为主题名或 <code>file://</code> URI，主题名按图标主题递归查找、URI 直接加载本地文件；<code>Pixels</code> 转纹理。任一加载未命中按缺失降级隐藏。</li>
+  <li>GTK 生命周期下的等价实现：字段类型为语义示意，可变状态以 <code>Rc</code> / <code>RefCell</code> / <code>Mutex</code> 持有；需要被信号闭包捕获的回调方法可使用 <code>self: &amp;Rc&lt;Self&gt;</code>，捕获前先 clone 句柄。</li>
 </ul>
 
 <h3 id="sec-4-dock">4.14. bar/modules/dock.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -490,6 +492,7 @@ pub const DOCK_MAX_WIDTH_RATIO: f64;    // 推荐值 0.88</code></pre>
   <li>指针离开 panel 或 trigger 后 <code>DOCK_HIDE_DELAY_MS</code> 收起，重新进入取消计时。条目左键发送 <code>Request::MinimizedRestore</code>，中键/关闭键发送 <code>Request::MinimizedClose</code>；右键不绑定。</li>
   <li>条目按 daemon 列表顺序渲染（旧→新，新条目右侧）；<code>rebuild</code> 重建条目，标题变化仅更新文本。图标按 <code>class</code> 从图标主题查找，未命中用通用占位图标。</li>
   <li><code>panel</code> 宽度取「条目数 × <code>DOCK_ITEM_WIDTH</code> + padding」，上限「显示器宽度 × <code>DOCK_MAX_WIDTH_RATIO</code>」；超限时条目区横向滚动。</li>
+  <li>GTK 生命周期下的等价实现：字段类型为语义示意，可变状态以 <code>Rc</code> / <code>RefCell</code> / <code>Mutex</code> 持有；需要被信号闭包捕获的回调方法可使用 <code>self: &amp;Rc&lt;Self&gt;</code>，捕获前先 clone 句柄。</li>
 </ul>
 
 <h3 id="sec-4-popup">4.15. bar/modules/popup.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -548,6 +551,7 @@ impl TrayWidget {
 }</code></pre>
 <ul class="note">
   <li>图标按传入顺序横向排列：<code>Added</code> 追加右端，<code>Changed</code> 原位更新图标 / 提示 / 状态、不改变位置，<code>Renamed</code> 原位换键，<code>Removed</code> 删除后其余图标不移动；属性变化不得以先删后加实现。</li>
+  <li>GTK 生命周期下的等价实现：字段类型为语义示意，可变状态以 <code>Rc</code> / <code>RefCell</code> / <code>Mutex</code> 持有；需要被信号闭包捕获的回调方法可使用 <code>self: &amp;Rc&lt;Self&gt;</code>，捕获前先 clone 句柄。</li>
 </ul>
 
 <h3 id="sec-4-center">4.17. bar/modules/center.rs <a href="#sec-1">↑ 文件树</a></h3>

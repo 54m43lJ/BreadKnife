@@ -297,7 +297,7 @@
    - 间距按当前实现 `POPUP_TOP_GAP = 5px` 写入，未照抄当时修订建议中的 30px；30px 是早期临时值，后续已调整为 5px，文档按现值描述避免回退。
    - `CORE.html` §4.13 / §4.14 未改动，几何与窗口分类仍由 CORE 承载。
 
-### 5. GTK 回调的 `'static` 要求与文档中的 `&self` 结构不一致
+### 5. GTK 回调的 `'static` 要求与文档中的 `&self` 结构不一致 [已解决]
 
 1. 问题描述
    CORE 把 `WindowApp`、`InfoCenterWidget`、`DockWidget`、`TrayWidget` 等写成普通结构体字段与 `&self` 方法；但 GTK 信号闭包要求 `'static`，需要 `Rc<Self>` / `Rc<RefCell<_>>`，并且闭包捕获前要显式 clone。`Popover::popdown()` 还会同步触发 `closed`，若此时持有 `RefCell` 借用会重入 panic。
@@ -312,6 +312,10 @@
 |--------|------|------|------|
 | `CORE.html` | §4.9 / §4.13 / §4.14 / §4.16 | 增 | 加通用注记：窗口模块字段为语义示意，GTK 生命周期下以 `Rc` / `RefCell` / `Mutex` 实现；回调方法可按需使用 `self: &Rc<Self>`。 |
 | `CORE.html` | §4.15 `popup.rs` | 不动 | 借用纪律已在文件注记中描述，保持现状。 |
+
+4. 实际操作
+   - `CORE.html` §4.9 / §4.13 / §4.14 / §4.16 各新增同一条通用注记：字段类型为语义示意，GTK 生命周期下可变状态以 `Rc` / `RefCell` / `Mutex` 持有；需要被信号闭包捕获的回调方法可使用 `self: &Rc<Self>`，捕获前先 clone 句柄。
+   - `CORE.html` §4.15 未改动，`popdown` / `RefCell` 借用纪律继续由该节现有注记承载。
 
 ### 6. clap `trailing_var_arg` 吞掉后台化参数
 
