@@ -52,7 +52,7 @@
 </table>
 <table>
   <tr><th>接口</th><th>消费内容</th></tr>
-  <tr><td><code>hyprctl clients -j</code></td><td><code>address</code> / <code>class</code> / <code>title</code> / <code>focusHistoryID</code> / <code>workspace.name</code> / <code>monitor</code>；过滤 <code>special:minimized</code>、确定归属显示器并按焦点历史排列工作区窗口列表</td></tr>
+  <tr><td><code>hyprctl clients -j</code></td><td><code>address</code> / <code>class</code> / <code>title</code> / <code>focusHistoryID</code> / <code>workspace.name</code> / <code>monitor</code>（显示器 id，与 <code>monitors -j</code> 的 <code>id</code> 对齐）；过滤 <code>special:minimized</code>、确定归属显示器并按焦点历史排列工作区窗口列表</td></tr>
   <tr><td><code>hyprctl monitors -j</code></td><td><code>focused</code>（当前显示器判定）、当前活动工作区（恢复目标）、宽度（托盘宽度上限）</td></tr>
   <tr><td><code>hl.dsp.window.move({ workspace, window, follow = false })</code></td><td>移入最小化工作区或恢复到活动工作区</td></tr>
   <tr><td><code>hl.dsp.focus({ window })</code></td><td>恢复后聚焦窗口</td></tr>

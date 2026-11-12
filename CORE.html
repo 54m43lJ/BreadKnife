@@ -164,7 +164,12 @@ impl Daemon {
 pub enum ControlCommand;     //见 USER §4.2</code></pre>
 
 <h3 id="sec-4-hyprland">4.3. daemon/hyprland.rs <a href="#sec-1">↑ 文件树</a></h3>
-<pre><code>pub struct MonitorInfo { pub name: String, pub focused: bool, pub active_ws: Option&lt;WorkspaceRef&gt; }
+<pre><code>pub struct MonitorInfo {
+    pub id: i64,                    // monitors -j 的 id；clients -j 的 monitor 按此对齐
+    pub name: String,
+    pub focused: bool,
+    pub active_ws: Option&lt;WorkspaceRef&gt;,
+}
 pub struct WorkspaceRef { pub id: i64, pub name: String }
 pub struct WorkspaceInfo { pub id: i64, pub name: String, pub monitor: String, pub windows: u64 }
 pub struct WorkspaceRuleInfo { pub workspace_string: String, pub enabled: bool, pub monitor: String }
@@ -173,7 +178,7 @@ pub struct ClientInfo {
     pub class: String,
     pub title: String,
     pub focus_history_id: i32,      // focusHistoryID：0 = 最近聚焦
-    pub monitor: String,            // 已由 monitor id 解析为显示器名；无效时回退当前聚焦显示器
+    pub monitor: String,            // RawClient.monitor（显示器 id）对齐 MonitorInfo.id 后解析为显示器名；无效时回退当前聚焦显示器
     pub workspace: WorkspaceRef,
 }
 
@@ -208,7 +213,7 @@ pub enum HyprlandEvent {
 <ul class="note">
   <li><code>move_to_workspace</code> / <code>focus_window</code> / <code>close_window</code> 均以窗口 <code>address:</code> 选择器执行 Lua dispatch，失败时回退经典语法；窗口地址统一经 <code>normalize_addr</code> 归一。</li>
   <li><code>minimized</code> 事件由外部 taskbar 通过 wlr-foreign-toplevel 请求触发；Hyprland 不因普通 CSD 最小化请求产生该事件。</li>
-  <li><code>clients()</code> 过滤最小化集合时消费 <code>workspace.name == MINIMIZED_WORKSPACE</code>；<code>monitor</code> 无效时回退当前聚焦显示器。工作区悬停列表同时消费 <code>title</code> / <code>class</code> / <code>focusHistoryID</code>，按焦点历史升序排列。</li>
+  <li><code>clients()</code> 过滤最小化集合时消费 <code>workspace.name == MINIMIZED_WORKSPACE</code>；<code>monitor</code>（显示器 id）按 <code>MonitorInfo.id</code> 解析为显示器名，无效时回退当前聚焦显示器。工作区悬停列表同时消费 <code>title</code> / <code>class</code> / <code>focusHistoryID</code>，按焦点历史升序排列。</li>
   <li><code>active_workspace_name</code> 返回普通工作区名；特殊工作区显示时取底层普通工作区，避免恢复目标仍是 <code>special:minimized</code>。</li>
   <li><code>current_monitor</code> 经 <code>hyprctl -j monitors</code> 取 <code>focused</code> 显示器；查询失败或无 focused 时回退首个显示器，无显示器时返回 <code>None</code>。不启用 <code>.socket.sock</code> 查询，保持 socket2 只读与单一查询路径。</li>
 </ul>

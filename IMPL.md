@@ -63,7 +63,7 @@
    - 根 `CORE.html` §5.3 Exit 调用栈由直接调用 `protocol::shutdown_files()` 改为 `Daemon::shutdown_files()`，并展开为“默认文件清理 + 按跟踪的 `control_path` / `window_path` 清理自定义控制套接字及派生窗口套接字”。
    - `BUILD.html` §4 未改动，`-s/--socket` 的运行时文件说明继续作为依据。
 
-### 4. `MonitorInfo` 缺少显示器 id，无法完成 `clients().monitor` 的名称解析
+### 4. `MonitorInfo` 缺少显示器 id，无法完成 `clients().monitor` 的名称解析 [已解决]
 
 1. 问题描述
    根 `CORE.html` §4.3 要求 `ClientInfo.monitor` 由 monitor id 解析为显示器名，但同节的 `MonitorInfo` 只有 `name` / `focused` / `active_ws`，没有数字 id；`hyprctl clients` 的 `monitor` 字段是显示器索引，缺少映射源就无法实现文档承诺。
@@ -77,6 +77,12 @@
 |--------|------|------|------|
 | `CORE.html` | §4.3 `daemon/hyprland.rs` | 改 | `MonitorInfo` 增加 `pub id: i64`，并注明 `clients().monitor` 的 id → name 解析。 |
 | `PROVIDER.html` | §4.1 Hyprland IPC | 增 | 在 `clients -j` 消费行标注：`monitor` 为显示器 id，需与 `monitors -j` 的 `id` 对齐。 |
+
+4. 实际操作
+   - `CORE.html` §4.3 的 `MonitorInfo` 展开为多行结构并增加 `pub id: i64`，注明 `monitors -j` 的 `id` 与 `clients -j` 的 `monitor` 对齐；`ClientInfo.monitor` 注释补充“`RawClient.monitor`（显示器 id）对齐 `MonitorInfo.id` 后解析为显示器名”。
+   - `CORE.html` §4.3 注记补充 `clients()` 的 id → name 解析与回退链：按 `MonitorInfo.id` 匹配，无效时回退当前聚焦显示器。
+   - `PROVIDER.html` §4.1 的 `hyprctl clients -j` 消费行标注 `monitor` 为显示器 id，需与 `monitors -j` 的 `id` 对齐。
+   - 仅改文档；`src/daemon/hyprland.rs` 现有的 `MonitorInfo.id`、`clients()` 映射与回退实现未改动。
 
 ## 二、开发中发现文档没写明的细节
 
