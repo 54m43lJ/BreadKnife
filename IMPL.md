@@ -502,7 +502,7 @@
    - `USER.html` §5.2.3 的图标按钮条款补充 Hover：用 35% `muted` 半透明叠加在 `fg` 基底上；失联图标仍按 35% 不透明度置灰。
    - `src/assets/bread.css` 已包含 `.tray-box` / `.tray-btn` 的 `fg` 底色、非对称 margin 与 `alpha(@muted, 0.35)` hover，未改代码。
 
-### 15. 注册期 Menu 探测失败导致 blueman 右键落到 ContextMenu
+### 15. 注册期 Menu 探测失败导致 blueman 右键落到 ContextMenu [已解决]
 
 1. 问题描述
    blueman 的 SNI 对象实现了 `Menu` 属性与 `com.canonical.dbusmenu`，但不实现 `ContextMenu` 方法。注册期 `probe_routing` 若瞬时失败或早于属性就绪，登记条目 `menu = None`；右键按路由表落到 `ContextMenu`，两个前缀都失败后报 “No such method ContextMenu / No such interface org.freedesktop.StatusNotifierItem”。
@@ -517,6 +517,12 @@
 |--------|------|------|------|
 | `breadpan/CORE.html` | §4.6.7 `interact.rs` / §5.5.2 | 改 | 增加 `ensure_menu` 签名与流程：无菜单时交互期补探 `Menu`，成功回写登记簿；右键在补探后仍无菜单才 `ContextMenu`。 |
 | `breadpan/USER.html` | §3.6 交互方法 | 改 | `right_click` 注释补“注册期探测缺失时交互时补探一次”；`TrayItem.menu` 说明注明该值为现场读取，注册期探测失败不永久生效。 |
+
+4. 实际操作
+   - `breadpan/CORE.html` §4.6.7 增加 `ensure_menu(bus, entry) -> bool` 签名：无菜单时重探 `Menu` / `ItemIsMenu`，成功回写登记簿并更新条目。
+   - `breadpan/CORE.html` §5.5.2 调用栈改为右键先 `ensure_menu`，有菜单走 `menu::read_layer`，补探后仍无菜单才 `ContextMenu`；注记补充左键的 `menu_only` 与 Activate 失败回退同样先补探。
+   - `breadpan/USER.html` §3.6 的 `right_click` 注释补充“注册期探测缺失时交互期补探一次，仍无菜单才 ContextMenu fallback”；§3.5 与 `TrayItem.menu` 的字段说明注明该值为现场读取，注册期探测失败不永久生效，交互时会补探。
+   - 仅改文档；`breadpan/src/dbus/interact.rs` 现有 `ensure_menu` 与补探逻辑未改动。
 
 ### 16. 音量只认 pamixer、亮度误读键盘 LED，导致拿不到数据
 
