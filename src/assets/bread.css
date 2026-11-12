@@ -431,7 +431,6 @@ scale highlight {
     color: @bg;
     border-radius: 6px;
     padding: 3px 8px;
-    margin-top: 2px;
 }
 .nc-arrow,
 .nc-app {
@@ -473,9 +472,9 @@ scale highlight {
     color: @bg;
 }
 
-/* 通知中心消息卡复用 .notif-card，去掉弹窗宽度约束 */
+/* 通知中心消息卡复用 .notif-card：组内不留外边距，组间距由 group block 外层 spacing 提供 */
 .nc-panel .notif-card {
-    margin: 2px 0;
+    margin: 0;
     border-radius: 8px;
 }
 

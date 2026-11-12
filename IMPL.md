@@ -697,3 +697,23 @@
    - `cargo check` 通过。
    - `USER.html` / `CORE.html` 未改动；组关闭仍由 daemon 清理该应用全部通知并广播 `NotificationCleared(Some(app_name))`。
    - 该条两项文档动作均为“不动”，本次只补记状态：`USER.html` §5.2.6 的组清理语义与 `CORE.html` §4.13 的实现注记保持现状。
+
+### 24. 通知中心组内消息残留外边距
+
+1. 问题描述
+   通知中心的通知组内部仍带外边距：外层内容容器 `gtk::Box` 使用 4px spacing，`.nc-panel .notif-card` 又保留 2px 上下 margin，导致同组标题、消息卡与「…」之间出现多余间距；用户要求组内不设 margin，只在组与组之间留一点间距。
+2. 解决方法
+   - 每个应用组包进独立的 `gtk::Box`，组内 spacing 设为 0，组间距由外层 `content` 的 4px spacing 提供。
+   - `.nc-panel .notif-card` 的 margin 归零，移除 `.nc-group` 的 `margin-top: 2px`。
+   - 组标题、消息卡、「…」按钮在组块内依次紧排，不再继承外层间距。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.6 通知中心 | 增 | 组内消息之间不设外边距；组与组之间以 4px 间距分隔。 |
+| `CORE.html` | §4.13 `bar/modules/info.rs` | 增 | 每个应用组由 spacing 0 的容器承载，组间距由外层 content 的 4px spacing 提供。 |
+
+4. 实际操作
+   - `src/bar/modules/info.rs` 的 `CenterView::rebuild` 把每个应用组包进 `gtk::Box::new(gtk::Orientation::Vertical, 0)`，标题、消息卡与「…」都 append 到该组块，再整体 append 到 `content`。
+   - `src/assets/bread.css` 将 `.nc-panel .notif-card` 的 margin 改为 `0`，并移除 `.nc-group` 的 `margin-top: 2px`；组间距仍由外层 `content` 的 4px spacing 提供。
+   - `USER.html` §5.2.6 与 `CORE.html` §4.13 已补充上述契约；`cargo fmt --check` 与 `cargo check` 通过。

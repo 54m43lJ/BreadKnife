@@ -480,6 +480,7 @@ pub const POPUP_TOP_GAP: i32;              // 推荐值 5；层壳 Top margin，
   <li>顶部定位使用 <code>set_margin(Edge::Top, POPUP_TOP_GAP = 5)</code>；该 margin 相对任务栏让出的可用区，不是屏幕顶边，不能再按“任务栏高度 + 间距”累加。任务栏底边到通知窗顶部即 5px（实测任务栏 h=31、通知窗 y=36）。</li>
   <li>组标题箭头方向由 <code>!collapsed.contains(app)</code> 决定：收起 <code>▸</code>、展开 <code>▾</code>；<code>expanded</code> 仅用于“展开全部”隐藏其它组，不参与普通预览态的箭头判定。</li>
   <li><code>CenterView</code> 保存 popover / scroll / max_height；<code>rebuild</code> 末尾调用 <code>fit_height()</code> 测量内容自然高度，执行 <code>set_min_content_height(min(natural, max_height))</code>，再对可见 popover 调用 <code>present()</code> 重新呈现。仅 <code>queue_resize()</code> 不足以更新已可见的 xdg_popup，面板高度会停在旧值。</li>
+  <li>每个应用组由独立的 <code>gtk::Box</code>（spacing 0）承载，组内标题 / 消息卡 / 「…」不设外边距；组间距由外层 <code>content</code> 的 4px spacing 提供。</li>
   <li>中心记录按到达顺序新→旧保存；按应用聚合，组按最后一条消息时间新→旧，组内同样新→旧。组标题点击展开/收缩，收缩后只保留聚合标题，展开时只显示该组；组标题右侧清理按钮清理本组（cleanup，与贴栏 dismiss 区分）。</li>
   <li>组内超过 <code>GROUP_PREVIEW_COUNT</code> 条时只显示最新 <code>GROUP_PREVIEW_COUNT</code> 条 + 「…」条目；点击「…」展开该组全部消息，其它组隐藏。</li>
   <li>标题/正文因裁剪省略时，将完整文本设为对应控件的 tooltip；悬停消息卡显示全文。</li>
