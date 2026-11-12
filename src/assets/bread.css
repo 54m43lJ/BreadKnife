@@ -20,10 +20,11 @@ window.bread-bar {
     font-size: 12px;
 }
 
-/* ── 通用按钮：透明背景，圆角 6px，Hover surface ── */
+/* ── 通用按钮：透明背景、无边框、无投影，圆角 6px，Hover surface ── */
 button {
     background: transparent;
     border: none;
+    box-shadow: none;
     border-radius: 6px;
     padding: 0;
 }
