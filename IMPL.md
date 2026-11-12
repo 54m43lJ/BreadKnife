@@ -380,7 +380,7 @@
    - `breadpan/CORE.html` §5.4.2 新增 dbusmenu 白名单：只接受 `LayoutUpdated` / `ItemsPropertiesUpdated`；`ItemActivationRequested` 等其它同接口成员忽略，不修改 `pending_menu`。
    - `breadpan/USER.html` §4.3 未改动。
 
-### 9. GTK 主题投影被当成菜单行的下边框
+### 9. GTK 主题投影被当成菜单行的下边框 [已解决]
 
 1. 问题描述
    dbusmenu 自绘菜单的每一行都是透明 `GtkButton`，紧密堆叠后看起来每条下面都挂着一条细线。通用 `button` 规则只重置了 `background` / `border` / `border-radius`，没有重置主题设置的 `box-shadow`；Adwaita（`0 1px 2px`）与 Breeze（`0 1px 1px`）都会给按钮加投影，落在 `fg` 浅色菜单底上就被读成了行下边框。
@@ -394,6 +394,11 @@
 |--------|------|------|------|
 | `USER.html` | §5.2.1 任务栏窗口与按钮 | 改 | 按钮外观补“无投影”：透明底、无边框、无投影、圆角 6px、padding 0，明确主题投影也须清零。 |
 | `USER.html` | §5.2.3 托盘与托盘菜单 | 不动 | “分隔线 1px”已限定分隔只来自菜单项，行间不加边框的语义可由按钮外观条款推出。 |
+
+4. 实际操作
+   - `USER.html` §5.2.1 的按钮外观补充“无投影”：透明底、无边框、无投影、圆角 6px、padding 0，并注明主题默认的 `box-shadow` 也须清零。
+   - `USER.html` §5.2.3 未改动；菜单行不画线仍由分隔只来自 `Separator` 节点的既有条款表达。
+   - 仅改文档；`src/assets/bread.css` 的通用 `button` 规则已包含 `box-shadow: none`，未改代码。
 
 ### 10. 工作区条整条重建，快速连点吞掉点击
 
