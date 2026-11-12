@@ -442,7 +442,7 @@
    - `CORE.html` §5.1.1 未改动，`rx.recv_timeout(TICK)` 与“超时且 `pending_resync` → `resync()`”保持现状。
    - 仅改文档；`src/daemon/mod.rs` 的 `TICK` 已是 50ms，未改代码。
 
-### 12. tooltip 配色与工作区浮层共用一套容器规则
+### 12. tooltip 配色与工作区浮层共用一套容器规则 [已解决]
 
 1. 问题描述
    `tooltip` 规则同时承担普通 tooltip 与工作区悬停浮层的外观：浮层通过 `set_custom` 塞进 tooltip 容器，配色只能跟着 tooltip 走，内容再套样式会出现双重内边距/描边的风险；而浮层语义上并不是 tooltip，需要独立定义。
@@ -456,6 +456,11 @@
 |--------|------|------|------|
 | `USER.html` | §5.2.2 Workspace 按钮 | 不动 | 浮层配色（`surface` / `fg` / `gold` / 圆角 8px）已在现有条款中，样式实现分离不改变契约。 |
 | `USER.html` | §2 通用约定 | 不动 | 按要求不新增“浮层不属于 tooltip”的规则，只保留 `bread.css` 中的样式定义。 |
+
+4. 实际操作
+   - 两项文档动作均为“不动”，因此 `USER.html` §5.2.2 与 §2 未改动：浮层配色（`surface` / `fg` / `gold` / 圆角 8px）已在 §5.2.2 现有条款中，本次样式实现分离不改变窗口契约。
+   - `src/assets/bread.css` 已按实现分离：`tooltip` 容器与内部 `box` 透明、无内边距，普通 tooltip 外观落在 `tooltip > box > label`；`.ws-tip` 独立定义完整外观，两者共用同一套色板但不共享选择器。
+   - 未改代码；本次仅将该项标记为已解决并记录实际处理方式。
 
 ### 13. 工作区基底与紧急/活跃对比色改取 fg / purple
 
