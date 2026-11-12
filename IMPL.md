@@ -86,7 +86,7 @@
 
 ## 二、开发中发现文档没写明的细节
 
-### 1. `RegisterStatusNotifierItem` 的错误分层没有具体映射
+### 1. `RegisterStatusNotifierItem` 的错误分层没有具体映射 [已解决]
 
 1. 问题描述
    `breadpan/PROVIDER.html` §4.1 只列出 `InvalidArgs` 与 `Failed` 两种线上错误，`CORE.html` §5.3.1 只说参数解析失败要拒绝；但没有说明“哪些失败归 InvalidArgs、哪些归 Failed”，也没有说明重复报到是否仍算成功。
@@ -101,6 +101,11 @@
 |--------|------|------|------|
 | `breadpan/PROVIDER.html` | §4.1 方法应答 / 错误应答 | 增 | 补一张映射表：解析失败 → InvalidArgs；停机 / 内部失败 → Failed；重复报到幂等成功。 |
 | `breadpan/CORE.html` | §5.3.1 报到 | 不动 | 保留参数解析与 upsert 流程，错误映射在上表补充。 |
+
+4. 实际操作
+   - `breadpan/PROVIDER.html` §4.1 在“错误应答”后新增“报到结果映射”表：参数解析失败 → `InvalidArgs` 且不写登记簿；运行时已停机或其它内部失败 → `Failed`；首次报到与同名 / 同一对象重复报到均为成功空应答，重复报到幂等，只有首次插入且快照栅栏已置位时才广播 `StatusNotifierItemRegistered` 并入队 `Added`。
+   - `breadpan/CORE.html` §5.3.1 未改动，继续保留参数解析与 `upsert` 流程。
+   - 仅改文档；错误映射与 `breadpan/src/dbus/iface.rs`、幂等入册与首次插入广播逻辑与 `breadpan/src/dbus/mod.rs` 现有实现一致。
 
 ### 2. 通知命令失败后的状态迁移没有具体接口
 
