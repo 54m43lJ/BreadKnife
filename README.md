@@ -85,7 +85,7 @@ bread exit                        # 退出
 
 ### 运行管理
 
-`bread` 前台启动，`bread daemon` 自动后台化；每个显示器一条任务栏， 随显示器插拔自动创建与回收。启动、运行与退出细节见 [BUILD.html](BUILD.md)。
+`bread` 前台启动，`bread daemon` 自动后台化；每个显示器一条任务栏， 随显示器插拔自动创建与回收；没有显示器时 daemon 继续后台常驻，显示器恢复后自动拉起任务栏。 启动、运行与退出细节见 [BUILD.html](BUILD.md)。
 
 ## 项目地图
 
