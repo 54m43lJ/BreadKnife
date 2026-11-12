@@ -22,7 +22,8 @@ use crate::shared::model::{
 use crate::shared::protocol::{Frame, NotificationCloseReason, Push, Request, Response};
 
 /// 事件循环滴答：超时档兼作重同步去抖窗口（事件风暴在若干个滴答内合并为一次全量重读）。
-const TICK: Duration = Duration::from_millis(200);
+/// 50ms：工作区切换的更新延迟不超过一帧量级，同时仍能合并连续的窗口生命周期事件。
+const TICK: Duration = Duration::from_millis(50);
 
 /// 最小化集合工作区。
 pub const MINIMIZED_WORKSPACE: &str = "special:minimized";
