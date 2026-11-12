@@ -276,7 +276,7 @@
    - `PROVIDER.html` §4.1 增补 `activespecial` / `activespecialv2`（特殊工作区切换）与 `moveworkspace` / `moveworkspacev2` / `renameworkspace`（工作区移动 / 重命名）均触发全量重同步。
    - `CORE.html` §4.3 未改动，`HyprlandEvent` 枚举保持现状，载荷细节由 PROVIDER 承载。
 
-### 4. layer-shell 窗口位置与全局 CSS 作用域
+### 4. layer-shell 窗口位置与全局 CSS 作用域 [已解决]
 
 1. 问题描述
    贴栏通知最初按 Bottom 锚定，实际跑到了屏幕底部；文档要求“任务栏正下方”。同时 CSS 全局 `window { min-height: 30px; border-bottom: ... }` 会作用到通知窗口、dock 面板与触发条，导致多余底边和高度。
@@ -291,6 +291,11 @@
 |--------|------|------|------|
 | `USER.html` | §5.2.5 通知弹窗 | 增 | 明确贴栏弹窗锚定任务栏下缘（Top + 30px），而非屏幕底部。 |
 | `CORE.html` | §4.13 / §4.14 | 不动 | 几何数值已定义，锚定实现细节由本条补充，避免重复。 |
+
+4. 实际操作
+   - `USER.html` §5.2.5 新增定位注记：贴栏弹窗锚定任务栏下缘而非屏幕底部；层壳使用 Top 边，top margin 相对任务栏让出的可用区。
+   - 间距按当前实现 `POPUP_TOP_GAP = 5px` 写入，未照抄当时修订建议中的 30px；30px 是早期临时值，后续已调整为 5px，文档按现值描述避免回退。
+   - `CORE.html` §4.13 / §4.14 未改动，几何与窗口分类仍由 CORE 承载。
 
 ### 5. GTK 回调的 `'static` 要求与文档中的 `&self` 结构不一致
 
