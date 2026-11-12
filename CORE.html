@@ -215,6 +215,7 @@ pub enum HyprlandEvent {
     OpenWindow { addr: String, workspace: String, class: String, title: String },
     CloseWindow(String),
     Minimized { addr: String, minimized: bool },
+    WorkspaceChanged,
     Resync,
 }</code></pre>
 <ul class="note">
@@ -222,6 +223,7 @@ pub enum HyprlandEvent {
   <li><code>minimized</code> 事件由外部 taskbar 通过 wlr-foreign-toplevel 请求触发；Hyprland 不因普通 CSD 最小化请求产生该事件。</li>
   <li><code>clients()</code> 过滤最小化集合时消费 <code>workspace.name == MINIMIZED_WORKSPACE</code>；<code>monitor</code>（显示器 id）按 <code>MonitorInfo.id</code> 解析为显示器名，无效时回退当前聚焦显示器。工作区悬停列表同时消费 <code>title</code> / <code>class</code> / <code>focusHistoryID</code>，按焦点历史升序排列。</li>
   <li><code>active_window()</code> 读取 <code>hyprctl -j activewindow</code> 的 <code>address</code> / <code>class</code> / <code>title</code>，三者都允许为空串；无焦点或解析失败返回 <code>None</code>。</li>
+  <li>工作区 / 焦点事件（<code>workspace*</code>、<code>focusedmon*</code>、<code>create/destroy/move/renameworkspace*</code>、<code>activespecial*</code>）归为 <code>WorkspaceChanged</code>，daemon 收到即重同步并推送工作区切片，不进入 50ms 去抖窗口；只有 <code>configreloaded</code> / <code>changefloatingmode</code> 等纯显示变化仍走 <code>Resync</code> 去抖。</li>
   <li><code>active_workspace_name</code> 先取 <code>monitors -j</code> 中同名显示器的 <code>active_ws.name</code>；名称不以 <code>special:</code> 开头时直接返回。若为特殊工作区，则在 <code>workspaces -j</code> 中取该显示器上第一个非 <code>special:</code> 工作区；没有则返回 <code>None</code>。恢复窗口以该值为目标工作区，移动失败则不移动；该算法避免把 <code>special:minimized</code> 当作恢复目标。</li>
   <li><code>current_monitor</code> 经 <code>hyprctl -j monitors</code> 取 <code>focused</code> 显示器；查询失败或无 focused 时回退首个显示器，无显示器时返回 <code>None</code>。不启用 <code>.socket.sock</code> 查询，保持 socket2 只读与单一查询路径。</li>
 </ul>
@@ -872,6 +874,9 @@ pub struct StateDelta {
      ├── rx.recv_timeout(TICK)
      │    └── Daemon::handle(ev)
      └── 超时且 pending_resync → Daemon::resync()</code></pre>
+<ul class="note">
+  <li>工作区 / 焦点事件走 <code>WorkspaceChanged</code> 直达，收到即重同步，不等待 <code>TICK</code>；<code>TICK</code> 只合并 <code>Resync</code> 类纯显示事件（配置重载 / 浮动模式）。</li>
+</ul>
 <h4 id="sec-5-1-2">5.1.2. 窗口进程</h4>
 <pre><code>启动（窗口进程，daemon spawn）
 ├── bar::run(monitor, socket)

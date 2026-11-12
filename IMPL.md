@@ -717,3 +717,25 @@
    - `src/bar/modules/info.rs` 的 `CenterView::rebuild` 把每个应用组包进 `gtk::Box::new(gtk::Orientation::Vertical, 0)`，标题、消息卡与「…」都 append 到该组块，再整体 append 到 `content`。
    - `src/assets/bread.css` 将 `.nc-panel .notif-card` 的 margin 改为 `0`，并移除 `.nc-group` 的 `margin-top: 2px`；组间距仍由外层 `content` 的 4px spacing 提供。
    - `USER.html` §5.2.6 与 `CORE.html` §4.13 已补充上述契约；`cargo fmt --check` 与 `cargo check` 通过。
+
+### 25. 去抖范围过大，工作区点击与滚轮切换被延后
+
+1. 问题描述
+   工作区 / 焦点事件原先全部折叠为 `Resync`，要等 `recv_timeout(TICK)` 的超时档才处理；点击工作区或滚轮切换后，工作区条最多晚一个去抖窗口才更新，用户体感为点击 / 滚轮被去抖。窗口打开 / 关闭、配置重载等纯显示变化可以合并，但用户输入触发的切换应立即反映。
+2. 解决方法
+   - 新增 `HyprlandEvent::WorkspaceChanged`，承载 `workspace*`、`focusedmon*`、`create/destroy/move/renameworkspace*`、`activespecial*`。
+   - daemon 收到 `WorkspaceChanged` 立即 `resync()`，并清掉已覆盖的 `pending_resync`；点击与滚轮切换不再等待滴答。
+   - 仅 `configreloaded` / `changefloatingmode` 等纯显示事件继续走 `Resync`，由 `TICK` 合并。
+   - 单元测试拆分：工作区事件断言 `WorkspaceChanged`，配置重载 / 浮动模式断言 `Resync`。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.3 `HyprlandEvent` | 改 | 增加 `WorkspaceChanged`，并注明工作区 / 焦点事件直达、不进入去抖窗口。 |
+| `CORE.html` | §5.1.1 daemon 启动 | 增 | 注明 `TICK` 只合并 `Resync` 类纯显示事件，工作区事件收到即重同步。 |
+
+4. 实际操作
+   - `src/daemon/hyprland.rs` 增加 `WorkspaceChanged` 枚举，工作区 / 焦点类事件从 `Resync` 拆出；配置重载与浮动模式仍保留在 `Resync`。
+   - `src/daemon/mod.rs` 的 `on_hyprland` 收到 `WorkspaceChanged` 时清 `pending_resync` 并立即 `resync()`，使点击 / 滚轮切换即时反馈。
+   - `src/daemon/hyprland.rs` 更新解析测试：工作区事件断言 `WorkspaceChanged`，配置重载 / 浮动模式断言 `Resync`。
+   - `CORE.html` §4.3 与 §5.1.1 已补充事件分层与去抖范围说明；`cargo fmt --check`、`cargo check` 与相关解析测试通过。

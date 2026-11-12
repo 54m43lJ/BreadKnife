@@ -350,6 +350,9 @@ pub enum HyprlandEvent {
         addr: String,
         minimized: bool,
     },
+    /// 工作区结构 / 焦点事件：工作区条应尽快反映切换，进 daemon 即重同步。
+    WorkspaceChanged,
+    /// 其余全量重读事件（配置重载 / 浮动模式）：由滴答窗口合并后重同步。
     Resync,
 }
 
@@ -479,11 +482,14 @@ fn parse_event(name: &str, data: &str) -> Option<HyprlandEvent> {
                 minimized: flag.trim() == "1",
             })
         }
-        // 触发全量重同步的事件（工作区 / 焦点 / 配置重载）
+        // 工作区结构 / 焦点变化：事件到达即重同步，点击 / 滚轮切换不等待去抖窗口。
         "workspacev2" | "workspace" | "focusedmonv2" | "focusedmon" | "createworkspace"
         | "createworkspacev2" | "destroyworkspace" | "destroyworkspacev2" | "moveworkspace"
-        | "moveworkspacev2" | "renameworkspace" | "changefloatingmode" | "configreloaded"
-        | "activespecial" | "activespecialv2" => Some(HyprlandEvent::Resync),
+        | "moveworkspacev2" | "renameworkspace" | "activespecial" | "activespecialv2" => {
+            Some(HyprlandEvent::WorkspaceChanged)
+        }
+        // 其余全量重读事件：配置重载 / 浮动模式（纯显示变化，可去抖）。
+        "changefloatingmode" | "configreloaded" => Some(HyprlandEvent::Resync),
         _ => None, // 未消费的事件静默忽略
     }
 }
@@ -614,28 +620,40 @@ mod tests {
     }
 
     #[test]
-    fn parse_event_resync_triggers() {
+    fn parse_event_workspace_triggers_immediate_sync() {
         let cases = [
-            ("workspacev2", "2"),
+            ("workspacev2", "2,2"),
             ("workspace", "2"),
             ("focusedmonv2", "DP-1,2"),
             ("focusedmon", "DP-1,2"),
             ("createworkspace", "3"),
-            ("createworkspacev2", "3"),
+            ("createworkspacev2", "3,3"),
             ("destroyworkspace", "3"),
-            ("destroyworkspacev2", "3"),
-            ("changefloatingmode", "0xa,1"),
-            ("configreloaded", ""),
-            ("activespecial", ""),
-            ("activespecialv2", "DP-1,magic"),
-            ("moveworkspace", "0x1,2"),
-            ("moveworkspacev2", "0x1,2,web"),
+            ("destroyworkspacev2", "3,3"),
+            ("activespecial", "magic,DP-1"),
+            ("activespecialv2", "99,magic,DP-1"),
+            ("moveworkspace", "web,DP-1"),
+            ("moveworkspacev2", "2,web,DP-1"),
             ("renameworkspace", "2,web"),
         ];
         for (name, data) in cases {
             assert!(
+                matches!(
+                    parse_event(name, data),
+                    Some(HyprlandEvent::WorkspaceChanged)
+                ),
+                "{name}>>{data} 应立即触发工作区重同步"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_event_resync_triggers() {
+        let cases = [("changefloatingmode", "0xa,1"), ("configreloaded", "")];
+        for (name, data) in cases {
+            assert!(
                 matches!(parse_event(name, data), Some(HyprlandEvent::Resync)),
-                "{name}>>{data} 应触发 Resync"
+                "{name}>>{data} 应触发去抖 Resync"
             );
         }
     }
