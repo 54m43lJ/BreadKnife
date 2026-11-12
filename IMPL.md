@@ -422,7 +422,7 @@
    - `CORE.html` §4.12 注记补充点击回调从浮层数据单元格读取当前工作区名，不固化创建时的名字。
    - `USER.html` §5.2.2 增加可验收行为：快速连续点击不同工作区时每次点击都应生效，状态推送不得在按下与松开之间重建按钮而吞掉 `clicked`。
 
-### 11. 重同步去抖窗口 200ms 偏高，工作区切换更新有滞后
+### 11. 重同步去抖窗口 200ms 偏高，工作区切换更新有滞后 [已解决]
 
 1. 问题描述
    工作区状态本来就由 `.socket2.sock` 事件驱动，并非轮询；但工作区事件被折叠为 `Resync` 后，要等 `recv_timeout(TICK)` 超时才处理，`TICK = 200ms` 让切换后的高亮最多晚一个滴答，体感像轮询。核心问题只是去抖窗口过长，不需要拆分事件类型。
@@ -436,6 +436,11 @@
 |--------|------|------|------|
 | `CORE.html` | §4.2 `daemon/mod.rs` | 改 | `run_loop` 注释补 `TICK = 50ms`：滴答仅作重同步去抖窗口，`recv_timeout` 是阻塞等待事件而非轮询。 |
 | `CORE.html` | §5.1.1 daemon 启动 | 不动 | 调用栈的 `rx.recv_timeout(TICK)` 与“超时且 `pending_resync` → `resync()`”保持现状，仅数值变化。 |
+
+4. 实际操作
+   - `CORE.html` §4.2 的 `run_loop` 注释补上 `TICK = 50ms`，并注明该滴答仅作重同步去抖窗口，`recv_timeout` 是阻塞等待事件而非周期轮询。
+   - `CORE.html` §5.1.1 未改动，`rx.recv_timeout(TICK)` 与“超时且 `pending_resync` → `resync()`”保持现状。
+   - 仅改文档；`src/daemon/mod.rs` 的 `TICK` 已是 50ms，未改代码。
 
 ### 12. tooltip 配色与工作区浮层共用一套容器规则
 

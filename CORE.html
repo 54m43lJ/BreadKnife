@@ -126,7 +126,7 @@ pub enum DaemonEvent {
 }
 
 impl Daemon {
-    fn run_loop(&amp;mut self);                                  // 事件循环；滴答超时档兼作重同步去抖窗口
+    fn run_loop(&amp;mut self);                                  // 事件循环；TICK = 50ms 仅作重同步去抖窗口，recv_timeout 阻塞等待事件而非轮询
     fn handle(&amp;mut self, ev: DaemonEvent) -&gt; bool;           // false = 退出循环
     fn on_hyprland(&amp;mut self, ev: hyprland::HyprlandEvent);
     fn clear_urgent_on_active_transition(&amp;mut self);
