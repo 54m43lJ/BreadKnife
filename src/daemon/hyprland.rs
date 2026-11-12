@@ -67,6 +67,17 @@ pub struct ClientInfo {
     pub workspace: WorkspaceRef,
 }
 
+/// `hyprctl -j activewindow`：当前焦点窗口（无焦点时字段为空串）。
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ActiveWindowInfo {
+    #[serde(default)]
+    pub address: String,
+    #[serde(default)]
+    pub class: String,
+    #[serde(default)]
+    pub title: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct RawClient {
     pub address: String,
@@ -125,6 +136,15 @@ pub fn monitors() -> Vec<MonitorInfo> {
 
 pub fn workspaces() -> Vec<WorkspaceInfo> {
     hyprctl_json(&["-j", "workspaces"])
+}
+
+/// 当前焦点窗口（`hyprctl -j activewindow`）；无焦点或解析失败 → None。
+pub fn active_window() -> Option<ActiveWindowInfo> {
+    let resp = hyprctl(&["-j", "activewindow"]).ok()?;
+    if resp.is_empty() {
+        return None;
+    }
+    serde_json::from_str(&resp).ok()
 }
 
 pub fn clients() -> Vec<ClientInfo> {
@@ -496,6 +516,20 @@ mod tests {
             parse_event("monitorremovedv2", "0,DP-1,Some Monitor"),
             Some(HyprlandEvent::MonitorRemoved(n)) if n == "DP-1"
         ));
+    }
+
+    #[test]
+    fn active_window_json_fields() {
+        let active: ActiveWindowInfo = serde_json::from_str(
+            r#"{"address":"0x55791591fbf0","class":"code-oss","title":"ISSUES.md"}"#,
+        )
+        .unwrap();
+        assert_eq!(active.address, "0x55791591fbf0");
+        assert_eq!(active.class, "code-oss");
+        assert_eq!(active.title, "ISSUES.md");
+
+        let empty: ActiveWindowInfo = serde_json::from_str("{}").unwrap();
+        assert!(empty.address.is_empty() && empty.class.is_empty() && empty.title.is_empty());
     }
 
     #[test]

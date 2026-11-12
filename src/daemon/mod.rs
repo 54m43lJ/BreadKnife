@@ -319,6 +319,21 @@ impl Daemon {
         self.monitors = hyprland::monitors();
         self.workspaces = hyprland::workspaces();
         self.ws_rules = hyprland::workspace_rules();
+        // 启动 / 重同步主动读取焦点窗口：仅靠 activewindow 事件会漏掉启动前的焦点。
+        let previous_active = self.active_window.clone();
+        if let Some(active) = hyprland::active_window() {
+            self.active_addr = hyprland::normalize_addr(&active.address);
+            self.active_window = crate::shared::model::ActiveWindow {
+                class: active.class,
+                title: active.title,
+            };
+        }
+        if previous_active != self.active_window {
+            self.broadcast(Push::State(StateDelta {
+                active: Some(self.active_window.clone()),
+                ..Default::default()
+            }));
+        }
         if !self.seeded {
             self.seeded = true;
             for m in &self.monitors {

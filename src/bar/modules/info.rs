@@ -152,9 +152,15 @@ impl InfoCenterWidget {
     }
 
     pub fn set_active(&self, active: &ActiveWindow) {
-        self.title_label.set_text(&active.title);
+        // 标题缺失时回退应用 class，避免窗口已聚焦但标题区空白。
+        let text = if active.title.trim().is_empty() {
+            active.class.trim()
+        } else {
+            active.title.trim()
+        };
+        self.title_label.set_text(text);
         self.title_label
-            .set_tooltip_text((!active.title.is_empty()).then_some(active.title.as_str()));
+            .set_tooltip_text((!text.is_empty()).then_some(text));
         set_image_from_theme(&self.icon, &active.class.to_lowercase(), 32);
     }
 

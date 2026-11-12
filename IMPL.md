@@ -475,3 +475,19 @@
 | `USER.html` | §5.2.6 通知中心 | 改 | 单条关闭 / 组关闭 / 全部清理属于 cleanup，与弹窗 dismiss 区分；dismiss 条目保留至 cleanup。 |
 | `CORE.html` | §4.13 `info.rs` / §4.19 协议 | 改 | `NotificationRecord` 增 `dismissed`；Request 改为 `NotificationDismiss` / `NotificationRemove` / `NotificationDismissAll`；Push 增 `NotificationDismissed`。 |
 | `ABOUT.html` | 「界面交互」通知弹窗 | 改 | 行为措辞 close→dismiss，并补“dismiss 后保留通知中心等待清理”。 |
+
+### 21. 启动时不主动读取焦点窗口，标题区可能空白
+
+1. 问题描述
+   daemon 只在 `activewindow` / `activewindowv2` / `windowtitlev2` 事件到达时更新活动窗口；如果启动时已有焦点窗口，事件早已发生，`resync` 又不查询 `hyprctl activewindow`，窗口快照里的 `active` 就是默认空值，标题区空白直到下一次焦点事件。标题本身为空时也会直接显示空白。
+2. 解决方法
+   - 新增 `hyprland::active_window()`：读取 `hyprctl -j activewindow`（address / class / title，允许空字段）。
+   - `resync` 主动刷新 `active_window` / `active_addr`，变化时广播 `StateDelta.active`；启动时的窗口快照因此带当前标题。
+   - 标题标签在 `title` 为空时回退显示 `class`，避免已聚焦但标题空白。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.3 `daemon/hyprland.rs` | 改 | 增加 `active_window()` 签名与 `hyprctl -j activewindow` 字段说明。 |
+| `CORE.html` | §5.1.1 启动调用栈 | 改 | `resync()` 补“读取当前焦点窗口并广播 active”。 |
+| `USER.html` | §5.2.1 任务栏窗口与按钮 | 增 | 标题为空时回退显示应用 class，避免已聚焦窗口标题区空白。 |
