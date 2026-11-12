@@ -589,7 +589,7 @@
    - `CORE.html` §4.13 注记明确箭头方向由 `!collapsed.contains(app)` 决定，`expanded` 只用于“展开全部”；`fit_height()` 测量自然高度、设置滚动区最小高度并对可见 popover 重新 `present()`，避免已可见 xdg_popup 保持旧高度。
    - 仅改文档；`src/bar/modules/info.rs` 现有箭头与 `fit_height` 实现未改动。
 
-### 19. 堆叠通知之间多出一条分隔线
+### 19. 堆叠通知之间多出一条分隔线 [已解决]
 
 1. 问题描述
    `NotificationWindow::rebuild` 在每两张通知卡之间插入一个 `GtkSeparator`（`.notif-sep`，`gold` 1px），用户认为堆叠弹窗之间不应画线。
@@ -601,6 +601,10 @@
 | 文档名 | 章节 | 动作 | 内容 |
 |--------|------|------|------|
 | `USER.html` | §5.2.5 通知弹窗 | 改 | 删除“条间分隔线 1px”，改为“多条之间以 4px 间距分隔，不画线”。 |
+
+4. 实际操作
+   - `USER.html` §5.2.5 删除“条间分隔线 1px”，改为“多条之间以 4px 间距分隔，不画线”。
+   - 仅改文档；`src/bar/modules/info.rs` 已不再插入 `GtkSeparator`，`src/assets/bread.css` 的 `.notif-card` 已使用 `margin: 0 0 4px 0`，未改代码。
 
 ### 20. dismiss 语义与清理混淆，dismiss 后条目被移出通知中心
 
