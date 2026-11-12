@@ -537,3 +537,23 @@
    - `Cargo.toml` / `Cargo.lock` 增加 `libc` 依赖。
    - 未改动 `src/daemon/mod.rs` 与 `src/daemon/hyprland.rs`，显示器插拔继续以 Hyprland 事件为唯一来源。
    - 在隔离的 `XDG_RUNTIME_DIR` 下冒烟：无 Hyprland / 无显示器时 daemon 保持存活，`bread exit` 能正常清理退出。
+
+### 23. 通知中心组关闭按钮被展开手势吞掉
+
+1. 问题描述
+   通知中心的组标题同时承载展开/收起 `GestureClick` 与右侧关闭按钮。点击 `✕` 时，按下事件冒泡到组标题的 `pressed` 处理并触发 `rebuild()`；关闭按钮在 `released` 之前被销毁，`clicked` 不再派发，于是只看到分组展开/收起，`NotificationClearGroup` 请求没有发出。
+2. 解决方法
+   - 把组标题拆成“箭头 + 应用名”的展开区与独立的关闭按钮，`GestureClick` 只挂展开区。
+   - 关闭按钮不再经过展开手势，继续发送 `Request::NotificationClearGroup { app_name }`；daemon 清理该组并广播 `NotificationCleared(Some(app_name))`。
+   - 不改协议与 daemon 清理逻辑。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.6 通知中心 | 不动 | 组标题关闭按钮“清空本组全部消息”的语义已定义，本次只修实现。 |
+| `CORE.html` | §4.13 `bar/modules/info.rs` | 不动 | 组标题结构属于实现细节，契约仍由 USER 描述。 |
+
+4. 实际操作
+   - `src/bar/modules/info.rs` 的 `group_header` 新增 `toggle` 容器（箭头 + 应用名），把展开/收起 `GestureClick` 从整个 `header` 移到 `toggle`；`✕` 保持独立 `clicked` 发送 `NotificationClearGroup`。
+   - `cargo check` 通过。
+   - `USER.html` / `CORE.html` 未改动；组关闭仍由 daemon 清理该应用全部通知并广播 `NotificationCleared(Some(app_name))`。
