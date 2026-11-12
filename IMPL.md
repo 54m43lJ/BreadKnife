@@ -549,7 +549,7 @@
    - `CORE.html` §4.5 更新 `set_volume` / `set_brightness` 注释，并把音量与亮度后端链、`backlight` 过滤语义写入注记。
    - 仅改文档；`src/daemon/system.rs` 现有后端链与解析实现未改动。
 
-### 17. 贴栏通知顶部空白过大
+### 17. 贴栏通知顶部空白过大 [已解决]
 
 1. 问题描述
    `NotificationWindow` 用层壳 `Edge::Top` margin 30 定位贴栏通知；层壳 margin 相对任务栏让出的可用区，而不是屏幕顶边，因此实际形成“任务栏 31px + margin 30px”的 30px 空白，用户只想要约 5px。
@@ -562,6 +562,11 @@
 |--------|------|------|------|
 | `USER.html` | §5.2.5 通知弹窗 | 改 | 明确“任务栏底边到通知窗顶部 5px”，并注明层壳 top margin 取 5（相对可用区）。 |
 | `CORE.html` | §4.13 `bar/modules/info.rs` | 改 | 记录 `POPUP_TOP_GAP` 常量及层壳 margin 语义，避免再次按屏幕顶边推算。 |
+
+4. 实际操作
+   - `USER.html` §5.2.5 的定位条款改为明确“任务栏底边到通知窗顶部为 5px”，层壳 Top margin 取 `POPUP_TOP_GAP = 5`，相对任务栏让出的可用区而非屏幕顶边。
+   - `CORE.html` §4.13 增加 `POPUP_TOP_GAP` 常量（推荐值 5），并在注记中说明 `set_margin(Edge::Top, POPUP_TOP_GAP)` 的可用区语义，附实测任务栏 h=31 / 通知窗 y=36，避免再按屏幕顶边累加。
+   - 仅改文档；`src/bar/modules/info.rs` 已使用 `POPUP_TOP_GAP = 5`，未改代码。
 
 ### 18. 通知中心组标题箭头不随收缩状态变化、面板高度不回落
 
