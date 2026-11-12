@@ -522,6 +522,8 @@ debounce_task(bus)
   <li>同名换主：条目保留、id 不变；属主唯一名重绑定，新属主的信号归属随 rebind 续接；路由字段就地重探。</li>
   <li>死亡清理：按服务名或属主唯一名双条件命中；唯一名消失 → 该连接全部条目一并下线（含双注册并入的单一 id）。</li>
   <li>栅栏前事实静默：重绑定已生效，快照即最新，不补投；<code>Removed</code> 在栅栏前进入 <code>bus.defer_removed</code> 缓冲。</li>
+  <li>重绑定与死亡清理在运行时任务中异步执行，信号泵线程不得同步等待 <code>tracker</code> 写锁；否则同线程任务持有读守卫时会互相死锁。</li>
+  <li>读守卫不得跨越后续写锁或 <code>await</code>：所有“读后可能写”的路径先把结果取出（如 <code>let found = { bus.tracker.read().unwrap().find(...) };</code>），让读守卫在块尾释放后再分支。删除 / 重键也先释放登记锁，再清理 <code>pending</code> / <code>pending_menu</code>。</li>
 </ul>
 
 <h3 id="sec-5-4">5.4. 菜单现场读取（Menu 流程，interact 与 menu()/menu_expand() 共用）</h3>

@@ -235,7 +235,7 @@
    - `breadpan/CORE.html` §4.4 注记补充 `BusCenter.arrival_seq`（`AtomicU64`）：报到在首次 `await` 前领取到达序号，再交给 `upsert_at`；并发完成顺序不再影响首见序；启动反向发现按服务名排序后顺序注册。
    - `breadpan/CORE.html` §5.3.1 调用栈在 `split_service_arg` 与 `GetNameOwner` 之间插入 `bus.arrival_seq.fetch_add(1)`，并把入册调用改为 `upsert_at(ItemEntry, seq)`；注记补充“到达序号必须在首次 await 前领取”。
 
-### 2. RwLock 读守卫跨 `if let` / `await` 造成写锁死等
+### 2. RwLock 读守卫跨 `if let` / `await` 造成写锁死等 [已解决]
 
 1. 问题描述
    信号任务里写 `if let Some(id) = bus.tracker.read().unwrap().find(...) { ... }` 时，读守卫可能活到整个 `if let` 块结束；若块内再取写锁，或信号泵线程同步等待写锁，而同线程上的任务正持有读守卫，就会死锁。把 `NameOwnerChanged` 的重绑定改成同步写锁后，生命周期测试直接超时。
@@ -250,6 +250,11 @@
 |--------|------|------|------|
 | `breadpan/CORE.html` | §5.3.2 NameOwnerChanged | 增 | 注明重绑定不得在信号泵线程同步阻塞；读守卫不得跨越后续写锁或 await。 |
 | `breadpan/CORE.html` | §4.6.2 `bus.rs` | 不动 | 共享簿记类型已定义，锁使用纪律在上条补充。 |
+
+4. 实际操作
+   - `breadpan/CORE.html` §5.3.2 新增注记：重绑定与死亡清理必须在运行时任务中异步执行，信号泵线程不得同步等待 `tracker` 写锁，避免同线程读守卫与写锁互相死锁。
+   - `breadpan/CORE.html` §5.3.2 补充锁使用纪律：读守卫不得跨越后续写锁或 `await`，读后可能写的路径先用显式块取出结果再分支；删除 / 重键先释放登记锁，再清理 `pending` / `pending_menu`。
+   - `breadpan/CORE.html` §4.6.2 未改动，共享簿记类型保持现状。
 
 ### 3. Hyprland v2 事件载荷取错 token，且特殊工作区事件名写错
 
