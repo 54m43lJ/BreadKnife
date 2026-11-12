@@ -190,6 +190,8 @@ pub struct ClientInfo {
 pub fn monitors() -&gt; Vec&lt;MonitorInfo&gt;;
 pub fn workspaces() -&gt; Vec&lt;WorkspaceInfo&gt;;
 pub fn clients() -&gt; Vec&lt;ClientInfo&gt;;
+pub struct ActiveWindowInfo { pub address: String, pub class: String, pub title: String }
+pub fn active_window() -&gt; Option&lt;ActiveWindowInfo&gt;;                                // hyprctl -j activewindow；字段允许空串
 pub fn current_monitor() -&gt; Option&lt;String&gt;;                                        // monitors -j 的 focused；失败回退首个
 pub fn workspace_rules() -&gt; Vec&lt;WorkspaceRuleInfo&gt;;
 pub fn rule_workspace(rule: &amp;WorkspaceRuleInfo) -&gt; Option&lt;(String, Option&lt;i64&gt;)&gt;;   // 静态选择器 → (名称, id 提示)
@@ -219,6 +221,7 @@ pub enum HyprlandEvent {
   <li><code>move_to_workspace</code> / <code>focus_window</code> / <code>close_window</code> 均以窗口 <code>address:</code> 选择器执行 Lua dispatch，失败时回退经典语法；窗口地址统一经 <code>normalize_addr</code> 归一。</li>
   <li><code>minimized</code> 事件由外部 taskbar 通过 wlr-foreign-toplevel 请求触发；Hyprland 不因普通 CSD 最小化请求产生该事件。</li>
   <li><code>clients()</code> 过滤最小化集合时消费 <code>workspace.name == MINIMIZED_WORKSPACE</code>；<code>monitor</code>（显示器 id）按 <code>MonitorInfo.id</code> 解析为显示器名，无效时回退当前聚焦显示器。工作区悬停列表同时消费 <code>title</code> / <code>class</code> / <code>focusHistoryID</code>，按焦点历史升序排列。</li>
+  <li><code>active_window()</code> 读取 <code>hyprctl -j activewindow</code> 的 <code>address</code> / <code>class</code> / <code>title</code>，三者都允许为空串；无焦点或解析失败返回 <code>None</code>。</li>
   <li><code>active_workspace_name</code> 先取 <code>monitors -j</code> 中同名显示器的 <code>active_ws.name</code>；名称不以 <code>special:</code> 开头时直接返回。若为特殊工作区，则在 <code>workspaces -j</code> 中取该显示器上第一个非 <code>special:</code> 工作区；没有则返回 <code>None</code>。恢复窗口以该值为目标工作区，移动失败则不移动；该算法避免把 <code>special:minimized</code> 当作恢复目标。</li>
   <li><code>current_monitor</code> 经 <code>hyprctl -j monitors</code> 取 <code>focused</code> 显示器；查询失败或无 focused 时回退首个显示器，无显示器时返回 <code>None</code>。不启用 <code>.socket.sock</code> 查询，保持 socket2 只读与单一查询路径。</li>
 </ul>
@@ -857,6 +860,8 @@ pub struct StateDelta {
 │    ├── hyprland::monitors()
 │    ├── hyprland::workspaces()
 │    ├── hyprland::workspace_rules()
+│    ├── hyprland::active_window()（读取当前焦点窗口）
+│    ├── broadcast(StateDelta.active)（无条件重发）
 │    ├── clear_urgent_on_active_transition()
 │    ├── rebuild_workspace_slices()
 │    ├── Daemon::resync_minimized()
