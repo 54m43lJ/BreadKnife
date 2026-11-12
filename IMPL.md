@@ -337,7 +337,7 @@
    - 注记同时说明原因：`cmd` 使用 `trailing_var_arg = true`，放在子命令之后的选项会被收进 `cmd`，后台 daemon 会退回默认套接字。
    - `BUILD.html` §4 未改动，`-s/--socket` 的用户说明保持现状。
 
-### 7. 协议测试在桌面总线上的 `NameTaken` 竞争
+### 7. 协议测试在桌面总线上的 `NameTaken` 竞争 [已解决]
 
 1. 问题描述
    `bnote` 协议测试需要占用 `org.freedesktop.Notifications`。直接在桌面会话跑 `cargo test` 时，dunst 等守护已持有该名，测试全部以 `NameTaken` 失败；若强制抢名又会干扰用户会话。
@@ -352,6 +352,11 @@
 |--------|------|------|------|
 | `bnote/BUILD.html` | §2 开发命令 | 增 | 注明普通 `cargo test` 在桌面总线被占用时会跳过协议用例；隔离全量运行必须用 `dbus-run-session -- cargo test`。 |
 | `BUILD.html` | §2 开发命令 | 不动 | 根项目只保留库测试的隔离命令，细节归 bnote BUILD。 |
+
+4. 实际操作
+   - `bnote/BUILD.html` §2 的 `cargo test` 行补充“桌面总线被占用时跳过”，并在命令块后新增注记：普通 `cargo test` 遇到 `org.freedesktop.Notifications` 被 dunst 等占用时打印跳过提示并以 `NameTaken` 跳过，不 panic、不抢名。
+   - `bnote/BUILD.html` §2 注明隔离全量运行必须使用 `dbus-run-session -- cargo test`；未设置 `DBUS_SESSION_BUS_ADDRESS` 时协议用例同样跳过；协议用例用进程内静态锁串行化。
+   - `BUILD.html` §2 未改动，根项目继续只列出库测试的隔离命令。
 
 ### 8. zbus 接口级信号匹配会收到厂商自定义信号
 
