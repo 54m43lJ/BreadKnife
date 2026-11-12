@@ -379,3 +379,19 @@
 | 文档名 | 章节 | 动作 | 内容 |
 |--------|------|------|------|
 | `USER.html` | §5.2.3 托盘与托盘菜单 | 改 | 托盘区域与图标按钮底色改 `fg`；hover 用 35% `muted` 叠加；背景块上下留 2px 间距。 |
+
+### 15. 注册期 Menu 探测失败导致 blueman 右键落到 ContextMenu
+
+1. 问题描述
+   blueman 的 SNI 对象实现了 `Menu` 属性与 `com.canonical.dbusmenu`，但不实现 `ContextMenu` 方法。注册期 `probe_routing` 若瞬时失败或早于属性就绪，登记条目 `menu = None`；右键按路由表落到 `ContextMenu`，两个前缀都失败后报 “No such method ContextMenu / No such interface org.freedesktop.StatusNotifierItem”。
+2. 解决方法
+   - 新增 `ensure_menu`：交互时若登记条目无菜单，补探一次 `Menu` / `ItemIsMenu`，成功即回写登记簿并继续 Menu 流程。
+   - 右键先补探再判定，仍无菜单才走 `ContextMenu` fallback。
+   - 左键在 `menu_only` 与 Activate 失败回退两处同样补探，避免注册竞态让整项即菜单的 Item 失去菜单。
+   - 生命周期测试让 mock 的 `Menu` 属性在三次注册期间不可读、右键前才就绪，断言右键仍返回 `InteractionOutcome::Menu`。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `breadpan/CORE.html` | §4.6.7 `interact.rs` / §5.5.2 | 改 | 增加 `ensure_menu` 签名与流程：无菜单时交互期补探 `Menu`，成功回写登记簿；右键在补探后仍无菜单才 `ContextMenu`。 |
+| `breadpan/USER.html` | §3.6 交互方法 | 改 | `right_click` 注释补“注册期探测缺失时交互时补探一次”；`TrayItem.menu` 说明注明该值为现场读取，注册期探测失败不永久生效。 |

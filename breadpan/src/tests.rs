@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -340,6 +341,8 @@ struct MockItem {
     calls: Arc<MockCalls>,
     title: Arc<Mutex<String>>,
     menu_only: Arc<Mutex<bool>>,
+    /// 模拟注册期 Menu 属性尚未就绪（blueman 场景）：false 时属性读取报错。
+    menu_ready: Arc<AtomicBool>,
 }
 
 #[interface(name = "org.kde.StatusNotifierItem")]
@@ -373,8 +376,11 @@ impl MockItem {
         "edit-copy".into()
     }
     #[zbus(property)]
-    fn menu(&self) -> OwnedObjectPath {
-        ObjectPath::from_static_str_unchecked(MOCK_MENU_PATH).into()
+    fn menu(&self) -> zbus::fdo::Result<OwnedObjectPath> {
+        if !self.menu_ready.load(Ordering::Relaxed) {
+            return Err(zbus::fdo::Error::Failed("menu not ready".into()));
+        }
+        Ok(ObjectPath::from_static_str_unchecked(MOCK_MENU_PATH).into())
     }
 
     async fn activate(&self, x: i32, y: i32) {
@@ -665,10 +671,13 @@ fn lifecycle() {
     let calls = Arc::new(MockCalls::default());
     let title = Arc::new(Mutex::new("Mock Tray Item".to_string()));
     let menu_only = Arc::new(Mutex::new(false));
+    // 注册期 Menu 尚不可读，稍后置位以验证交互时补探（blueman 的注册竞态）。
+    let menu_ready = Arc::new(AtomicBool::new(false));
     let calls_for_item = calls.clone();
     let calls_for_menu = calls.clone();
     let title_for_item = title.clone();
     let menu_only_for_item = menu_only.clone();
+    let menu_ready_for_item = menu_ready.clone();
     let conn = rt.block_on(async move {
         let conn = Connection::session().await.expect("session bus");
         conn.object_server()
@@ -678,6 +687,7 @@ fn lifecycle() {
                     calls: calls_for_item,
                     title: title_for_item,
                     menu_only: menu_only_for_item,
+                    menu_ready: menu_ready_for_item,
                 },
             )
             .await
@@ -817,6 +827,10 @@ fn lifecycle() {
         .and_then(|v| v.try_into().ok())
         .unwrap_or(false);
     assert!(host_registered, "host stub must answer true");
+
+    // 注册期 Menu 探测均失败（三次报到都在就绪前）；此时才让 Menu 可读，
+    // 右键必须靠交互时补探拿到菜单，而不是落到不存在的 ContextMenu。
+    menu_ready.store(true, Ordering::Relaxed);
 
     // 现场读取：item() 全字段
     let item = handle.item(&MOCK_ID.to_string()).expect("item read");
@@ -1101,6 +1115,7 @@ fn lifecycle() {
                     calls: calls2_for_item,
                     title: title2_for_item,
                     menu_only: menu_only2_for_item,
+                    menu_ready: Arc::new(AtomicBool::new(true)),
                 },
             )
             .await
