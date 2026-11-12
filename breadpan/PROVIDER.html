@@ -65,6 +65,11 @@
 <ul class="note">
   <li><code>RegisteredStatusNotifierItems</code> 的顺序是本库附加契约：按首见序保持稳定；SNI 规范未规定该属性顺序。</li>
 </ul>
+<h4>菜单读取应答</h4>
+<ul class="note">
+  <li>库内菜单读取对 <code>GetLayout</code> 的每个子节点按 <code>(i32, a{sv}, av)</code> 严格反序列化；任一子节点结构非法立即返回 <code>TrayError::Protocol</code>，不跳过该节点，也不返回部分 <code>MenuSnapshot</code>。</li>
+  <li>调用方把该错误作为整层菜单读取失败处理，不渲染半截菜单；<code>TrayError::Protocol</code> 的窗口侧含义见 <a href="USER.html#sec-4-2">USER §4.2</a>。</li>
+</ul>
 <h4>错误应答</h4>
 <pre><code>org.freedesktop.DBus.Error.InvalidArgs(message)
 org.freedesktop.DBus.Error.Failed(message)</code></pre>

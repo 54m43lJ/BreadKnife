@@ -171,7 +171,7 @@
    - `CORE.html` §4.3 注记展开完整回退算法：`monitors -j` 的 `active_ws.name` 优先；非 `special:` 直接返回；`special:` 时在 `workspaces -j` 中按该显示器找第一个非 `special:` 工作区；没有则 `None`。恢复窗口以该值为目标，移动失败则不移动。
    - `USER.html` §5.2.7 未改动，恢复目标仍由窗口契约定义为“该屏当前活动工作区”。
 
-### 5. dbusmenu 非法布局节点的错误语义未写
+### 5. dbusmenu 非法布局节点的错误语义未写 [已解决]
 
 1. 问题描述
    `breadpan/PROVIDER.html` §4.1 只规定方法调用失败与 `InvalidArgs / Failed`，没有说明 `GetLayout` 返回的某个子节点结构非法时，是跳过该节点返回部分结果，还是整体失败。`CORE.html` §5.4.1 也未覆盖该分支。
@@ -185,6 +185,11 @@
 |--------|------|------|------|
 | `breadpan/PROVIDER.html` | §4.1 方法应答 / 错误应答 | 增 | 注明 GetLayout 子节点结构非法 → `TrayError::Protocol`，不返回部分快照。 |
 | `breadpan/USER.html` | §4.2 消息与错误 | 不动 | `Protocol` 已定义为属性缺失/类型不符的兜底错误，保持现状。 |
+
+4. 实际操作
+   - `breadpan/PROVIDER.html` §4.1 新增“菜单读取应答”注记：库内菜单读取对 `GetLayout` 的每个子节点按 `(i32, a{sv}, av)` 严格反序列化，任一子节点结构非法立即返回 `TrayError::Protocol`，不跳过节点、不返回部分 `MenuSnapshot`。
+   - `breadpan/PROVIDER.html` §4.1 补充调用方语义：把该错误作为整层菜单读取失败处理，不渲染半截菜单；`TrayError::Protocol` 的窗口侧含义仍由 `USER.html` §4.2 定义。
+   - `breadpan/USER.html` §4.2 未改动。
 
 ### 6. 通知计时器与“中心打开 / 同 id 替换”的交互未完全写死
 
