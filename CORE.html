@@ -146,8 +146,10 @@ impl Daemon {
     fn on_notification(&amp;mut self, record: NotificationRecord);
     fn on_notification_closed(&amp;mut self, id: u32);
     fn on_notification_status(&amp;mut self, status: NotificationStatus);
-    fn close_notification(&amp;mut self, id: u32, reason: NotificationCloseReason);
-    fn close_notification_group(&amp;mut self, app_name: &amp;str);
+    fn dismiss_notification(&amp;mut self, id: u32, reason: NotificationDismissReason);
+    fn remove_notification(&amp;mut self, id: u32);
+    fn dismiss_all_notifications(&amp;mut self);
+    fn clear_notification_group(&amp;mut self, app_name: &amp;str);
     fn clear_notifications(&amp;mut self);
     fn activate_notification(&amp;mut self, id: u32, action_key: Option&lt;&amp;str&gt;,
                              activation_token: Option&lt;&amp;str&gt;);
@@ -350,7 +352,7 @@ impl WindowApp {
     fn apply_snapshot(&amp;self, snapshot: &amp;WindowSnapshot);
 }</code></pre>
 <ul class="note">
-  <li><code>Notification</code> → <code>InfoCenterWidget::upsert_center</code>；<code>NotificationPopup</code> → <code>push_popup</code>；<code>NotificationRemoved</code> / <code>NotificationCleared</code> → 同步通知中心与贴栏栈。</li>
+  <li><code>Notification</code> → <code>InfoCenterWidget::upsert_center</code>；<code>NotificationPopup</code> → <code>push_popup</code>；<code>NotificationDismissed</code> → 仅移除贴栏卡片；<code>NotificationRemoved</code> / <code>NotificationCleared</code> → 同步通知中心与贴栏栈。</li>
   <li><code>State</code> / <code>Snapshot</code> 携带 <code>NotificationStatus</code>，据此更新中心不可用态并隐藏贴栏通知；携带的 <code>minimized</code> 列表喂给 <code>DockWidget</code>。</li>
   <li>GTK 生命周期下的等价实现：字段类型为语义示意，可变状态以 <code>Rc</code> / <code>RefCell</code> / <code>Mutex</code> 持有；需要被信号闭包捕获的回调方法可使用 <code>self: &amp;Rc&lt;Self&gt;</code>，捕获前先 clone 句柄。</li>
 </ul>
@@ -475,16 +477,16 @@ pub const POPUP_TOP_GAP: i32;              // 推荐值 5；层壳 Top margin，
   <li>顶部定位使用 <code>set_margin(Edge::Top, POPUP_TOP_GAP = 5)</code>；该 margin 相对任务栏让出的可用区，不是屏幕顶边，不能再按“任务栏高度 + 间距”累加。任务栏底边到通知窗顶部即 5px（实测任务栏 h=31、通知窗 y=36）。</li>
   <li>组标题箭头方向由 <code>!collapsed.contains(app)</code> 决定：收起 <code>▸</code>、展开 <code>▾</code>；<code>expanded</code> 仅用于“展开全部”隐藏其它组，不参与普通预览态的箭头判定。</li>
   <li><code>CenterView</code> 保存 popover / scroll / max_height；<code>rebuild</code> 末尾调用 <code>fit_height()</code> 测量内容自然高度，执行 <code>set_min_content_height(min(natural, max_height))</code>，再对可见 popover 调用 <code>present()</code> 重新呈现。仅 <code>queue_resize()</code> 不足以更新已可见的 xdg_popup，面板高度会停在旧值。</li>
-  <li>中心记录按到达顺序新→旧保存；按应用聚合，组按最后一条消息时间新→旧，组内同样新→旧。组标题点击展开/收缩，收缩后只保留聚合标题，展开时只显示该组；组标题右侧关闭按钮清空本组。</li>
+  <li>中心记录按到达顺序新→旧保存；按应用聚合，组按最后一条消息时间新→旧，组内同样新→旧。组标题点击展开/收缩，收缩后只保留聚合标题，展开时只显示该组；组标题右侧清理按钮清理本组（cleanup，与贴栏 dismiss 区分）。</li>
   <li>组内超过 <code>GROUP_PREVIEW_COUNT</code> 条时只显示最新 <code>GROUP_PREVIEW_COUNT</code> 条 + 「…」条目；点击「…」展开该组全部消息，其它组隐藏。</li>
   <li>标题/正文因裁剪省略时，将完整文本设为对应控件的 tooltip；悬停消息卡显示全文。</li>
-  <li>贴栏通知窗口内多张卡片纵向堆叠；新条在最上，同 id 原位替换并重置计时，超过 <code>POPUP_VISIBLE_MAX</code> 条显示隐藏计数。有限超时的条目独立计时；超时仅移除贴栏卡片，<code>transient</code> 记录同时发送 <code>NotificationClose { id, reason: Expired }</code>，非 transient 记录的中心条目保留。</li>
+  <li>贴栏通知窗口内多张卡片纵向堆叠；新条在最上，同 id 原位替换并重置计时，超过 <code>POPUP_VISIBLE_MAX</code> 条显示隐藏计数。有限超时的条目独立计时；超时只移除贴栏卡片，发送 <code>NotificationDismiss { id, reason: Expired }</code>，非 transient 的中心条目保留，<code>transient</code> 记录由 daemon 删除。</li>
   <li>超时取 <code>NotificationRecord.expire_timeout_ms</code>：<code>Some(0)</code> 常驻，<code>Some(ms)</code> 按 ms；<code>None</code> 时低优先级取 <code>POPUP_LOW_TIMEOUT_MS</code>，普通与紧急常驻。常驻条目不创建计时器。</li>
   <li>通知中心打开时 <code>NotificationWindow::set_center_open(true)</code>：窗口隐藏，记录与计时器保留；关闭时重新显示未过期记录。期间到达的通知只入栈，不显示。</li>
   <li><code>show</code> 仅在记录非空且窗口不可见时设置窗口可见；空栈不创建可见窗口；<code>hide</code> 仅隐藏，不清理记录。</li>
   <li>动作按钮按 <code>actions</code> 顺序显示；默认文字，<code>action_icons</code> 为真且图标命中时用 action key 作为图标名、label 作为 tooltip / 无障碍文本，未命中回退文字。按钮发送 <code>NotificationActivate { id, action_key: Some(key), activation_token }</code>，左键点击卡片发送 <code>NotificationActivate { id, action_key: None, activation_token }</code>。</li>
-  <li><code>activation_token()</code> 只由动作按钮与左键默认动作调用；中键、关闭按钮、清空、超时与通知中心开关不调用；令牌不缓存、不复用。</li>
-  <li>daemon 触发动作后关闭该条（<code>resident</code> 保留）；无可用动作时左键仅关闭该条。贴栏卡片的中键/关闭按钮发送 <code>NotificationClose { id, reason: Dismissed }</code>，右键发送 <code>NotificationClear</code>；中心内的消息与组按钮复用关闭 / 动作请求。</li>
+  <li><code>activation_token()</code> 只由动作按钮与左键默认动作调用；中键、dismiss / 清理按钮、清空、超时与通知中心开关不调用；令牌不缓存、不复用。</li>
+  <li>daemon 触发动作后 dismiss 该条（<code>resident</code> 保留），无可用动作时左键也仅 dismiss。贴栏卡片的 ✕ / 中键发送 <code>NotificationDismiss { id, reason: Dismissed }</code>，右键发送 <code>NotificationDismissAll</code>；中心内的单条 ✕ 发送 <code>NotificationRemove</code>，组 ✕ 发送 <code>NotificationClearGroup</code>。</li>
   <li>通知中心的消息卡同样渲染动作按钮；默认文字，<code>action_icons</code> 为真且图标命中时用图标。点击发送 <code>NotificationActivate { id, action_key: Some(key), activation_token }</code>。</li>
   <li><code>remove_notification</code> / <code>clear_notifications</code> 同时更新中心列表与贴栏通知窗口；快照只填充通知中心，贴栏通知窗口不重放历史。</li>
   <li>服务不可用时中心显示失败说明与刷新按钮，贴栏通知窗口隐藏但保留记录。</li>
@@ -614,7 +616,7 @@ impl CenterWidget {
 }
 
 pub enum MediaOp { PlayPause, Next, Prev }
-pub enum NotificationCloseReason { Dismissed, Expired }
+pub enum NotificationDismissReason { Dismissed, Expired }
 
 pub enum Request {
     Hello { monitor: String },
@@ -629,8 +631,10 @@ pub enum Request {
     VolumeSet { value: u32 },
     BrightnessSet { value: u32 },
     NotificationRetry,
-    NotificationClose { id: u32, reason: NotificationCloseReason },
-    NotificationCloseGroup { app_name: String },
+    NotificationDismiss { id: u32, reason: NotificationDismissReason },
+    NotificationRemove { id: u32 },
+    NotificationDismissAll,
+    NotificationClearGroup { app_name: String },
     NotificationClear,
     NotificationActivate {
         id: u32,
@@ -653,6 +657,7 @@ pub enum Push {
     MenuChanged { item: String },
     Notification(NotificationRecord),
     NotificationPopup(NotificationRecord),
+    NotificationDismissed(u32),
     NotificationRemoved(u32),
     NotificationCleared(Option&lt;String&gt;),
     Reload,
@@ -679,9 +684,9 @@ pub fn parse_control_line(line: &amp;str) -&gt; Option&lt;ControlCommand&gt;;</c
 <ul class="note">
   <li>传输：Unix Socket（daemon 为服务端）；两类消息——窗口 → daemon 的请求（均有应答）与 daemon → 窗口的推送；首连握手后由 daemon 推送全量快照，此后增量衔接。</li>
   <li><code>hello</code>：窗口接入握手，显示器名 → 先推全量快照、后应答受理。</li>
-  <li>请求语义：<code>tray.menu_read</code> / <code>tray.menu_expand</code> 返回菜单快照；<code>tray.interact</code> 返回路由结果（<code>Dispatched</code> / <code>Menu</code> 快照）；<code>notification.activate</code> 的动作 key 缺省取 <code>default</code> / 唯一动作，<code>activation_token</code> 缺省表示不生成；daemon 先回发令牌再触发动作，触发后关闭该条（<code>resident</code> 除外），无可用动作则直接关闭。</li>
+  <li>请求语义：<code>tray.menu_read</code> / <code>tray.menu_expand</code> 返回菜单快照；<code>tray.interact</code> 返回路由结果（<code>Dispatched</code> / <code>Menu</code> 快照）；<code>notification.activate</code> 的动作 key 缺省取 <code>default</code> / 唯一动作，<code>activation_token</code> 缺省表示不生成；daemon 先回发令牌再触发动作，触发后 dismiss 该条（<code>resident</code> 除外），无可用动作则直接 dismiss。</li>
   <li>请求语义：<code>minimized.restore</code> 把窗口移到其显示器当前活动工作区并聚焦；<code>minimized.close</code> 请求关闭窗口；地址不在最小化集合时无操作。</li>
-  <li>推送语义：<code>notification</code> 推送全部窗口用于通知中心缓存；<code>notification_popup</code> 仅推当前显示器；<code>notification_removed</code> / <code>notification_cleared</code> 推送全部窗口；<code>state.minimized</code> 推送全部窗口，由各窗口按显示器过滤。</li>
+  <li>推送语义：<code>notification</code> 推送全部窗口用于通知中心缓存；<code>notification_popup</code> 仅推当前显示器；<code>notification_dismissed</code> 只移除贴栏卡片，<code>notification_removed</code> / <code>notification_cleared</code> 才同步中心并推送全部窗口；<code>state.minimized</code> 推送全部窗口，由各窗口按显示器过滤。</li>
   <li>大对象（如位图图标）可经 fd 传递升级（memfd + <code>SCM_RIGHTS</code>），协议骨架不变。</li>
   <li>断开处理：互动失败时窗口重连一次（按首连流程再取全量快照）；周期性存活检查（PID 文件）确认 daemon 已退出则自主退出。</li>
   <li><code>shutdown_files()</code> 只清理默认运行时文件（PID 文件、默认控制套接字及其派生窗口套接字）；daemon 停机时由 <code>Daemon::shutdown_files()</code> 在默认清理后，再按自身跟踪的 <code>control_path</code> / <code>window_path</code> 清理 <code>-s/--socket</code> 指定的自定义路径（见 §5.3）。</li>
@@ -782,6 +787,7 @@ pub struct NotificationRecord {     // bnote::Notice 的共享投影
     pub expire_timeout_ms: Option&lt;u32&gt;,
     pub transient: bool,
     pub resident: bool,
+    pub dismissed: bool,        // 已 dismiss：贴栏不再显示，中心保留等待清理
     pub sound_file: Option&lt;String&gt;,
     pub sound_name: Option&lt;String&gt;,
     pub suppress_sound: bool,
@@ -825,9 +831,9 @@ pub struct StateDelta {
   <li><code>TrayUpdate</code>：<code>Added</code> 追加右端、<code>Changed</code> 原位更新、<code>Renamed</code> 原位换键、<code>Removed</code> 删除；窗口按该语义维护首见序。</li>
   <li><code>MinimizedWindow</code>：<code>address</code> 为归一化窗口地址，<code>class</code> / <code>title</code> 用于图标与标题，<code>monitor</code> 为窗口归属显示器；daemon 维护列表顺序，新条目追加右侧，窗口标题变化原地更新。</li>
   <li><code>StateDelta.minimized</code> 为完整列表快照；列表变化时广播全部窗口，各窗口按 <code>monitor</code> 过滤。</li>
-  <li><code>NotificationRecord</code>：由 <code>bnote::Notice</code> 投影，保留 id、应用名、图标三态、标题、正文、动作、<code>action_icons</code>、紧急度、请求超时、<code>transient</code> / <code>resident</code>、<code>sound_file</code> / <code>sound_name</code> / <code>suppress_sound</code>；窗口只消费共享模型，不接触 bnote 类型。</li>
+  <li><code>NotificationRecord</code>：由 <code>bnote::Notice</code> 投影，保留 id、应用名、图标三态、标题、正文、动作、<code>action_icons</code>、紧急度、请求超时、<code>transient</code> / <code>resident</code> / <code>dismissed</code>、<code>sound_file</code> / <code>sound_name</code> / <code>suppress_sound</code>；窗口只消费共享模型，不接触 bnote 类型。</li>
   <li><code>NotificationStatus</code>：<code>Ready</code> / <code>Unavailable { message }</code>；通知服务启动成功为 <code>Ready</code>，启动失败或运行中终止为 <code>Unavailable</code>，变化时推送全部窗口。</li>
-  <li>通知关闭原因：<code>Dismissed</code>（用户关闭 / 组清理 / 动作确认）/ <code>Expired</code>（<code>transient</code> 超时）；窗口请求映射为 bnote <code>CloseReason</code>；客户端 <code>CloseNotification</code> 由 bnote 自行回发 <code>CloseRequest</code>。</li>
+  <li>通知 dismiss 原因：<code>Dismissed</code>（用户 dismiss / 组清理 / 动作确认）/ <code>Expired</code>（<code>transient</code> 超时）；窗口请求映射为 bnote <code>CloseReason</code>；客户端 <code>CloseNotification</code> 由 bnote 自行回发 <code>CloseRequest</code>。</li>
 </ul>
 
 <h3 id="sec-4-tests">4.20. tests.rs <a href="#sec-1">↑ 文件树</a></h3>
@@ -964,38 +970,46 @@ popup::hover_switch(manager, anchor, switch)（悬停切换，世代校验）</c
   <li>提示音在到达时播放一次，与通知中心/贴栏弹窗是否显示无关；<code>suppress_sound</code> 为真或后端缺席时跳过。</li>
 </ul>
 
-<h3 id="sec-5-6">5.6. 通知关闭、清理与动作</h3>
+<h3 id="sec-5-6">5.6. 通知 dismiss、清理与动作</h3>
 
-<h4 id="sec-5-6-1">5.6.1. 单条关闭</h4>
-<pre><code>窗口/计时器 → Request::NotificationClose { id, reason }
-└── Daemon::close_notification(id, reason)
-     ├── notifications.remove(id)
-     ├── NotificationService::close(id, bnote::CloseReason::{Dismissed|Expired})
-     └── Daemon::broadcast(Push::NotificationRemoved(id))
-          └── WindowApp::handle_push(push)
-               └── InfoCenterWidget::remove_notification(id)</code></pre>
+<h4 id="sec-5-6-1">5.6.1. 单条 dismiss 与发送方撤回</h4>
+<pre><code>窗口/计时器 → Request::NotificationDismiss { id, reason }
+└── Daemon::dismiss_notification(id, reason)
+     ├── transient → 删除记录 + NotificationService::close(id, reason)
+     │    └── broadcast(Push::NotificationRemoved(id))
+     └── 非 transient → dismissed = true + NotificationService::close(id, reason)
+          └── broadcast(Push::NotificationDismissed(id))   // 中心保留，贴栏移除</code></pre>
 <pre><code>客户端 CloseNotification（bnote 自动回发 NotificationClosed）
 └── NoticeEvent::Close { id }
      └── DaemonEvent::NotificationClosed(id)
-          └── Daemon::on_notification_closed(id)
-               ├── notifications.remove(id)
-               └── Daemon::broadcast(Push::NotificationRemoved(id))</code></pre>
+          └── Daemon::on_notification_closed(id)   // 按 dismiss 处理
+               ├── transient → 删除记录 + Push::NotificationRemoved(id)
+               └── 非 transient → dismissed = true + Push::NotificationDismissed(id)</code></pre>
 
-<h4 id="sec-5-6-2">5.6.2. 组关闭与全部清理</h4>
-<pre><code>中心组关闭 → Request::NotificationCloseGroup { app_name }
-└── Daemon::close_notification_group(app_name)
-     ├── notifications.collect_ids(app_name)
-     ├── NotificationService::close(id, Dismissed) × N
-     ├── notifications.remove(id) × N
+<h4 id="sec-5-6-2">5.6.2. 清理与全部 dismiss</h4>
+<pre><code>中心单条清理 → Request::NotificationRemove { id }
+└── Daemon::remove_notification(id)
+     ├── notifications.remove(id)
+     ├── 未 dismissed → NotificationService::close(id, Dismissed)
+     └── broadcast(Push::NotificationRemoved(id))
+
+组清理 → Request::NotificationClearGroup { app_name }
+└── Daemon::clear_notification_group(app_name)
+     ├── 该组未 dismissed 条目 → NotificationService::close(id, Dismissed) × N
+     ├── 移除该组记录
      └── broadcast(Push::NotificationCleared(Some(app_name)))
 
 全部清理 → Request::NotificationClear
 └── Daemon::clear_notifications()
-     ├── NotificationService::close(id, Dismissed) × N
+     ├── 未 dismissed 条目 → NotificationService::close(id, Dismissed) × N
      ├── notifications.clear()
-     └── broadcast(Push::NotificationCleared(None))</code></pre>
+     └── broadcast(Push::NotificationCleared(None))
 
-<h4 id="sec-5-6-3">5.6.3. 左键动作、激活令牌与关闭</h4>
+贴栏全部 dismiss → Request::NotificationDismissAll
+└── Daemon::dismiss_all_notifications()
+     └── 对未 dismissed 条目逐条 dismiss_notification(id, Dismissed)；中心全部保留</code></pre>
+
+<h4 id="sec-5-6-3">5.6.3. 左键动作、激活令牌与 dismiss</h4>
 <pre><code>窗口左键/动作按钮
 ├── InfoCenterWidget::activation_token()
 │    └── gdk::Display::default()
@@ -1008,12 +1022,12 @@ popup::hover_switch(manager, anchor, switch)（悬停切换，世代校验）</c
           │    ├── activation_token 存在 → SessionHandle::activation_token(id, token)
           │    └── SessionHandle::invoke_action(id, key)
           ├── 有动作且 resident → 返回（保留条目）
-          └── 无动作或非 resident → Daemon::close_notification(id, Dismissed)</code></pre>
+          └── 无动作或非 resident → Daemon::dismiss_notification(id, Dismissed)</code></pre>
 <ul class="note">
   <li>左键的 <code>action_key</code> 为 <code>None</code>，取 <code>default</code> 或唯一动作；动作按钮带对应 key。</li>
-  <li>有动作时触发后关闭该条；<code>resident</code> 记录保留。无可用动作时左键仅关闭该条。</li>
+  <li>有动作时触发后 dismiss 该条；<code>resident</code> 记录保留。无可用动作时左键仅 dismiss 该条。</li>
   <li>令牌在 bar 的点击回调中先生成、再随请求投递；缺失或回发失败时只记日志并跳过 <code>ActivationToken</code>，<code>ActionInvoked</code> 仍照常发出。</li>
-  <li><code>resident</code> 只影响动作后是否关闭，不改变令牌生成与回发顺序。</li>
+  <li><code>resident</code> 只影响动作后是否 dismiss，不改变令牌生成与回发顺序。</li>
   <li>通知协议没有可映射到具体应用/窗口的字段；bread 不直接聚焦来源应用，只回发令牌，由发送方自行激活其窗口。</li>
 </ul>
 

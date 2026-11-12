@@ -606,7 +606,7 @@
    - `USER.html` §5.2.5 删除“条间分隔线 1px”，改为“多条之间以 4px 间距分隔，不画线”。
    - 仅改文档；`src/bar/modules/info.rs` 已不再插入 `GtkSeparator`，`src/assets/bread.css` 的 `.notif-card` 已使用 `margin: 0 0 4px 0`，未改代码。
 
-### 20. dismiss 语义与清理混淆，dismiss 后条目被移出通知中心
+### 20. dismiss 语义与清理混淆，dismiss 后条目被移出通知中心 [已解决]
 
 1. 问题描述
    原 `NotificationClose` 同时承担“贴栏 dismiss”和“通知中心清理”两种动作：dismiss 时 daemon 直接把条目移出 `notifications` 并广播 `NotificationRemoved`，通知中心随之消失；用户要求 dismiss 只收起贴栏卡片，条目保留在中心等待清理。术语上“关闭通知”也应改为 dismiss。
@@ -624,6 +624,13 @@
 | `USER.html` | §5.2.6 通知中心 | 改 | 单条关闭 / 组关闭 / 全部清理属于 cleanup，与弹窗 dismiss 区分；dismiss 条目保留至 cleanup。 |
 | `CORE.html` | §4.13 `info.rs` / §4.19 协议 | 改 | `NotificationRecord` 增 `dismissed`；Request 改为 `NotificationDismiss` / `NotificationRemove` / `NotificationDismissAll`；Push 增 `NotificationDismissed`。 |
 | `ABOUT.html` | 「界面交互」通知弹窗 | 改 | 行为措辞 close→dismiss，并补“dismiss 后保留通知中心等待清理”。 |
+
+4. 实际操作
+   - `USER.html` §5.2.5：通知弹窗的“关闭”措辞统一改为 dismiss；补充 dismiss 与清理的分工（dismiss 只收贴栏卡片，清理才彻底移除），发送方 `CloseNotification` 按 dismiss 处理，超时只收贴栏卡片、`transient` 由 daemon 删除。
+   - `USER.html` §5.2.6：单条 / 组 / 全部按钮改称清理，明确属于 cleanup；补充“dismiss 的条目保留在中心并继续显示，直到 cleanup”。
+   - `CORE.html` §4.13 / §4.19 / §5.6：`NotificationRecord` 增加 `dismissed`；Request 改为 `NotificationDismiss` / `NotificationRemove` / `NotificationDismissAll` / `NotificationClearGroup` / `NotificationClear`；Push 增加 `NotificationDismissed`；`NotificationDismissReason` 替换旧 `NotificationCloseReason`；调用栈按 transient 删除、非 transient 置 `dismissed` 并广播 `NotificationDismissed` 重写。
+   - `ABOUT.html`「界面交互」通知弹窗与通知中心：行为措辞 close→dismiss，组 / 单条 / 全部按钮改称清理，并补充“dismiss 后条目保留在通知中心等待清理”。
+   - 仅改文档；`src/shared/protocol.rs`、`src/shared/model.rs` 与 `src/daemon/mod.rs` 的现有实现未改动。
 
 ### 21. 启动时不主动读取焦点窗口，标题区可能空白
 
