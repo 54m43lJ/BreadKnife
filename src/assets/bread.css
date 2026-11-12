@@ -176,7 +176,7 @@ tooltip > box > label {
     background-color: @fg;
     border-radius: 6px;
     /* 与任务栏上下留一点呼吸；背景块不贴满 30px 栏高 */
-    margin: 2px 0;
+    margin: 4px 0;
 }
 
 .tray-btn {

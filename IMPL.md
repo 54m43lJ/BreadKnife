@@ -369,16 +369,17 @@
 ### 14. 托盘背景块与 hover 配色
 
 1. 问题描述
-   `cream` 作托盘底色在任务栏上过亮；改用 `fg` 后，普通 hover 若直接落到通用 `surface` 会破坏底色层次，需要一个半透明叠加。同时背景块贴满任务栏 30px 高度，缺少上下呼吸。
+   `cream` 作托盘底色在任务栏上过亮；改用 `fg` 后，普通 hover 若直接落到通用 `surface` 会破坏底色层次，需要一个半透明叠加。背景块最初只留 2px 上下 margin，顶部空间不可靠且整体过窄。
 2. 解决方法
-   - `.tray-box` 与 `.tray-btn` 背景改 `fg`，`.tray-box` 增加上下 2px margin。
+   - `.tray-box` 与 `.tray-btn` 背景改 `fg`，`.tray-box` 上下 margin 改为 4px。
+   - 托盘容器设 `valign = Center`，按自然高度居中，上下留白不受父容器拉伸影响。
    - `.tray-btn:hover` 使用 `alpha(@muted, 0.35)` 叠在 `fg` 基底上；GTK CSS 的 `alpha()` 可用，无需回退 `purple`。
    - 移除 `tray-attention` 的独立 hover 覆写，所有托盘项统一走半透明 muted；NeedsAttention 的额外视觉不在本轮范围。
 3. 修订建议
 
 | 文档名 | 章节 | 动作 | 内容 |
 |--------|------|------|------|
-| `USER.html` | §5.2.3 托盘与托盘菜单 | 改 | 托盘区域与图标按钮底色改 `fg`；hover 用 35% `muted` 叠加；背景块上下留 2px 间距。 |
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 改 | 托盘区域与图标按钮底色改 `fg`；hover 用 35% `muted` 叠加；背景块上下各留 4px，并垂直居中。 |
 
 ### 15. 注册期 Menu 探测失败导致 blueman 右键落到 ContextMenu
 

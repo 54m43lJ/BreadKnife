@@ -63,6 +63,8 @@ impl TrayWidget {
             container: {
                 let container = gtk::Box::new(gtk::Orientation::Horizontal, 0);
                 container.add_css_class("tray-box");
+                // 背景块按自然高度居中，上下 margin 不受父容器拉伸影响
+                container.set_valign(gtk::Align::Center);
                 container
             },
             ipc,
