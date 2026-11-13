@@ -213,6 +213,12 @@ tooltip > box > label {
     box-shadow: 0 2px 8px alpha(black, 0.5);
 }
 
+/* 菜单层只承接弹窗焦点（避免 GTK 在无根焦点时触发 is_ancestor CRITICAL），
+   本身不参与交互，不画焦点环 */
+.menu-layer {
+    outline: none;
+}
+
 .menu-row {
     padding: 3px 10px;
     border-radius: 4px;

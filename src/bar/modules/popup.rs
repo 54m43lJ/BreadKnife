@@ -127,7 +127,8 @@ impl PopupManager {
         let targets: Vec<gtk::Popover> =
             self.open.borrow().iter().map(|(p, _)| p.clone()).collect();
         let had = !targets.is_empty();
-        for p in targets {
+        // 后打开的是更深的菜单层：先收子层再收父层，保证每层都能同步派发 closed。
+        for p in targets.into_iter().rev() {
             p.popdown(); // 同步派发 closed → 除名；此刻不得持有 open 借用
         }
         had
@@ -242,7 +243,7 @@ impl PopupManager {
             .filter(|(_, g)| f(g))
             .map(|(p, _)| p.clone())
             .collect();
-        for p in targets {
+        for p in targets.into_iter().rev() {
             p.popdown();
         }
     }

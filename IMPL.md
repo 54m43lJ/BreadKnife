@@ -782,3 +782,31 @@
    - `USER.html` §5.2.3 的菜单配色说明同步改为子菜单箭头取 `bg`，并注明对比度理由。
    - `CORE.html` 未改动；箭头节点与样式类保持现状。
    - 本次只改样式与文档；`cargo fmt --check`、`cargo check` 与 `cargo test --bin bread` 通过。
+
+### 28. dbusmenu 多级子菜单互相顶掉，并在无根焦点时触发 GTK CRITICAL [已解决]
+
+1. 问题描述
+   打开“子菜单的子菜单”时上级菜单会被关闭，悬停展开的子层还会与上级互相抢焦点。三个原因叠加：
+   - 所有子层都以同一个组标签 `tray:<item>:sub` 注册；`PopupManager::open` 会先关同组旧实例，于是打开第三级时把第二级一并关掉。
+   - 所有子层都 `attach` 到根弹窗而不是所在行的上级弹窗；第三级与第二级成为同级 grab 弹窗，`close_subs_not_at` 的祖先判定也失效，进入第三级会把第二级当作“不在祖先链上”收起。
+   - 菜单行全部不可聚焦且弹窗内没有其它可聚焦子项。GTK 的 `gtk_popover_focus` 在 autohide 弹窗打开时若根焦点为空，会把 NULL 传给 `gtk_widget_is_ancestor` 并打印 `Gtk-CRITICAL`（属于 GTK 内部缺空值检查，但可由焦点落点规避）。
+2. 解决方法
+   - 子层改为挂到 `containing_popover(anchor)` 找到的上级弹窗：根行挂根层，二级行挂二级层，逐级嵌套；锚行脱离当前根会话时丢弃迟到回执。
+   - 每个子层分配递增序号，组标签改为 `tray:<item>:sub:<id>`；`closed` 只捕获序号除名，避免 closure 自持 popover。
+   - `close_subs_not_at` 改用自走的 `parent()` 链判断祖先，并在判定前剔除已隐藏的迟到条目；子层按由深到浅顺序 popdown，`PopupManager::close_all` / `close_by` 同样反序关闭。
+   - 菜单层 `set_focusable(true)` 作为弹窗焦点落点（行仍不可聚焦），并加 `.menu-layer { outline: none; }`；根菜单被外部关闭时一并清理残留子层。
+   - `build_menu_layer` 不再清空全局 `pending_rows`（会误伤其它行的飞行中展开）；改在根菜单重读重建前作废。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.16 `bar/modules/tray.rs` | 增 | 子层逐级挂上级弹窗、每层独立组标签；祖先判定自走 parent 链并由深到浅关闭；菜单层可聚焦以规避 GTK 空焦点 CRITICAL。 |
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 增 | 子菜单逐级嵌套，进入下一级不关闭上级；悬停其它条目只收起相关子级。 |
+| `ABOUT.html` | 界面交互 | 改 | 托盘菜单交互补“子菜单逐级嵌套，进入更深一层不关闭上级”。 |
+
+4. 实际操作
+   - `src/bar/modules/tray.rs` 新增 `SubMenu { id, popover, anchor }`、`next_sub_id`；`open_sub_popover` 按锚行实际所属弹窗 `attach` 与 `point_at_expanded`，组标签带序号；`closed` 仅按序号除名。
+   - 新增 `widget_within` / `containing_popover`；`close_subs_not_at` 改用前者，反向 popdown，并剔除不可见迟到条目；根菜单 `closed` 清理残留子层。
+   - `build_menu_layer` 将内容层设为可聚焦并加 `menu-layer` 类，移除全局 `pending_rows.clear()`；`on_menu_read_done` 在重建前清空 pending。
+   - `src/bar/modules/popup.rs` 的 `close_all` / `close_by` 改为反序关闭；`src/assets/bread.css` 增加 `.menu-layer { outline: none; }`。
+   - `CORE.html` §4.16、`USER.html` §5.2.3、`ABOUT.html` 已同步契约；`cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。
