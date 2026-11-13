@@ -225,14 +225,21 @@ tooltip > box > label {
     min-width: 120px;
 }
 
+/* GTK 的 PRELIGHT 由合成器 crossing 事件驱动，弹层出现时可能落在错误行；
+   菜单行高亮改由应用按真实 enter/motion 自管，禁止 :hover 着色。 */
 .menu-row:hover {
+    background-color: transparent;
+    color: @bg;
+}
+
+.menu-row.menu-hover {
     background-color: @purple;
     color: @cream;
 }
 
-.menu-row:hover .menu-label,
-.menu-row:hover .menu-arrow,
-.menu-row:hover .menu-toggle {
+.menu-row.menu-hover .menu-label,
+.menu-row.menu-hover .menu-arrow,
+.menu-row.menu-hover .menu-toggle {
     color: @cream;
 }
 

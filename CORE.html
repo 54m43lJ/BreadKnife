@@ -605,6 +605,8 @@ impl TrayWidget {
   <li>子菜单逐级挂在“所在行所属的上级弹窗”下（根层或更上一层），不是全部挂根层。每层使用独立组标签 <code>tray:&lt;item&gt;:sub:&lt;序号&gt;</code>；打开更深一层不得关闭上级，同级子层之间也不得因组标签相同互相顶掉。</li>
   <li><code>close_subs_not_at</code> 的祖先判定沿 <code>parent()</code> 链自行遍历，不调用 <code>gtk_widget_is_ancestor</code>（旧会话遗留的锚行可能已脱离，GTK 会打印 CRITICAL）。收起子层按由深到浅顺序执行，保证每层都能同步派发 <code>closed</code>。</li>
   <li>菜单层可聚焦（行与图标仍不可聚焦），以承接 popover 的焦点落点；否则 autohide 弹窗在没有根焦点的窗口里打开时，GTK 会把空焦点传给 <code>gtk_widget_is_ancestor</code> 并打印 <code>Gtk-CRITICAL</code>。</li>
+  <li>父菜单切换必须由 <code>enter</code> 驱动：子菜单 popover 成为 grab widget 后，GTK 会把 <code>motion</code> 重定向给它，父菜单行收不到 motion；<code>enter/leave</code> 在 picking 阶段处理，不受影响。<code>motion</code> 只用于补高亮/补展开计时。</li>
+  <li>新弹层行创建后 80ms 内忽略指针事件，专门吞掉合成器映射 xdg_popup 时坐标错误的 enter/motion；静默期只作用于新层自己的行，父菜单行仍是旧层，可立即切换。高亮由应用自管的 <code>menu-hover</code> 类控制，CSS 禁用 <code>:hover</code>，同一时刻至多一行。</li>
 </ul>
 
 <h3 id="sec-4-center">4.17. bar/modules/center.rs <a href="#sec-1">↑ 文件树</a></h3>

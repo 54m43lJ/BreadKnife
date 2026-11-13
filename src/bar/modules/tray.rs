@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
 
@@ -21,6 +22,11 @@ use crate::shared::protocol::{InteractInput, Request, Response};
 
 /// 图标渲染直出尺寸（逻辑像素）。
 const ICON_SIZE: i32 = 16;
+
+/// 新弹层行的悬停静默期：合成器映射 xdg_popup 时可能附带坐标错误的
+/// enter / motion，静默期内的行不得据此高亮或启动子层展开。
+/// 只作用于新层自己的行，父菜单行不受影响，仍可立即切换。
+const HOVER_SETTLE: Duration = Duration::from_millis(80);
 
 pub struct TrayWidget {
     inner: Rc<TrayInner>,
@@ -43,6 +49,8 @@ struct TrayInner {
     subs: RefCell<Vec<SubMenu>>,
     /// 子层会话序号：用作组标签与 closed 除名，避免同 Item 的各层互相顶掉。
     next_sub_id: Cell<u64>,
+    /// 当前高亮的菜单行：真实 enter/motion 驱动，同一时刻至多一行高亮。
+    hovered_row: RefCell<Option<gtk::Button>>,
     /// 待展开条目登记：子层请求飞行中的行锚（item, entry) → row。
     pending_rows: RefCell<HashMap<(String, i32), gtk::Button>>,
 }
@@ -81,6 +89,7 @@ impl TrayWidget {
             menu: RefCell::new(None),
             subs: RefCell::new(Vec::new()),
             next_sub_id: Cell::new(0),
+            hovered_row: RefCell::new(None),
             pending_rows: RefCell::new(HashMap::new()),
         });
         Self { inner }
@@ -173,8 +182,10 @@ impl TrayWidget {
                     // 行树重建：飞行中的展开回执与已展开子层都以旧锚行为准，
                     // 必须先作废，避免回执拿已替换的锚行去开子层。
                     self.inner.pending_rows.borrow_mut().clear();
+                    clear_menu_hover(&self.inner);
                     self.inner.popup.close_prefix(&format!("tray:{item}:sub"));
-                    let content = build_menu_layer(&self.inner, item, &snapshot);
+                    // 内容替换不是新弹层：不存在合成 enter，立即允许悬停。
+                    let content = build_menu_layer(&self.inner, item, &snapshot, Instant::now());
                     popover.set_child(Some(&content));
                 }
             }
@@ -412,13 +423,14 @@ fn show_menu(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: 
         gtk::Align::Fill,
     );
     popup::point_at(&popover, &inner.window, anchor);
-    let content = build_menu_layer(inner, item, &snapshot);
+    let content = build_menu_layer(inner, item, &snapshot, Instant::now() + HOVER_SETTLE);
     popover.set_child(Some(&content));
     {
         let inner2 = inner.clone();
         popover.connect_closed(move |_| {
             *inner2.menu.borrow_mut() = None;
             inner2.pending_rows.borrow_mut().clear();
+            clear_menu_hover(&inner2);
             // 根层可能被外部点击 / Escape 直接收回：子层一并清掉，避免残留
             // 会话条目在下次菜单打开时误参与悬停判定。
             let subs: Vec<gtk::Popover> = inner2
@@ -446,12 +458,65 @@ fn show_menu(inner: &Rc<TrayInner>, anchor: &gtk::Button, item: &str, snapshot: 
 /// closed 信号，闭包会重入 menu / pending_rows（RefCell 跨 popdown 曾致崩溃）。
 fn close_menu(inner: &Rc<TrayInner>) {
     inner.pending_rows.borrow_mut().clear();
+    clear_menu_hover(inner);
     *inner.menu.borrow_mut() = None;
     inner.popup.close_prefix("tray:");
 }
 
+/// 清除当前高亮行；菜单链整体关闭时调用，避免持有已隐藏的旧行。
+fn clear_menu_hover(inner: &Rc<TrayInner>) {
+    if let Some(row) = inner.hovered_row.borrow_mut().take() {
+        row.remove_css_class("menu-hover");
+    }
+}
+
+/// 给可用的行打上高亮；同一时刻至多一行（新行着色前先清除旧行）。
+fn highlight_row(inner: &Rc<TrayInner>, row: &gtk::Button, enabled: bool) {
+    if !enabled {
+        return;
+    }
+    let mut hovered = inner.hovered_row.borrow_mut();
+    if let Some(prev) = hovered.take()
+        && prev != *row
+    {
+        prev.remove_css_class("menu-hover");
+    }
+    row.add_css_class("menu-hover");
+    *hovered = Some(row.clone());
+}
+
+/// 启动一次 150ms 驻留展开；已计时则不重复启动。
+fn schedule_expand(
+    inner: &Rc<TrayInner>,
+    row: &gtk::Button,
+    item: &str,
+    entry: i32,
+    dwell: &Rc<Cell<u64>>,
+) {
+    if dwell.get() != 0 {
+        return;
+    }
+    dwell.set(1);
+    let dwell = dwell.clone();
+    let inner = inner.clone();
+    let row = row.clone();
+    let item = item.to_string();
+    gtk::glib::timeout_add_local_once(popup::HOVER_DWELL, move || {
+        if dwell.get() != 1 {
+            return;
+        }
+        request_expand(&inner, &row, &item, entry);
+    });
+}
+
 /// 单层菜单内容：分隔行 / 标准行（toggle、图标、助记符标签、子层箭头）。
-fn build_menu_layer(inner: &Rc<TrayInner>, item: &str, snapshot: &MenuSnapshot) -> gtk::Box {
+/// `hover_after` 之前忽略该层行上的指针事件（新弹层的合成 enter 静默期）。
+fn build_menu_layer(
+    inner: &Rc<TrayInner>,
+    item: &str,
+    snapshot: &MenuSnapshot,
+    hover_after: Instant,
+) -> gtk::Box {
     // 每层只登记自己的行锚；清空 pending_rows 会误伤其它行的飞行中展开请求。
     let layer = gtk::Box::new(gtk::Orientation::Vertical, 0);
     layer.add_css_class("menu-layer");
@@ -466,14 +531,19 @@ fn build_menu_layer(inner: &Rc<TrayInner>, item: &str, snapshot: &MenuSnapshot) 
                 layer.append(&sep);
             }
             MenuItemType::Standard => {
-                layer.append(&build_menu_row(inner, item, entry));
+                layer.append(&build_menu_row(inner, item, entry, hover_after));
             }
         }
     }
     layer
 }
 
-fn build_menu_row(inner: &Rc<TrayInner>, item: &str, entry: &MenuItem) -> gtk::Button {
+fn build_menu_row(
+    inner: &Rc<TrayInner>,
+    item: &str,
+    entry: &MenuItem,
+    hover_after: Instant,
+) -> gtk::Button {
     let row = gtk::Button::new();
     row.add_css_class("menu-row");
     row.set_focusable(false);
@@ -507,42 +577,64 @@ fn build_menu_row(inner: &Rc<TrayInner>, item: &str, entry: &MenuItem) -> gtk::B
     }
 
     // 行级悬停（macOS 同级悬停）：进入任意层级的行 → ① 收起"锚点非本行且
-    // 不含本行"的子层（经典）；② 有子层且可用 → 驻留即展开（掠过不触发）
+    // 不含本行"的子层（经典）；② 有子层且可用 → 驻留即展开（掠过不触发）。
+    //
+    // 父菜单切换必须继续用 enter：子菜单 popover 是 grab widget，GTK 会把
+    // motion 重定向给它，父菜单行收不到 motion；enter/leave 在 picking 阶段
+    // 处理，不受重定向影响。新层行在静默期内忽略 enter/motion，父层行不受影响。
     {
-        let inner2 = inner.clone();
-        let item2 = item.to_string();
         let entry_id = entry.id;
         let submenu = entry.children_display;
         let enabled = entry.enabled;
         let row_handle = row.clone();
-        let generation = Rc::new(Cell::new(0u64));
+        // 0 = 无计时；非 0 = 本次驻留令牌。
+        let dwell = Rc::new(Cell::new(0u64));
         let motion = gtk::EventControllerMotion::new();
         {
-            let g = generation.clone();
+            let g = dwell.clone();
             let row2 = row_handle.clone();
+            let inner2 = inner.clone();
+            let item2 = item.to_string();
             motion.connect_enter(move |_c, _x, _y| {
+                if Instant::now() < hover_after {
+                    return;
+                }
+                highlight_row(&inner2, &row2, enabled);
                 close_subs_not_at(&inner2, &row2);
                 if !submenu || !enabled {
                     return;
                 }
-                g.set(g.get().wrapping_add(1));
-                let token = g.get();
-                let g2 = g.clone();
-                let inner3 = inner2.clone();
-                let row3 = row2.clone();
-                let item3 = item2.clone();
-                gtk::glib::timeout_add_local_once(popup::HOVER_DWELL, move || {
-                    if g2.get() != token {
-                        return;
-                    }
-                    request_expand(&inner3, &row3, &item3, entry_id);
-                });
+                schedule_expand(&inner2, &row2, &item2, entry_id, &g);
             });
         }
         {
-            let g = generation.clone();
+            // motion 只补高亮 / 补展开：合成 enter 可能已经占住指针焦点，
+            // 真实移入同一行时不再有 enter，需要 motion 兜底。
+            let g = dwell.clone();
+            let row2 = row_handle.clone();
+            let inner2 = inner.clone();
+            let item2 = item.to_string();
+            motion.connect_motion(move |_c, _x, _y| {
+                if Instant::now() < hover_after {
+                    return;
+                }
+                highlight_row(&inner2, &row2, enabled);
+                if submenu && enabled {
+                    schedule_expand(&inner2, &row2, &item2, entry_id, &g);
+                }
+            });
+        }
+        {
+            let g = dwell.clone();
+            let inner2 = inner.clone();
+            let row2 = row_handle.clone();
             motion.connect_leave(move |_c| {
-                g.set(g.get().wrapping_add(1));
+                let mut hovered = inner2.hovered_row.borrow_mut();
+                if hovered.as_ref() == Some(&row2) {
+                    hovered.take();
+                }
+                row2.remove_css_class("menu-hover");
+                g.set(0);
             });
         }
         row.add_controller(motion);
@@ -663,7 +755,7 @@ fn open_sub_popover(
         gtk::Align::Start,
     );
     popup::point_at_expanded(&popover, &parent, anchor, MENU_PANEL_INSET);
-    let content = build_menu_layer(inner, item, &snapshot);
+    let content = build_menu_layer(inner, item, &snapshot, Instant::now() + HOVER_SETTLE);
     popover.set_child(Some(&content));
     // 每层独立组标签：同 Item 的各级子菜单不得在 open 时互相 close_group。
     let id = inner.next_sub_id.get().wrapping_add(1);

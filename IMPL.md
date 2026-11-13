@@ -810,3 +810,26 @@
    - `build_menu_layer` 将内容层设为可聚焦并加 `menu-layer` 类，移除全局 `pending_rows.clear()`；`on_menu_read_done` 在重建前清空 pending。
    - `src/bar/modules/popup.rs` 的 `close_all` / `close_by` 改为反序关闭；`src/assets/bread.css` 增加 `.menu-layer { outline: none; }`。
    - `CORE.html` §4.16、`USER.html` §5.2.3、`ABOUT.html` 已同步契约；`cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。
+
+### 29. 子菜单弹层错误高亮末行（合成 enter），motion-only 又会锁死父菜单
+
+1. 问题描述
+   悬停父条目展开子菜单后，子菜单会错误高亮一个选项（常见为末行），若该行还有子菜单会继续递归展开。原因是合成器映射 xdg_popup 时可能附带坐标错误的指针 crossing，GTK 向错误行派发合成 `enter`，而原实现既用 GTK `:hover` 显示高亮、又用 `enter` 启动展开。
+   但把悬停整体改成 `motion` 驱动也不行：子菜单 popover 是 GTK grab widget，`gtk_main_do_event` 会把非后代的 motion 事件重定向给 grab widget，父菜单行从此收不到 motion，无法快速切换到其它子菜单；`enter/leave` 在 picking 阶段处理，不受 grab 重定向。
+2. 解决方法
+   - 父菜单切换与子层展开继续由 `enter` 驱动；`motion` 仅补高亮和补展开计时（应对合成 enter 已占住指针焦点、真实移入同一行不再发 enter 的情况）。
+   - 每层菜单行记录 80ms 悬停静默截止：静默期内该层行忽略 enter/motion，吞掉映射期的错误 crossing；父菜单行属于旧层，不受新层静默影响。
+   - 高亮改为应用自管的 `menu-hover` 类，CSS 将 `.menu-row:hover` 置为透明，阻断 GTK PRELIGHT 的错误着色。
+   - `hovered_row` 保证同一时刻至多一行高亮，并在菜单重读/关闭时清除。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.16 `bar/modules/tray.rs` | 增 | 父菜单切换由 enter 驱动、motion 仅补高亮；新层 80ms 静默；高亮自管 `menu-hover` 且至多一行。 |
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 增 | 弹层打开不预选选项，高亮随真实指针；子菜单打开后父菜单仍可立即切换。 |
+
+4. 实际操作
+   - `src/bar/modules/tray.rs` 新增 `HOVER_SETTLE`（80ms）与 `hovered_row`；`build_menu_layer` / `build_menu_row` 接收该层的静默截止时刻，根层与子层新行取 `now + HOVER_SETTLE`，菜单重读重建取 `now`。
+   - 行控制器恢复 `connect_enter`（切换父菜单、启动展开计时）并新增 `connect_motion`（仅补高亮/补计时）；`highlight_row`、`schedule_expand`、`clear_menu_hover` 统一高亮与驻留逻辑。
+   - `src/assets/bread.css` 将 `.menu-row:hover` 改为透明，新增 `.menu-row.menu-hover` 及子部件配色；`CORE.html` §4.16、`USER.html` §5.2.3 同步契约。
+   - `cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。
