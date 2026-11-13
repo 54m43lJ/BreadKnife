@@ -761,3 +761,24 @@
    - `SwitchQueue` 线程命名为 `workspace-switch`，请求失败沿用 `[workspace] switch failed` 日志；队列关闭时记录 `[workspace] switch queue closed`。
    - 新增 3 个单元测试，覆盖方向判定（含斜向与零位移）、同向合并窗口（被忽略事件不刷新计时）以及反向放行后重新计时。
    - `CORE.html` §4.12 与 `USER.html` §5.2.2 已补充上述契约；`cargo fmt --check`、`cargo check` 与 `cargo test --bin bread scroll` 通过。
+
+### 27. dbusmenu 子菜单三角取 muted，在 fg 底上对比度不足
+
+1. 问题描述
+   自绘菜单弹窗以 `fg`（浅色）为底、`bg`（深色）为文字，子菜单指示三角却单独取 `muted`（浅灰蓝）。`muted` 与 `fg` 明度接近，三角在浅色面板上几乎融进背景，带子菜单的条目缺少可辨识的展开提示。
+2. 解决方法
+   - `.menu-arrow` 的颜色从 `muted` 改为 `bg`，与菜单文字同色，借助深色前景在 `fg` 底上取得足够对比度。
+   - 保留 Hover 行的既有覆盖：`.menu-row:hover .menu-arrow` 仍取 `cream`，与 Hover 文字一致。
+   - 只改颜色，不改三角字形、尺寸与布局；禁用行的 45% 不透明度继续作用于整行。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 改 | 子菜单箭头颜色由 `muted` 改为 `bg`，并注明与文字同色以保证 `fg` 底上的对比度。 |
+| `CORE.html` | §4.16 `bar/modules/tray.rs` | 不动 | 箭头仍为 `▸` + `menu-arrow` 样式类，渲染结构不变，仅主题色调整。 |
+
+4. 实际操作
+   - `src/assets/bread.css` 的 `.menu-arrow` 由 `color: @muted` 改为 `color: @bg`；Hover 覆盖规则未动。
+   - `USER.html` §5.2.3 的菜单配色说明同步改为子菜单箭头取 `bg`，并注明对比度理由。
+   - `CORE.html` 未改动；箭头节点与样式类保持现状。
+   - 本次只改样式与文档；`cargo fmt --check`、`cargo check` 与 `cargo test --bin bread` 通过。
