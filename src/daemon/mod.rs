@@ -304,6 +304,11 @@ impl Daemon {
                     self.resync_minimized();
                 }
             }
+            // 工作区事件直达：点击 / 滚轮切换不等待滴答去抖；同时清掉已覆盖的待重同步位。
+            WorkspaceChanged => {
+                self.pending_resync = false;
+                self.resync();
+            }
             Resync => self.pending_resync = true,
         }
     }

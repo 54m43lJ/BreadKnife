@@ -105,10 +105,24 @@ impl PopupManager {
     /// 打开：同组旧实例先收（托盘菜单每次新建 popover）→ 登记 → popup。
     pub fn open(self: &Rc<Self>, popover: &gtk::Popover, group: String) {
         self.close_group(&group);
+        self.ensure_root_focus();
         self.open.borrow_mut().push((popover.clone(), group));
         popover.popup();
         if !self.hover_anchors.borrow().is_empty() {
             self.ensure_hover_poll();
+        }
+    }
+
+    /// 弹窗打开前确保根窗口有焦点落点。
+    /// GTK 的 popover 焦点兜底在根焦点为空时会把 NULL 传给
+    /// `gtk_widget_is_ancestor`（Gtk-CRITICAL）；栏根容器常驻可聚焦，
+    /// 在这里兜底重挂一次，避免其它控件销毁时把焦点清空。
+    fn ensure_root_focus(&self) {
+        if gtk::prelude::GtkWindowExt::focus(&self.window).is_some() {
+            return;
+        }
+        if let Some(child) = self.window.child() {
+            child.grab_focus();
         }
     }
 
@@ -127,7 +141,8 @@ impl PopupManager {
         let targets: Vec<gtk::Popover> =
             self.open.borrow().iter().map(|(p, _)| p.clone()).collect();
         let had = !targets.is_empty();
-        for p in targets {
+        // 后打开的是更深的菜单层：先收子层再收父层，保证每层都能同步派发 closed。
+        for p in targets.into_iter().rev() {
             p.popdown(); // 同步派发 closed → 除名；此刻不得持有 open 借用
         }
         had
@@ -242,7 +257,7 @@ impl PopupManager {
             .filter(|(_, g)| f(g))
             .map(|(p, _)| p.clone())
             .collect();
-        for p in targets {
+        for p in targets.into_iter().rev() {
             p.popdown();
         }
     }

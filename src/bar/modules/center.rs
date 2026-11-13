@@ -29,6 +29,8 @@ pub struct CenterWidget {
     brightness_row: gtk::Box,
     net_value: gtk::Label,
     bt_value: gtk::Label,
+    play_pause_icon: gtk::Image,
+    playing: Rc<Cell<bool>>,
 }
 
 impl CenterWidget {
@@ -61,27 +63,52 @@ impl CenterWidget {
         let (volume, volume_row) = Self::make_slider("音量");
         let (brightness, brightness_row) = Self::make_slider("亮度");
 
+        // 媒体控制：符号图标（非 emoji），均分整行；播放/暂停更大且随状态切换
+        let playing = Rc::new(Cell::new(false));
         let media_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         media_row.add_css_class("center-media");
-        for (glyph, op) in [
-            ("⏮", MediaOp::Prev),
-            ("⏯", MediaOp::PlayPause),
-            ("⏭", MediaOp::Next),
-        ] {
-            let button = gtk::Button::with_label(glyph);
-            button.add_css_class("center-btn");
-            button.set_focusable(false);
+        media_row.set_homogeneous(true);
+        media_row.set_hexpand(true);
+        media_row.set_valign(gtk::Align::End);
+
+        let prev = Self::media_button("media-skip-backward-symbolic", 16);
+        let next = Self::media_button("media-skip-forward-symbolic", 16);
+
+        let play_pause_icon = gtk::Image::from_icon_name("media-playback-start-symbolic");
+        play_pause_icon.set_pixel_size(22);
+        play_pause_icon.set_halign(gtk::Align::Center);
+        play_pause_icon.set_valign(gtk::Align::End);
+        let play_pause = gtk::Button::new();
+        play_pause.add_css_class("center-btn");
+        play_pause.set_focusable(false);
+        play_pause.set_hexpand(true);
+        play_pause.set_valign(gtk::Align::End);
+        play_pause.set_child(Some(&play_pause_icon));
+
+        {
             let ipc = ipc.clone();
-            button.connect_clicked(move |_| {
-                let ipc = ipc.clone();
-                std::thread::spawn(move || {
-                    if let Err(e) = ipc.request(Request::MediaControl { op }) {
-                        eprintln!("[center] media control failed: {e}");
-                    }
-                });
-            });
-            media_row.append(&button);
+            prev.connect_clicked(move |_| Self::send_media(ipc.clone(), MediaOp::Prev));
         }
+        {
+            let ipc = ipc.clone();
+            next.connect_clicked(move |_| Self::send_media(ipc.clone(), MediaOp::Next));
+        }
+        {
+            let ipc = ipc.clone();
+            let playing = playing.clone();
+            let icon = play_pause_icon.clone();
+            play_pause.connect_clicked(move |_| {
+                // 乐观切换图标，daemon 的 MPRIS 轮询随后校正
+                let now = !playing.get();
+                playing.set(now);
+                icon.set_icon_name(Some(play_pause_icon_name(now)));
+                Self::send_media(ipc.clone(), MediaOp::PlayPause);
+            });
+        }
+
+        media_row.append(&prev);
+        media_row.append(&play_pause);
+        media_row.append(&next);
 
         let (net_value, net_row) = Self::make_status_row("网络");
         let (bt_value, bt_row) = Self::make_status_row("蓝牙");
@@ -100,6 +127,9 @@ impl CenterWidget {
 
         // 面板挂根窗口（不参与容器布局），右缘与入口对齐；开关经 PopupManager
         let popover = gtk::Popover::new();
+        popover.add_css_class("center-popover-shell");
+        // 无箭头、无外层气泡：可见面板由 panel 自身绘制
+        popover.set_has_arrow(false);
         popover.set_child(Some(&panel));
         popup::attach(
             &popover,
@@ -135,21 +165,53 @@ impl CenterWidget {
             brightness_row,
             net_value,
             bt_value,
+            play_pause_icon,
+            playing,
         };
 
         widget.wire_sliders(ipc);
         widget
     }
 
+    /// 媒体按钮：符号图标按设备像素尺寸渲染，底部对齐，横向均分由父容器负责。
+    fn media_button(icon: &str, pixel_size: i32) -> gtk::Button {
+        let image = gtk::Image::from_icon_name(icon);
+        image.set_pixel_size(pixel_size);
+        image.set_halign(gtk::Align::Center);
+        image.set_valign(gtk::Align::End);
+
+        let button = gtk::Button::new();
+        button.add_css_class("center-btn");
+        button.set_focusable(false);
+        button.set_hexpand(true);
+        button.set_valign(gtk::Align::End);
+        button.set_child(Some(&image));
+        button
+    }
+
+    fn send_media(ipc: Arc<IpcClient>, op: MediaOp) {
+        std::thread::spawn(move || {
+            if let Err(e) = ipc.request(Request::MediaControl { op }) {
+                eprintln!("[center] media control failed: {e}");
+            }
+        });
+    }
+
     fn make_slider(title: &str) -> (gtk::Scale, gtk::Box) {
         let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
         scale.set_draw_value(false);
         scale.set_hexpand(true);
+        scale.set_valign(gtk::Align::Center);
 
         let label = gtk::Label::new(Some(title));
         label.add_css_class("center-slider-label");
+        label.set_xalign(0.0);
+        label.set_valign(gtk::Align::Center);
+        label.set_size_request(30, -1);
 
-        let row = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        // 文字在左、滑块在右，同一行
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        row.add_css_class("center-slider-row");
         row.append(&label);
         row.append(&scale);
         (scale, row)
@@ -294,6 +356,14 @@ impl CenterWidget {
                 self.set_status(&self.bt_value, &format!("{} 台已连接", b.connected), None);
             }
         }
+
+        // 媒体状态：Playing → 暂停图标，其余（暂停 / 停止 / 无播放器）→ 播放图标
+        let playing = system.media.as_ref().is_some_and(|m| m.playing);
+        if self.playing.get() != playing {
+            self.playing.set(playing);
+            self.play_pause_icon
+                .set_icon_name(Some(play_pause_icon_name(playing)));
+        }
     }
 
     /// 面板操作项降级：灰置 + 提示（tooltip），恢复时解除。
@@ -317,6 +387,14 @@ impl CenterWidget {
             label.remove_css_class("row-off");
         }
         label.set_tooltip_text(hint);
+    }
+}
+
+fn play_pause_icon_name(playing: bool) -> &'static str {
+    if playing {
+        "media-playback-pause-symbolic"
+    } else {
+        "media-playback-start-symbolic"
     }
 }
 

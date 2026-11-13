@@ -87,8 +87,8 @@
 <h3 id="sec-5-1">5.1. 样式基础变量</h3>
 <div class="pal">
   <div class="sw"><div class="chip" style="background:#231F1F"></div><div class="lab"><code>bg</code><span>#231F1F</span><em>主背景</em></div></div>
-  <div class="sw"><div class="chip" style="background:#3E3542"></div><div class="lab"><code>surface</code><span>#3E3542</span><em>次级浮层：弹窗、通知底、输入框底</em></div></div>
-  <div class="sw"><div class="chip" style="background:#D6CAB6"></div><div class="lab"><code>fg</code><span>#D6CAB6</span><em>正文文字、滑块轨道</em></div></div>
+  <div class="sw"><div class="chip" style="background:#3E3542"></div><div class="lab"><code>surface</code><span>#3E3542</span><em>次级浮层：弹窗、通知底、输入框底、滑块轨道</em></div></div>
+  <div class="sw"><div class="chip" style="background:#D6CAB6"></div><div class="lab"><code>fg</code><span>#D6CAB6</span><em>正文文字、滑块填充</em></div></div>
   <div class="sw"><div class="chip" style="background:#B0B4BC"></div><div class="lab"><code>muted</code><span>#B0B4BC</span><em>中性图标</em></div></div>
   <div class="sw"><div class="chip" style="background:#89338E"></div><div class="lab"><code>purple</code><span>#89338E</span><em>hover/选中填充、亮底上的文字</em></div></div>
   <div class="sw"><div class="chip" style="background:#E593E7"></div><div class="lab"><code>purple-light</code><span>#E593E7</span><em>提亮：浮层上的文字、hover 高亮</em></div></div>
@@ -150,6 +150,7 @@
   <li>活跃叠点直径 4px 取 <code>purple</code>；紧急基底上叠点取 <code>fg</code>，紧急态即基底与叠点两色互换；无窗口且活跃时叠点与基底圆点等大重叠，视觉为单个 <code>purple</code> 圆点。</li>
   <li>悬停工作区按钮显示窗口标题浮层：按 Hyprland 焦点历史排序（最近聚焦在前），最多 4 条；超出时第五条固定为「...」，不显示具体计数；无窗口显示「无窗口」。首期仅标题，截图预览为后续可选扩展。</li>
   <li>快速连续点击不同工作区时，每次点击都应生效；状态推送不得在按下与松开之间重建按钮而吞掉 <code>clicked</code>。</li>
+  <li>滚轮切换：向下 / 向右切到下一工作区，向上 / 向左切到上一工作区。同一方向 20ms 内的连续滚动事件合并为一次切换；反向滚动立即生效。点击不受该合并窗口影响。</li>
   <li>浮层宽 220px、<code>surface</code> 底 <code>fg</code> 字、1px <code>gold</code> 边框、圆角 8px、内边距 6px／水平 8px；工作区名 <code>gold</code> 加粗，窗口行 1 行省略。</li>
   <li>可见性矩阵见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>；状态过渡 150ms ease。</li>
 </ul>
@@ -180,9 +181,9 @@
   <li>图标按钮 22×22px、圆角 6px；Hover 用 35% <code>muted</code> 半透明叠加在 <code>fg</code> 基底上；失联图标置灰（不透明度 35%）。</li>
   <li>图标按首见序（<a href="breadpan/USER.html#sec-1">breadpan USER §1</a>）从左到右排列：已有图标不因其它图标加入、移除或属性变化而移动，新图标追加在最右侧；同一 Item 的 id 重键保持原位。</li>
   <li>菜单容器圆角 8px、内边距 4px、无边框，以投影与任务栏分离；菜单行圆角 4px、水平内边距 10px、最小宽 120px。</li>
-  <li>菜单文字取 <code>bg</code>；Hover 行 <code>purple</code> 填充配 <code>cream</code> 字（例外，见 <a href="#sec-2">§2</a>）；勾选标记 <code>gold</code>；子菜单箭头 <code>muted</code>；禁用行不透明度 45%。</li>
+  <li>菜单文字取 <code>bg</code>；Hover 行 <code>purple</code> 填充配 <code>cream</code> 字（例外，见 <a href="#sec-2">§2</a>）；勾选标记 <code>gold</code>；子菜单箭头 <code>bg</code>（与文字同色，保证在 <code>fg</code> 底上的对比度）；禁用行不透明度 45%。</li>
   <li>分隔线 1px，上下边距 3px、水平边距 6px。</li>
-  <li>同级条目悬停驻留 150ms 展开子菜单；已有弹窗显示时，托盘图标悬停驻留 150ms 直接切换菜单。</li>
+  <li>同级条目悬停驻留 150ms 展开子菜单；子菜单逐级嵌套，进入下一级不关闭上级，悬停其它条目只收起相关子级。弹层打开瞬间不预选任何选项，行高亮只随真实指针变化；子菜单打开后父菜单仍可立即悬停切换。已有弹窗显示时，托盘图标悬停驻留 150ms 直接切换菜单。</li>
 </ul>
 
 <h4 id="sec-5-2-4">5.2.4. 控制中心</h4>
@@ -206,8 +207,10 @@
 <ul class="note">
   <li>常驻入口与弹出面板的内容构成见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>。</li>
   <li>入口容器与通用按钮一致：透明底、圆角 6px、内边距 2px 10px，Hover 态 <code>surface</code>。</li>
-  <li>弹出面板：圆角 10px、内边距 12px、最小宽 260px。</li>
-  <li>滑块：滑轨高 4px（圆角 2px）取 <code>fg</code>，已填充段与滑块 Hover 取 <code>purple-light</code>；滑块 12px 圆形取 <code>purple</code>。</li>
+  <li>弹出面板：背景取 <code>bg</code>、圆角 10px、内边距 12px、最小宽 260px；无外层气泡、箭头与描边。</li>
+  <li>媒体控制：上一首 / 播放暂停 / 下一首使用符号图标横向平铺满整行、等宽居中并底部对齐；播放暂停图标按 MPRIS <code>PlaybackStatus</code> 在播放 / 暂停间切换，且尺寸大于上一首 / 下一首。</li>
+  <li>滑块：文字在左、滑块在右同一行；轨道高 8px、胶囊大圆角，轨道取 <code>surface</code>，已填充段取 <code>fg</code>；不显示滑块圆点，整条轨道可点击 / 拖动。</li>
+  <li>日历：整体为 <code>surface</code> 色卡片（圆角 8px、无边框、内边距 6px）；今天的日期以 <code>purple</code> 底配 <code>cream</code> 字高亮，非本月日期取 <code>muted</code>。</li>
 </ul>
 
 <h4 id="sec-5-2-5">5.2.5. 通知弹窗</h4>
@@ -294,6 +297,7 @@
   <li>面板顶边紧贴任务栏底边，水平位置锚定标题区域中心（面板水平中心与标题区域水平中心对齐）；面板宽 40% 屏宽，高度随消息列表动态变化，上限 100% 屏高。</li>
   <li>达到 100% 屏高后不再增高，面板内部滚动；面板底 <code>bg</code>，圆角 10px、边框 1px、内边距 4px。</li>
   <li>消息按应用聚合：聚合标题为应用名，点击可展开/收缩，收缩后只保留聚合标题；组标题箭头与展开/收缩一致（收起 <code>▸</code>、展开 <code>▾</code>），面板高度随组状态实时变化。组按最后一条消息的时间从新到旧排序，最后推送通知的应用在最上；组内消息同样从新到旧排序，新消息在最前。</li>
+  <li>组内消息之间不设外边距；组与组之间以 4px 间距分隔。</li>
   <li>聚合标题右侧带清理按钮，点击清理本组全部消息（cleanup，与弹窗 dismiss 区分）；聚合标题与清理按钮：<code>fg</code> 底 <code>bg</code> 字，圆角 6px，与托盘同语言。</li>
   <li>组内超过 3 条时，默认只显示最新 3 条，余下折叠为一条「…」条目；点击「…」展开本组全部消息，展开期间隐藏其它组，点击该组聚合标题收起并恢复其它组。</li>
   <li>每条消息：普通 <code>surface</code> 底 <code>fg</code> 字；紧急 <code>red</code> 底 <code>cream</code> 字（与通知弹窗一致）；圆角 8px；标题至多 1 行、正文至多 2 行，超出裁剪显示省略号，悬停卡片显示全文；清理按钮与标题同行置右。</li>

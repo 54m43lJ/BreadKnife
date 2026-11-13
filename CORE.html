@@ -215,6 +215,7 @@ pub enum HyprlandEvent {
     OpenWindow { addr: String, workspace: String, class: String, title: String },
     CloseWindow(String),
     Minimized { addr: String, minimized: bool },
+    WorkspaceChanged,
     Resync,
 }</code></pre>
 <ul class="note">
@@ -222,6 +223,7 @@ pub enum HyprlandEvent {
   <li><code>minimized</code> 事件由外部 taskbar 通过 wlr-foreign-toplevel 请求触发；Hyprland 不因普通 CSD 最小化请求产生该事件。</li>
   <li><code>clients()</code> 过滤最小化集合时消费 <code>workspace.name == MINIMIZED_WORKSPACE</code>；<code>monitor</code>（显示器 id）按 <code>MonitorInfo.id</code> 解析为显示器名，无效时回退当前聚焦显示器。工作区悬停列表同时消费 <code>title</code> / <code>class</code> / <code>focusHistoryID</code>，按焦点历史升序排列。</li>
   <li><code>active_window()</code> 读取 <code>hyprctl -j activewindow</code> 的 <code>address</code> / <code>class</code> / <code>title</code>，三者都允许为空串；无焦点或解析失败返回 <code>None</code>。</li>
+  <li>工作区 / 焦点事件（<code>workspace*</code>、<code>focusedmon*</code>、<code>create/destroy/move/renameworkspace*</code>、<code>activespecial*</code>）归为 <code>WorkspaceChanged</code>，daemon 收到即重同步并推送工作区切片，不进入 50ms 去抖窗口；只有 <code>configreloaded</code> / <code>changefloatingmode</code> 等纯显示变化仍走 <code>Resync</code> 去抖。</li>
   <li><code>active_workspace_name</code> 先取 <code>monitors -j</code> 中同名显示器的 <code>active_ws.name</code>；名称不以 <code>special:</code> 开头时直接返回。若为特殊工作区，则在 <code>workspaces -j</code> 中取该显示器上第一个非 <code>special:</code> 工作区；没有则返回 <code>None</code>。恢复窗口以该值为目标工作区，移动失败则不移动；该算法避免把 <code>special:minimized</code> 当作恢复目标。</li>
   <li><code>current_monitor</code> 经 <code>hyprctl -j monitors</code> 取 <code>focused</code> 显示器；查询失败或无 focused 时回退首个显示器，无显示器时返回 <code>None</code>。不启用 <code>.socket.sock</code> 查询，保持 socket2 只读与单一查询路径。</li>
 </ul>
@@ -254,11 +256,12 @@ pub fn media_control(op: MediaOp);        // MPRIS 操作（阻塞调用线程�
 pub fn set_volume(value: u32);            // pamixer → wpctl → pactl，命中即止
 pub fn set_brightness(value: u32);        // brightnessctl 与 ddcutil 均尝试，两者都失败才报错</code></pre>
 <ul class="note">
-  <li>采样基线：system 线程内的私有 tokio 运行时按固定节拍轮询，<code>FAST_POLL = 5s</code> 覆盖音量 / 亮度，<code>SLOW_POLL = 30s</code> 覆盖电池 / 网络 / 蓝牙；当前不订阅 <code>PropertiesChanged</code>，轮询是唯一数据源，后续可叠加信号增量但保留轮询作为兜底，不改变 <code>SystemState</code> / <code>StateDelta</code> 契约。</li>
+  <li>采样基线：system 线程内的私有 tokio 运行时按固定节拍轮询，<code>FAST_POLL = 5s</code> 覆盖音量 / 亮度，<code>SLOW_POLL = 30s</code> 覆盖电池 / 网络 / 蓝牙，<code>MEDIA_POLL = 2s</code> 覆盖 MPRIS <code>PlaybackStatus</code>；当前不订阅 <code>PropertiesChanged</code>，轮询是唯一数据源，后续可叠加信号增量但保留轮询作为兜底，不改变 <code>SystemState</code> / <code>StateDelta</code> 契约。</li>
   <li>电池：system bus 的 UPower <code>/org/freedesktop/UPower/devices/DisplayDevice</code>，读取 <code>org.freedesktop.UPower.Device</code> 的 <code>Percentage</code> 与 <code>State</code>（<code>1</code> = 充电中）。</li>
   <li>网络：system bus 的 NetworkManager <code>/org/freedesktop/NetworkManager</code>，读取 <code>org.freedesktop.NetworkManager.PrimaryConnectionType</code>；空串映射为 <code>none</code> 且未连接，<code>802-3-ethernet</code> → <code>ethernet</code>，<code>802-11-wireless</code> / <code>wifi</code> → <code>wifi</code>，其它值 → <code>other</code>。</li>
   <li>蓝牙：system bus 的 BlueZ <code>/</code>，经 <code>org.freedesktop.DBus.ObjectManager.GetManagedObjects</code> 清点 <code>org.bluez.Adapter1.Powered</code> 与已连接 <code>org.bluez.Device1.Connected</code> 数量。</li>
-  <li>MPRIS 不参与周期采样：仅在 <code>media_control</code> 请求时经 session bus 选择播放器（优先非 <code>.instance</code> 的唯一名）调用 <code>org.mpris.MediaPlayer2.Player</code> 方法；session bus 不可用时记录日志并返回。</li>
+  <li>MPRIS 经 session bus 选择播放器（优先非 <code>.instance</code> 的唯一名）：<code>media_control</code> 调用 <code>org.mpris.MediaPlayer2.Player</code> 方法；每 <code>MEDIA_POLL</code> 读取同一播放器的 <code>PlaybackStatus</code> 写入 <code>SystemState.media</code>（<code>Playing</code> → <code>playing = true</code>，无播放器 → <code>None</code>）。session bus 不可用时记录日志并返回。</li>
+
   <li>音量读取 / 设置为 <code>pamixer → wpctl → pactl</code>，命中即止；亮度读取先 <code>brightnessctl -m -c backlight</code>（只取 backlight 类，从 <code>device,class,current,percent%,max</code> 取百分比字段，避免误读键盘 LED），无内置面板时回退 <code>ddcutil getvcp 10 --brief</code>；亮度设置同时尝试 <code>brightnessctl</code> 与 <code>ddcutil</code>，两者都失败才报错。</li>
   <li>降级规则：会话 / 系统总线不可用、对应服务缺席或读取失败时，该项保持 <code>None</code>，不阻塞其它项；窗口隐藏入口或灰置对应面板项。每轮只在值变化时发送 <code>DaemonEvent::System</code>，daemon 再对整份 <code>SystemState</code> 去重后广播 <code>StateDelta.system</code>。</li>
 </ul>
@@ -381,9 +384,15 @@ pub fn reload(path: &amp;str) -&gt; Result&lt;(), String&gt;;</code></pre>
 <h3 id="sec-4-workspace">4.12. bar/modules/workspace.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct WorkspaceWidget {
     pub container: gtk::Box,
-    ipc: Arc&lt;IpcClient&gt;,
+    switches: Rc&lt;SwitchQueue&gt;,
     buttons: Rc&lt;RefCell&lt;BTreeMap&lt;i64, WsButton&gt;&gt;&gt;,
 }
+
+/// 工作区切换队列：单工作线程按提交顺序执行请求。
+struct SwitchQueue { tx: mpsc::Sender&lt;String&gt; }
+
+/// 滚轮合并器：20ms 内同向事件忽略，反向事件立即放行并重新计时。
+struct ScrollGate { last: Option&lt;(Instant, i8)&gt; }
 
 /// 单个工作区按钮及其可原地更新的子部件；状态推送只改样式类与浮层数据。
 struct WsButton {
@@ -404,6 +413,9 @@ fn build_ws_tooltip(name: &amp;str, windows: &amp;[WorkspaceWindow]) -&gt; gtk::
 <ul class="note">
   <li><code>make_button</code> 以 <code>query_tooltip</code> 设置自定义浮层：工作区名加粗，窗口标题按焦点历史排序，最多 4 列；超出时第五条固定为「...」，空工作区显示「无窗口」。首期不加载截图。</li>
   <li>浮层宽 220px，样式类 <code>ws-tip*</code>；窗口标题单行省略；点击与滚轮切换行为不变。</li>
+  <li>滚轮方向取位移绝对值更大的轴：向下 / 向右切到下一工作区（<code>m+1</code>），向上 / 向左切到上一工作区（<code>m-1</code>）；零位移事件忽略。</li>
+  <li><code>ScrollGate</code> 只合并滚轮事件，不涉及点击等其它输入：从首次放行的事件起 20ms 内的同向事件直接忽略，表现为合并为一次切换；反向事件立即放行并以该事件重新计时。被忽略的事件不刷新窗口。</li>
+  <li>点击与滚轮统一提交到 <code>SwitchQueue</code> 的单工作线程，按提交顺序执行；逐事件 <code>spawn</code> 会让相对切换（<code>m±1</code>）在线程调度中乱序，出现切换被吞或方向反转。</li>
   <li><code>rebuild</code> 按 id 增量对账：删除消失的工作区，复用仍存在的按钮并原地更新样式类 / 可见性与浮层数据，只新建新增项。不得整条清空重建——状态推送可能落在按下与松开之间销毁按钮，使 <code>GtkButton::clicked</code> 不再配对，快速连点被吞掉。</li>
   <li>仅在工作区集合或顺序变化时重排（<code>order_matches</code> 比较容器子节点顺序）；活跃态、紧急态的推送不移动按钮，避免打断进行中的按下。</li>
   <li>点击回调从浮层数据单元格读取当前工作区名，不固化创建时的名字。</li>
@@ -480,6 +492,7 @@ pub const POPUP_TOP_GAP: i32;              // 推荐值 5；层壳 Top margin，
   <li>顶部定位使用 <code>set_margin(Edge::Top, POPUP_TOP_GAP = 5)</code>；该 margin 相对任务栏让出的可用区，不是屏幕顶边，不能再按“任务栏高度 + 间距”累加。任务栏底边到通知窗顶部即 5px（实测任务栏 h=31、通知窗 y=36）。</li>
   <li>组标题箭头方向由 <code>!collapsed.contains(app)</code> 决定：收起 <code>▸</code>、展开 <code>▾</code>；<code>expanded</code> 仅用于“展开全部”隐藏其它组，不参与普通预览态的箭头判定。</li>
   <li><code>CenterView</code> 保存 popover / scroll / max_height；<code>rebuild</code> 末尾调用 <code>fit_height()</code> 测量内容自然高度，执行 <code>set_min_content_height(min(natural, max_height))</code>，再对可见 popover 调用 <code>present()</code> 重新呈现。仅 <code>queue_resize()</code> 不足以更新已可见的 xdg_popup，面板高度会停在旧值。</li>
+  <li>每个应用组由独立的 <code>gtk::Box</code>（spacing 0）承载，组内标题 / 消息卡 / 「…」不设外边距；组间距由外层 <code>content</code> 的 4px spacing 提供。</li>
   <li>中心记录按到达顺序新→旧保存；按应用聚合，组按最后一条消息时间新→旧，组内同样新→旧。组标题点击展开/收缩，收缩后只保留聚合标题，展开时只显示该组；组标题右侧清理按钮清理本组（cleanup，与贴栏 dismiss 区分）。</li>
   <li>组内超过 <code>GROUP_PREVIEW_COUNT</code> 条时只显示最新 <code>GROUP_PREVIEW_COUNT</code> 条 + 「…」条目；点击「…」展开该组全部消息，其它组隐藏。</li>
   <li>标题/正文因裁剪省略时，将完整文本设为对应控件的 tooltip；悬停消息卡显示全文。</li>
@@ -590,22 +603,41 @@ impl TrayWidget {
 <ul class="note">
   <li>图标按传入顺序横向排列：<code>Added</code> 追加右端，<code>Changed</code> 原位更新图标 / 提示 / 状态、不改变位置，<code>Renamed</code> 原位换键，<code>Removed</code> 删除后其余图标不移动；属性变化不得以先删后加实现。</li>
   <li>GTK 生命周期下的等价实现：字段类型为语义示意，可变状态以 <code>Rc</code> / <code>RefCell</code> / <code>Mutex</code> 持有；需要被信号闭包捕获的回调方法可使用 <code>self: &amp;Rc&lt;Self&gt;</code>，捕获前先 clone 句柄。</li>
+  <li>子菜单逐级挂在“所在行所属的上级弹窗”下（根层或更上一层），不是全部挂根层。每层使用独立组标签 <code>tray:&lt;item&gt;:sub:&lt;序号&gt;</code>；打开更深一层不得关闭上级，同级子层之间也不得因组标签相同互相顶掉。</li>
+  <li><code>close_subs_not_at</code> 的祖先判定沿 <code>parent()</code> 链自行遍历，不调用 <code>gtk_widget_is_ancestor</code>（旧会话遗留的锚行可能已脱离，GTK 会打印 CRITICAL）。收起子层按由深到浅顺序执行，保证每层都能同步派发 <code>closed</code>。</li>
+  <li>栏根容器常驻持有 GTK 焦点，菜单层、行与图标均不可聚焦；<code>PopupManager::open</code> 在打开前兜底检查根焦点，为空则重挂栏根。GTK 的 popover 焦点兜底在根焦点为空时会把 NULL 传给 <code>gtk_widget_is_ancestor</code>（<code>Gtk-CRITICAL</code>）。</li>
+  <li>同一 <code>(item, entry)</code> 的展开请求在飞时只发一次；菜单重读作废锚行后的迟到 <code>Menu</code> 回执静默丢弃，不作为异常打印。</li>
+  <li>父菜单切换必须由 <code>enter</code> 驱动：子菜单 popover 成为 grab widget 后，GTK 会把 <code>motion</code> 重定向给它，父菜单行收不到 motion；<code>enter/leave</code> 在 picking 阶段处理，不受影响。<code>motion</code> 只用于补高亮/补展开计时。</li>
+  <li>新弹层行创建后 80ms 内忽略指针事件，专门吞掉合成器映射 xdg_popup 时坐标错误的 enter/motion；静默期只作用于新层自己的行，父菜单行仍是旧层，可立即切换。高亮由应用自管的 <code>menu-hover</code> 类控制，CSS 禁用 <code>:hover</code>，同一时刻至多一行。</li>
 </ul>
 
 <h3 id="sec-4-center">4.17. bar/modules/center.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct CenterWidget {
     pub container: gtk::Box,
-    ipc: Arc&lt;IpcClient&gt;,
-    status_label: gtk::Label,
-    panel: gtk::Popover,
+    net: gtk::Label,
+    battery: gtk::Label,
     volume: gtk::Scale,
     brightness: gtk::Scale,
+    volume_row: gtk::Box,
+    brightness_row: gtk::Box,
+    net_value: gtk::Label,
+    bt_value: gtk::Label,
+    play_pause_icon: gtk::Image,
+    playing: Rc&lt;Cell&lt;bool&gt;&gt;,
 }
 
 impl CenterWidget {
     pub fn new(ipc: Arc&lt;IpcClient&gt;, window: &amp;gtk::Window, popup: Rc&lt;PopupManager&gt;) -&gt; Self;
     pub fn set_system(&amp;self, system: &amp;SystemState);
-}</code></pre>
+}
+
+fn play_pause_icon_name(playing: bool) -&gt; &amp;'static str;</code></pre>
+<ul class="note">
+  <li>媒体按钮使用 <code>media-skip-backward-symbolic</code> / <code>media-playback-start|pause-symbolic</code> / <code>media-skip-forward-symbolic</code>，行内等宽平铺、底部对齐；播放暂停按 <code>SystemState.media.playing</code> 切换图标并乐观更新，daemon 的 MPRIS 轮询随后校正。</li>
+  <li>弹窗外壳 <code>center-popover-shell</code> 透明、<code>has_arrow = false</code>，不画主题气泡、箭头、描边与阴影；可见面板 <code>.center-popover</code> 以 <code>bg</code> 为背景、圆角 10px、内边距 12px。</li>
+  <li>音量 / 亮度滑块为水平行：标签在左、<code>GtkScale</code> 在右并横向扩展；CSS 用 <code>background-image: none</code> 覆盖 Breeze 主题渐变，轨道取 <code>surface</code>、填充取 <code>fg</code>；滑块尺寸归零且透明，不显示圆点，<code>GtkRange</code> 仍支持在整条轨道上点击 / 拖动。</li>
+  <li>日历使用 <code>GtkCalendar</code>：<code>surface</code> 卡片背景、无边框，<code>.today</code> 日期以 <code>purple</code> 底 / <code>cream</code> 字高亮，<code>.other-month</code> 取 <code>muted</code>；无单独状态推送。</li>
+</ul>
 
 <h3 id="sec-4-protocol">4.18. shared/protocol.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub enum InteractInput {
@@ -763,12 +795,14 @@ pub struct SystemState {
     pub bluetooth: Option&lt;BluetoothState&gt;,
     pub volume: Option&lt;VolumeState&gt;,
     pub brightness: Option&lt;u32&gt;,
+    pub media: Option&lt;MediaState&gt;,
 }
 
 pub struct BatteryState { pub percent: u32, pub charging: bool }
 pub struct NetworkState { pub kind: String, pub connected: bool }
 pub struct BluetoothState { pub powered: bool, pub connected: u32 }
 pub struct VolumeState { pub percent: u32, pub muted: bool }
+pub struct MediaState { pub playing: bool }   // MPRIS PlaybackStatus == Playing
 
 pub enum NotificationUrgency { Low, Normal, Critical }
 pub struct NotificationAction { pub key: String, pub label: String }
@@ -871,6 +905,9 @@ pub struct StateDelta {
      ├── rx.recv_timeout(TICK)
      │    └── Daemon::handle(ev)
      └── 超时且 pending_resync → Daemon::resync()</code></pre>
+<ul class="note">
+  <li>工作区 / 焦点事件走 <code>WorkspaceChanged</code> 直达，收到即重同步，不等待 <code>TICK</code>；<code>TICK</code> 只合并 <code>Resync</code> 类纯显示事件（配置重载 / 浮动模式）。</li>
+</ul>
 <h4 id="sec-5-1-2">5.1.2. 窗口进程</h4>
 <pre><code>启动（窗口进程，daemon spawn）
 ├── bar::run(monitor, socket)

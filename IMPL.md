@@ -697,3 +697,183 @@
    - `cargo check` 通过。
    - `USER.html` / `CORE.html` 未改动；组关闭仍由 daemon 清理该应用全部通知并广播 `NotificationCleared(Some(app_name))`。
    - 该条两项文档动作均为“不动”，本次只补记状态：`USER.html` §5.2.6 的组清理语义与 `CORE.html` §4.13 的实现注记保持现状。
+
+### 24. 通知中心组内消息残留外边距
+
+1. 问题描述
+   通知中心的通知组内部仍带外边距：外层内容容器 `gtk::Box` 使用 4px spacing，`.nc-panel .notif-card` 又保留 2px 上下 margin，导致同组标题、消息卡与「…」之间出现多余间距；用户要求组内不设 margin，只在组与组之间留一点间距。
+2. 解决方法
+   - 每个应用组包进独立的 `gtk::Box`，组内 spacing 设为 0，组间距由外层 `content` 的 4px spacing 提供。
+   - `.nc-panel .notif-card` 的 margin 归零，移除 `.nc-group` 的 `margin-top: 2px`。
+   - 组标题、消息卡、「…」按钮在组块内依次紧排，不再继承外层间距。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.6 通知中心 | 增 | 组内消息之间不设外边距；组与组之间以 4px 间距分隔。 |
+| `CORE.html` | §4.13 `bar/modules/info.rs` | 增 | 每个应用组由 spacing 0 的容器承载，组间距由外层 content 的 4px spacing 提供。 |
+
+4. 实际操作
+   - `src/bar/modules/info.rs` 的 `CenterView::rebuild` 把每个应用组包进 `gtk::Box::new(gtk::Orientation::Vertical, 0)`，标题、消息卡与「…」都 append 到该组块，再整体 append 到 `content`。
+   - `src/assets/bread.css` 将 `.nc-panel .notif-card` 的 margin 改为 `0`，并移除 `.nc-group` 的 `margin-top: 2px`；组间距仍由外层 `content` 的 4px spacing 提供。
+   - `USER.html` §5.2.6 与 `CORE.html` §4.13 已补充上述契约；`cargo fmt --check` 与 `cargo check` 通过。
+
+### 25. 去抖范围过大，工作区点击与滚轮切换被延后
+
+1. 问题描述
+   工作区 / 焦点事件原先全部折叠为 `Resync`，要等 `recv_timeout(TICK)` 的超时档才处理；点击工作区或滚轮切换后，工作区条最多晚一个去抖窗口才更新，用户体感为点击 / 滚轮被去抖。窗口打开 / 关闭、配置重载等纯显示变化可以合并，但用户输入触发的切换应立即反映。
+2. 解决方法
+   - 新增 `HyprlandEvent::WorkspaceChanged`，承载 `workspace*`、`focusedmon*`、`create/destroy/move/renameworkspace*`、`activespecial*`。
+   - daemon 收到 `WorkspaceChanged` 立即 `resync()`，并清掉已覆盖的 `pending_resync`；点击与滚轮切换不再等待滴答。
+   - 仅 `configreloaded` / `changefloatingmode` 等纯显示事件继续走 `Resync`，由 `TICK` 合并。
+   - 单元测试拆分：工作区事件断言 `WorkspaceChanged`，配置重载 / 浮动模式断言 `Resync`。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.3 `HyprlandEvent` | 改 | 增加 `WorkspaceChanged`，并注明工作区 / 焦点事件直达、不进入去抖窗口。 |
+| `CORE.html` | §5.1.1 daemon 启动 | 增 | 注明 `TICK` 只合并 `Resync` 类纯显示事件，工作区事件收到即重同步。 |
+
+4. 实际操作
+   - `src/daemon/hyprland.rs` 增加 `WorkspaceChanged` 枚举，工作区 / 焦点类事件从 `Resync` 拆出；配置重载与浮动模式仍保留在 `Resync`。
+   - `src/daemon/mod.rs` 的 `on_hyprland` 收到 `WorkspaceChanged` 时清 `pending_resync` 并立即 `resync()`，使点击 / 滚轮切换即时反馈。
+   - `src/daemon/hyprland.rs` 更新解析测试：工作区事件断言 `WorkspaceChanged`，配置重载 / 浮动模式断言 `Resync`。
+   - `CORE.html` §4.3 与 §5.1.1 已补充事件分层与去抖范围说明；`cargo fmt --check`、`cargo check` 与相关解析测试通过。
+
+### 26. 工作区滚轮无合并窗口，相对切换乱序并吞操作 [已解决]
+
+1. 问题描述
+   移除统一去抖后，工作区条的每个 GTK 滚动事件都会 `spawn` 一个线程发送一次 `m±1` 请求。平滑滚动 / 高频滚轮会在极短间隔内产生多个事件，工作区被连续切过多个；每次切换各起一线，相对目标（`m+1` / `m-1`）还可能在线程调度中后发先至，最终落点与滚动方向不符，表现为操作被吞。用户要求只对滚轮做极小间隔合并，不恢复任何统一去抖。
+2. 解决方法
+   - 新增 `ScrollGate`：首个滚动事件立即放行；从该事件起 20ms 内的同向事件忽略（合并为一次切换）；反向事件立即放行并以该事件重新计时；被忽略的事件不刷新窗口。
+   - 方向改为取位移绝对值更大的轴（向下 / 向右为 `m+1`，向上 / 向左为 `m-1`），零位移事件忽略，避免斜向滚动的正负分量被 `||` 误判。
+   - 新增 `SwitchQueue`：点击与滚轮统一提交到单工作线程，按提交顺序执行工作区切换；不再逐事件 `spawn`，相对切换不会乱序，也避免高频滚动堆出并发请求。
+   - 点击路径不做任何去抖，仍保持“按下与松开之间不重建按钮”的既有增量对账。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.12 `bar/modules/workspace.rs` | 改 | `WorkspaceWidget` 的 `ipc` 字段改为 `switches: Rc<SwitchQueue>`；补充 `ScrollGate` 的 20ms 同向合并、反向立即放行与重新计时语义，以及切换请求按提交顺序串行执行。 |
+| `USER.html` | §5.2.2 Workspace 按钮 | 增 | 补可验收行为：滚轮向下 / 向右切到下一工作区、向上 / 向左切到上一工作区；同向 20ms 内的连续滚动合并为一次，反向滚动立即生效，点击不受合并窗口影响。 |
+
+4. 实际操作
+   - `src/bar/modules/workspace.rs` 新增 `SCROLL_MERGE`（20ms）、`ScrollGate` 与 `scroll_direction`；滚动回调只在 `accept` 放行时提交 `m±1`，点击与滚轮共用 `SwitchQueue` 的单工作线程。
+   - `SwitchQueue` 线程命名为 `workspace-switch`，请求失败沿用 `[workspace] switch failed` 日志；队列关闭时记录 `[workspace] switch queue closed`。
+   - 新增 3 个单元测试，覆盖方向判定（含斜向与零位移）、同向合并窗口（被忽略事件不刷新计时）以及反向放行后重新计时。
+   - `CORE.html` §4.12 与 `USER.html` §5.2.2 已补充上述契约；`cargo fmt --check`、`cargo check` 与 `cargo test --bin bread scroll` 通过。
+
+### 27. dbusmenu 子菜单三角取 muted，在 fg 底上对比度不足
+
+1. 问题描述
+   自绘菜单弹窗以 `fg`（浅色）为底、`bg`（深色）为文字，子菜单指示三角却单独取 `muted`（浅灰蓝）。`muted` 与 `fg` 明度接近，三角在浅色面板上几乎融进背景，带子菜单的条目缺少可辨识的展开提示。
+2. 解决方法
+   - `.menu-arrow` 的颜色从 `muted` 改为 `bg`，与菜单文字同色，借助深色前景在 `fg` 底上取得足够对比度。
+   - 保留 Hover 行的既有覆盖：`.menu-row:hover .menu-arrow` 仍取 `cream`，与 Hover 文字一致。
+   - 只改颜色，不改三角字形、尺寸与布局；禁用行的 45% 不透明度继续作用于整行。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 改 | 子菜单箭头颜色由 `muted` 改为 `bg`，并注明与文字同色以保证 `fg` 底上的对比度。 |
+| `CORE.html` | §4.16 `bar/modules/tray.rs` | 不动 | 箭头仍为 `▸` + `menu-arrow` 样式类，渲染结构不变，仅主题色调整。 |
+
+4. 实际操作
+   - `src/assets/bread.css` 的 `.menu-arrow` 由 `color: @muted` 改为 `color: @bg`；Hover 覆盖规则未动。
+   - `USER.html` §5.2.3 的菜单配色说明同步改为子菜单箭头取 `bg`，并注明对比度理由。
+   - `CORE.html` 未改动；箭头节点与样式类保持现状。
+   - 本次只改样式与文档；`cargo fmt --check`、`cargo check` 与 `cargo test --bin bread` 通过。
+
+### 28. dbusmenu 多级子菜单互相顶掉，并在无根焦点时触发 GTK CRITICAL [已解决]
+
+1. 问题描述
+   打开“子菜单的子菜单”时上级菜单会被关闭，悬停展开的子层还会与上级互相抢焦点。三个原因叠加：
+   - 所有子层都以同一个组标签 `tray:<item>:sub` 注册；`PopupManager::open` 会先关同组旧实例，于是打开第三级时把第二级一并关掉。
+   - 所有子层都 `attach` 到根弹窗而不是所在行的上级弹窗；第三级与第二级成为同级 grab 弹窗，`close_subs_not_at` 的祖先判定也失效，进入第三级会把第二级当作“不在祖先链上”收起。
+   - 菜单行全部不可聚焦且弹窗内没有其它可聚焦子项。GTK 的 `gtk_popover_focus` 在 autohide 弹窗打开时若根焦点为空，会把 NULL 传给 `gtk_widget_is_ancestor` 并打印 `Gtk-CRITICAL`（属于 GTK 内部缺空值检查，但可由焦点落点规避）。
+2. 解决方法
+   - 子层改为挂到 `containing_popover(anchor)` 找到的上级弹窗：根行挂根层，二级行挂二级层，逐级嵌套；锚行脱离当前根会话时丢弃迟到回执。
+   - 每个子层分配递增序号，组标签改为 `tray:<item>:sub:<id>`；`closed` 只捕获序号除名，避免 closure 自持 popover。
+   - `close_subs_not_at` 改用自走的 `parent()` 链判断祖先，并在判定前剔除已隐藏的迟到条目；子层按由深到浅顺序 popdown，`PopupManager::close_all` / `close_by` 同样反序关闭。
+   - 菜单层 `set_focusable(true)` 作为弹窗焦点落点（行仍不可聚焦），并加 `.menu-layer { outline: none; }`；根菜单被外部关闭时一并清理残留子层。
+   - `build_menu_layer` 不再清空全局 `pending_rows`（会误伤其它行的飞行中展开）；改在根菜单重读重建前作废。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.16 `bar/modules/tray.rs` | 增 | 子层逐级挂上级弹窗、每层独立组标签；祖先判定自走 parent 链并由深到浅关闭；菜单层可聚焦以规避 GTK 空焦点 CRITICAL。 |
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 增 | 子菜单逐级嵌套，进入下一级不关闭上级；悬停其它条目只收起相关子级。 |
+| `ABOUT.html` | 界面交互 | 改 | 托盘菜单交互补“子菜单逐级嵌套，进入更深一层不关闭上级”。 |
+
+4. 实际操作
+   - `src/bar/modules/tray.rs` 新增 `SubMenu { id, popover, anchor }`、`next_sub_id`；`open_sub_popover` 按锚行实际所属弹窗 `attach` 与 `point_at_expanded`，组标签带序号；`closed` 仅按序号除名。
+   - 新增 `widget_within` / `containing_popover`；`close_subs_not_at` 改用前者，反向 popdown，并剔除不可见迟到条目；根菜单 `closed` 清理残留子层。
+   - `build_menu_layer` 将内容层设为可聚焦并加 `menu-layer` 类，移除全局 `pending_rows.clear()`；`on_menu_read_done` 在重建前清空 pending。
+   - `src/bar/modules/popup.rs` 的 `close_all` / `close_by` 改为反序关闭；`src/assets/bread.css` 增加 `.menu-layer { outline: none; }`。
+   - `CORE.html` §4.16、`USER.html` §5.2.3、`ABOUT.html` 已同步契约；`cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。
+
+### 29. 子菜单弹层错误高亮末行（合成 enter），motion-only 又会锁死父菜单
+
+1. 问题描述
+   悬停父条目展开子菜单后，子菜单会错误高亮一个选项（常见为末行），若该行还有子菜单会继续递归展开。原因是合成器映射 xdg_popup 时可能附带坐标错误的指针 crossing，GTK 向错误行派发合成 `enter`，而原实现既用 GTK `:hover` 显示高亮、又用 `enter` 启动展开。
+   但把悬停整体改成 `motion` 驱动也不行：子菜单 popover 是 GTK grab widget，`gtk_main_do_event` 会把非后代的 motion 事件重定向给 grab widget，父菜单行从此收不到 motion，无法快速切换到其它子菜单；`enter/leave` 在 picking 阶段处理，不受 grab 重定向。
+2. 解决方法
+   - 父菜单切换与子层展开继续由 `enter` 驱动；`motion` 仅补高亮和补展开计时（应对合成 enter 已占住指针焦点、真实移入同一行不再发 enter 的情况）。
+   - 每层菜单行记录 80ms 悬停静默截止：静默期内该层行忽略 enter/motion，吞掉映射期的错误 crossing；父菜单行属于旧层，不受新层静默影响。
+   - 高亮改为应用自管的 `menu-hover` 类，CSS 将 `.menu-row:hover` 置为透明，阻断 GTK PRELIGHT 的错误着色。
+   - `hovered_row` 保证同一时刻至多一行高亮，并在菜单重读/关闭时清除。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.16 `bar/modules/tray.rs` | 增 | 父菜单切换由 enter 驱动、motion 仅补高亮；新层 80ms 静默；高亮自管 `menu-hover` 且至多一行。 |
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 增 | 弹层打开不预选选项，高亮随真实指针；子菜单打开后父菜单仍可立即切换。 |
+
+4. 实际操作
+   - `src/bar/modules/tray.rs` 新增 `HOVER_SETTLE`（80ms）与 `hovered_row`；`build_menu_layer` / `build_menu_row` 接收该层的静默截止时刻，根层与子层新行取 `now + HOVER_SETTLE`，菜单重读重建取 `now`。
+   - 行控制器恢复 `connect_enter`（切换父菜单、启动展开计时）并新增 `connect_motion`（仅补高亮/补计时）；`highlight_row`、`schedule_expand`、`clear_menu_hover` 统一高亮与驻留逻辑。
+   - `src/assets/bread.css` 将 `.menu-row:hover` 改为透明，新增 `.menu-row.menu-hover` 及子部件配色；`CORE.html` §4.16、`USER.html` §5.2.3 同步契约。
+   - `cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。
+
+### 30. 托盘菜单持续打印 Gtk-CRITICAL，并把迟到展开回执当成异常
+
+1. 问题描述
+   菜单操作时持续出现 `gtk_widget_is_ancestor: assertion 'GTK_IS_WIDGET (widget)' failed`。该断言来自 GTK popover 内部：autohide 弹窗打开时若根窗口焦点为空，`gtk_popover_focus`（以及 `activate_default`）会把 NULL 传给 `gtk_widget_is_ancestor`。此前把菜单层设为可聚焦，但弹窗关闭后 GTK 会清掉位于弹窗内的焦点，下一次打开仍是 NULL，所以每个菜单都会报。
+   另外，悬停计时与点击可能对同一 `(item, entry)` 各发一次展开请求；第一个回执消费锚行后，第二个迟到回执被当成 `unexpected expand reply` 打印整份菜单。
+2. 解决方法
+   - 栏根 `CenterBox` 设为可聚焦并在启动后 `grab_focus`，作为常驻焦点落点；菜单层恢复不可聚焦，弹层开关不再移动焦点。
+   - `PopupManager::open` 打开前检查根焦点，为空则重挂窗口子控件，防止其它控件销毁时焦点被清空。
+   - `request_expand` 对同 `(item, entry)` 的飞行中请求去重；`on_expand_done` 对“Menu + 锚行已失效”的迟到回执静默丢弃。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.16 `bar/modules/tray.rs` | 改 | 菜单层/行/图标均不可聚焦，栏根常驻焦点；`PopupManager::open` 前兜底；展开请求去重、迟到回执静默。 |
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 不动 | 既有交互契约不变，仅内部焦点与回执处理调整。 |
+
+4. 实际操作
+   - `src/bar/mod.rs` 的栏根 `CenterBox` 增加 `bar-root` 类并 `set_focusable(true)`，`present()` 后经 idle `grab_focus`；`src/assets/bread.css` 增加 `.bar-root { outline: none; }`。
+   - `src/bar/modules/tray.rs` 移除菜单层的 `set_focusable(true)` 与 `menu-layer` 类；`on_expand_done` 对 `Menu + None` 静默，`request_expand` 对同键在飞请求去重。
+   - `src/bar/modules/popup.rs` 新增 `ensure_root_focus`，在 `open` 前兜底。
+   - `CORE.html` §4.16 已同步；`cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。
+
+### 31. 控制中心保留外层气泡，主背景 / 滑轨 / 日历边框不符合样式要求 [已解决]
+
+1. 问题描述
+   控制中心的 `GtkPopover` 仍使用 GTK 默认气泡：带箭头、主题背景与描边；面板自身又叠加了 `gold` 边框，形成“外面一圈气泡”的双层轮廓。面板主背景取 `surface`，滑轨取 `muted`，日历带 `gold` 边框，与“背景用 `bg`、滑轨用 `surface`、日历不要边框”的要求不符。
+2. 解决方法
+   - 弹窗加 `center-popover-shell` 类并 `set_has_arrow(false)`；`shell` 与 `contents` 设为透明、无边框、无阴影、无内边距，可见卡片只由内层 `panel` 绘制。
+   - `.center-popover` 背景从 `surface` 改为 `bg`，移除 `gold` 描边，保留圆角与内边距。
+   - 滑块 `trough` 背景从 `muted` 改为 `surface`，`highlight` 仍取 `fg`。
+   - 日历移除边框，保留 `surface` 背景、圆角与今天高亮。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.4 控制中心 | 改 | 面板改为 `bg` 背景、无外层气泡/箭头/描边；滑轨改 `surface`；日历改无边框。 |
+| `CORE.html` | §4.17 `bar/modules/center.rs` | 改 | 增加透明弹窗外壳与无箭头说明，同步面板 / 滑轨 / 日历取色。 |
+
+4. 实际操作
+   - `src/bar/modules/center.rs` 的 popover 增加 `center-popover-shell` 类并关闭箭头。
+   - `src/assets/bread.css` 增加 `.center-popover-shell` / `contents` 透明规则；`.center-popover` 改 `bg` 背景并去边框；滑轨改 `surface`；日历去边框。
+   - `USER.html` §5.2.4 与 `CORE.html` §4.17 已同步契约。
+   - `cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。

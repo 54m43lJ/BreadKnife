@@ -9,11 +9,14 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::daemon::DaemonEvent;
-use crate::shared::model::{BatteryState, BluetoothState, NetworkState, SystemState, VolumeState};
+use crate::shared::model::{
+    BatteryState, BluetoothState, MediaState, NetworkState, SystemState, VolumeState,
+};
 use crate::shared::protocol::MediaOp;
 
 const FAST_POLL: Duration = Duration::from_secs(5); // 音量 / 亮度
 const SLOW_POLL: Duration = Duration::from_secs(30); // 电池 / 网络 / 蓝牙
+const MEDIA_POLL: Duration = Duration::from_secs(2); // MPRIS 播放状态
 
 /// 媒体控制下发通道：请求线程 → system 运行时（zbus 连接绑定其创建的运行时）。
 type MediaReply = std::sync::mpsc::Sender<Result<(), String>>;
@@ -67,6 +70,13 @@ pub fn start(tx: Sender<DaemonEvent>) {
                         tx.clone(),
                     )));
                 }
+                if let Some(conn) = &session {
+                    tasks.push(tokio::spawn(poll_media(
+                        conn.clone(),
+                        state.clone(),
+                        tx.clone(),
+                    )));
+                }
                 tasks.push(tokio::spawn(poll_blocking(
                     FAST_POLL,
                     state.clone(),
@@ -114,8 +124,8 @@ pub fn media_control(op: MediaOp) {
     }
 }
 
-/// MPRIS 消费：取总线上的播放器（优先非瞬态名），对 Player 接口下发操作。
-async fn media_dispatch(conn: &zbus::Connection, op: MediaOp) -> Result<(), String> {
+/// 当前 MPRIS 播放器总线名：优先非瞬态名（.instance 为影子注册）。
+async fn player_bus_name(conn: &zbus::Connection) -> Result<String, String> {
     let dbus = zbus::Proxy::new(
         conn,
         "org.freedesktop.DBus",
@@ -134,17 +144,19 @@ async fn media_dispatch(conn: &zbus::Connection, op: MediaOp) -> Result<(), Stri
         .map(String::from)
         .collect();
     players.sort();
-    // .instance 后缀为瞬态名，等价玩家的影子注册——优先唯一名
     let suffix = players
         .iter()
         .find(|s| !s.contains(".instance"))
-        .or_else(|| players.first());
-    let Some(suffix) = suffix else {
-        return Err("no mpris player on the bus".into());
-    };
+        .or_else(|| players.first())
+        .ok_or_else(|| "no mpris player on the bus".to_string())?;
+    Ok(format!("org.mpris.MediaPlayer2.{suffix}"))
+}
+
+/// MPRIS 消费：对当前播放器的 Player 接口下发操作。
+async fn media_dispatch(conn: &zbus::Connection, op: MediaOp) -> Result<(), String> {
     let player = zbus::Proxy::new(
         conn,
-        format!("org.mpris.MediaPlayer2.{suffix}"),
+        player_bus_name(conn).await?,
         "/org/mpris/MediaPlayer2",
         "org.mpris.MediaPlayer2.Player",
     )
@@ -157,6 +169,45 @@ async fn media_dispatch(conn: &zbus::Connection, op: MediaOp) -> Result<(), Stri
     };
     let _: () = player.call(method, &()).await.map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// MPRIS 播放状态轮询：没有播放器时保持 None，供控制中心切换播放/暂停图标。
+async fn poll_media(
+    conn: zbus::Connection,
+    state: Arc<Mutex<SystemState>>,
+    tx: Sender<DaemonEvent>,
+) {
+    loop {
+        let media = media_read(&conn).await;
+        let changed = {
+            let mut g = state.lock().unwrap();
+            if g.media != media {
+                g.media = media;
+                true
+            } else {
+                false
+            }
+        };
+        if changed {
+            let _ = tx.send(DaemonEvent::System(state.lock().unwrap().clone()));
+        }
+        tokio::time::sleep(MEDIA_POLL).await;
+    }
+}
+
+async fn media_read(conn: &zbus::Connection) -> Option<MediaState> {
+    let player = zbus::Proxy::new(
+        conn,
+        player_bus_name(conn).await.ok()?,
+        "/org/mpris/MediaPlayer2",
+        "org.mpris.MediaPlayer2.Player",
+    )
+    .await
+    .ok()?;
+    let status: String = player.get_property("PlaybackStatus").await.ok()?;
+    Some(MediaState {
+        playing: status == "Playing",
+    })
 }
 
 // ── 电池（UPower，system bus）──

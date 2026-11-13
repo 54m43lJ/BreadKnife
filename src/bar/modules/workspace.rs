@@ -4,7 +4,8 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
 
@@ -12,10 +13,81 @@ use crate::bar::ipc::IpcClient;
 use crate::shared::model::{WorkspaceState, WorkspaceWindow};
 use crate::shared::protocol::Request;
 
+/// 同向滚动的合并窗口：从首次放行的事件起算，窗口内的同向事件直接忽略。
+const SCROLL_MERGE: Duration = Duration::from_millis(20);
+
 pub struct WorkspaceWidget {
     pub container: gtk::Box,
-    ipc: Arc<IpcClient>,
+    switches: Rc<SwitchQueue>,
     buttons: Rc<RefCell<BTreeMap<i64, WsButton>>>,
+}
+
+/// 工作区切换队列：所有点击 / 滚轮共用一条工作线程，按提交顺序执行。
+/// 逐事件 `spawn` 会让相对切换（m±1）在线程调度中乱序，后发的请求先到，
+/// 表现为切换被吞或方向反了；串行队列同时避免高频滚动堆出并发请求。
+struct SwitchQueue {
+    tx: mpsc::Sender<String>,
+}
+
+impl SwitchQueue {
+    fn new(ipc: Arc<IpcClient>) -> Self {
+        let (tx, rx) = mpsc::channel::<String>();
+        std::thread::Builder::new()
+            .name("workspace-switch".into())
+            .spawn(move || {
+                while let Ok(target) = rx.recv() {
+                    if let Err(e) = ipc.request(Request::WorkspaceSwitch { target }) {
+                        eprintln!("[workspace] switch failed: {e}");
+                    }
+                }
+            })
+            .expect("spawn workspace-switch thread");
+        Self { tx }
+    }
+
+    fn submit(&self, target: impl Into<String>) {
+        if self.tx.send(target.into()).is_err() {
+            eprintln!("[workspace] switch queue closed");
+        }
+    }
+}
+
+/// 滚轮方向：`+1` 为下一工作区（向下 / 向右），`-1` 为上一工作区（向上 / 向左）。
+/// 双轴均有位移时取绝对值更大的轴，避免斜向滚动的正负分量被 `||` 误判。
+fn scroll_direction(dx: f64, dy: f64) -> Option<i8> {
+    let (delta, positive) = if dy.abs() >= dx.abs() {
+        (dy, dy > 0.0)
+    } else {
+        (dx, dx > 0.0)
+    };
+    if delta == 0.0 {
+        None
+    } else if positive {
+        Some(1)
+    } else {
+        Some(-1)
+    }
+}
+
+/// 滚轮合并器：只作用于滚动事件，点击等输入不做任何去抖。
+#[derive(Default)]
+struct ScrollGate {
+    /// 最近一次放行的事件时刻与方向；被忽略的事件不刷新窗口。
+    last: Option<(Instant, i8)>,
+}
+
+impl ScrollGate {
+    /// 首个事件立即放行；合并窗口内的同向事件忽略；反向事件立即放行并重新计时。
+    fn accept(&mut self, direction: i8, now: Instant) -> bool {
+        if let Some((at, last_direction)) = self.last
+            && last_direction == direction
+            && now.saturating_duration_since(at) < SCROLL_MERGE
+        {
+            return false;
+        }
+        self.last = Some((now, direction));
+        true
+    }
 }
 
 /// 单个工作区按钮及其可原地更新的子部件。
@@ -36,29 +108,30 @@ struct WsTip {
 impl WorkspaceWidget {
     pub fn new(ipc: Arc<IpcClient>) -> Self {
         let container = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        let switches = Rc::new(SwitchQueue::new(ipc));
 
-        // 滚轮切换：上＝左侧工作区、下＝右侧工作区，滚轮左右自然对应
-        let ipc_scroll = ipc.clone();
+        // 滚轮切换：上＝左侧工作区、下＝右侧工作区，滚轮左右自然对应。
+        // 合并窗口只吞同向的连续滚动事件，反向滚动立即生效并重新计时。
+        let gate = Rc::new(RefCell::new(ScrollGate::default()));
+        let scroll_switches = switches.clone();
         let scroll = gtk::EventControllerScroll::new(
             gtk::EventControllerScrollFlags::VERTICAL | gtk::EventControllerScrollFlags::HORIZONTAL,
         );
         scroll.connect_scroll(move |_ctrl, dx, dy| {
-            let target = if dy > 0.0 || dx > 0.0 { "m+1" } else { "m-1" };
-            let ipc = ipc_scroll.clone();
-            std::thread::spawn(move || {
-                if let Err(e) = ipc.request(Request::WorkspaceSwitch {
-                    target: target.into(),
-                }) {
-                    eprintln!("[workspace] scroll switch failed: {e}");
-                }
-            });
+            let Some(direction) = scroll_direction(dx, dy) else {
+                return gtk::glib::Propagation::Proceed;
+            };
+            if gate.borrow_mut().accept(direction, Instant::now()) {
+                let target = if direction > 0 { "m+1" } else { "m-1" };
+                scroll_switches.submit(target);
+            }
             gtk::glib::Propagation::Proceed
         });
         container.add_controller(scroll);
 
         Self {
             container,
-            ipc,
+            switches,
             buttons: Rc::new(RefCell::new(BTreeMap::new())),
         }
     }
@@ -167,17 +240,11 @@ impl WorkspaceWidget {
             });
         }
 
-        let ipc = self.ipc.clone();
         {
+            let switches = self.switches.clone();
             let tip = tip.clone();
             button.connect_clicked(move |_| {
-                let target = tip.borrow().name.clone();
-                let ipc = ipc.clone();
-                std::thread::spawn(move || {
-                    if let Err(e) = ipc.request(Request::WorkspaceSwitch { target }) {
-                        eprintln!("[workspace] switch failed: {e}");
-                    }
-                });
+                switches.submit(tip.borrow().name.clone());
             });
         }
 
@@ -258,4 +325,48 @@ fn build_ws_tooltip(name: &str, windows: &[WorkspaceWindow]) -> gtk::Box {
     }
 
     root
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::{SCROLL_MERGE, ScrollGate, scroll_direction};
+
+    #[test]
+    fn scroll_direction_prefers_dominant_axis() {
+        assert_eq!(scroll_direction(0.0, 0.0), None);
+        assert_eq!(scroll_direction(0.0, 1.0), Some(1));
+        assert_eq!(scroll_direction(0.0, -1.0), Some(-1));
+        assert_eq!(scroll_direction(2.0, 0.0), Some(1));
+        assert_eq!(scroll_direction(-2.0, 0.0), Some(-1));
+        // 斜向滚动取绝对值更大的轴，而不是正负分量相或。
+        assert_eq!(scroll_direction(-5.0, 1.0), Some(-1));
+        assert_eq!(scroll_direction(1.0, -2.0), Some(-1));
+    }
+
+    #[test]
+    fn scroll_gate_merges_same_direction_within_window() {
+        let start = Instant::now();
+        let mut gate = ScrollGate::default();
+
+        assert!(gate.accept(1, start));
+        assert!(!gate.accept(1, start + SCROLL_MERGE / 2));
+        // 窗口从首次放行的事件起算，被忽略的事件不刷新计时。
+        assert!(gate.accept(1, start + SCROLL_MERGE));
+        assert!(!gate.accept(1, start + SCROLL_MERGE + Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn scroll_gate_accepts_reverse_and_restarts_window() {
+        let start = Instant::now();
+        let mut gate = ScrollGate::default();
+
+        assert!(gate.accept(-1, start));
+        // 反方向立即放行，并以该事件重新开始计时。
+        assert!(gate.accept(1, start + Duration::from_millis(10)));
+        assert!(!gate.accept(1, start + Duration::from_millis(15)));
+        assert!(gate.accept(-1, start + Duration::from_millis(25)));
+        assert!(!gate.accept(-1, start + Duration::from_millis(30)));
+    }
 }

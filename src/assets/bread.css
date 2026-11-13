@@ -15,6 +15,11 @@ window.bread-bar {
     min-height: 30px;
 }
 
+/* 栏根常驻 GTK 焦点落点（菜单弹层不接焦点），不画焦点环 */
+.bar-root {
+    outline: none;
+}
+
 * {
     font-family: 'Noto Sans Mono', 'Noto Sans', monospace;
     font-size: 12px;
@@ -219,14 +224,21 @@ tooltip > box > label {
     min-width: 120px;
 }
 
+/* GTK 的 PRELIGHT 由合成器 crossing 事件驱动，弹层出现时可能落在错误行；
+   菜单行高亮改由应用按真实 enter/motion 自管，禁止 :hover 着色。 */
 .menu-row:hover {
+    background-color: transparent;
+    color: @bg;
+}
+
+.menu-row.menu-hover {
     background-color: @purple;
     color: @cream;
 }
 
-.menu-row:hover .menu-label,
-.menu-row:hover .menu-arrow,
-.menu-row:hover .menu-toggle {
+.menu-row.menu-hover .menu-label,
+.menu-row.menu-hover .menu-arrow,
+.menu-row.menu-hover .menu-toggle {
     color: @cream;
 }
 
@@ -244,7 +256,7 @@ tooltip > box > label {
 }
 
 .menu-arrow {
-    color: @muted;
+    color: @bg;
 }
 
 .menu-popover separator {
@@ -272,27 +284,37 @@ tooltip > box > label {
     color: @fg;
 }
 
+/* 弹窗外壳透明：不要箭头与主题气泡，只保留 panel 自身 */
+.center-popover-shell,
+.center-popover-shell contents {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
 .center-popover {
-    background-color: @surface;
+    background-color: @bg;
     color: @fg;
     border-radius: 10px;
-    border: 1px solid @gold;
+    border: none;
     padding: 12px;
     min-width: 260px;
 }
 
 .center-media {
-    padding: 2px;
+    padding: 0 2px 2px;
 }
 
 .center-btn {
-    padding: 4px 10px;
-    font-size: 14px;
+    padding: 2px 6px;
+    color: @fg;
+    background: transparent;
 }
 
-.center-slider-label {
-    color: @fg;
-    font-size: 11px;
+.center-btn:hover {
+    background-color: alpha(@fg, 0.10);
+    color: @cream;
 }
 
 /* 面板操作项缺失降级：灰置（提示走 tooltip，USER §2） */
@@ -300,39 +322,113 @@ tooltip > box > label {
     opacity: 0.45;
 }
 
-/* 滑块：滑轨高 4px 取 fg，圆形滑块 12px 取 purple */
-scale trough {
-    min-height: 4px;
+/* 滑块：文字在左、滑块在右同一行；轨道 / 填充 / 滑块均为胶囊大圆角 */
+.center-slider-row {
+    min-height: 24px;
+}
+
+.center-slider-label {
+    color: @fg;
+    font-size: 11px;
+}
+
+/* Breeze 主题用 background 简写铺渐变，必须同时清 background-image 才能吃住颜色 */
+.center-popover scale {
+    padding: 0;
+    min-height: 20px;
+}
+
+.center-popover scale trough {
+    min-width: 0;
+    min-height: 8px;
+    margin: 0;
+    border: none;
+    border-radius: 999px;
+    background-image: none;
+    background-color: @surface;
+    box-shadow: none;
+}
+
+.center-popover scale highlight {
+    margin: 0;
+    border: none;
+    border-radius: 999px;
+    background-image: none;
     background-color: @fg;
-    border-radius: 2px;
+    box-shadow: none;
 }
 
-scale slider {
-    min-width: 12px;
-    min-height: 12px;
-    border-radius: 50%;
-    background-color: @purple;
-    margin: -4px;
+/* 不要滑块圆点：尺寸归零且透明；GtkRange 仍可在整条轨道上点击 / 拖动 */
+.center-popover scale slider {
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    opacity: 0;
 }
 
-scale slider:hover {
-    background-color: @purple-light;
-}
-
-scale highlight {
-    background-color: @purple-light;
-}
-
-/* 日历 */
+/* 日历：surface 卡片 + 今天高亮 */
 .center-calendar {
-    background: transparent;
+    background-color: @surface;
     color: @fg;
     border: none;
+    border-radius: 8px;
+    padding: 6px;
 }
 
-.calendar-selected {
+.center-calendar header {
+    background: transparent;
+    color: @fg;
+}
+
+.center-calendar header button {
+    color: @fg;
+    min-width: 22px;
+    min-height: 22px;
+    border-radius: 999px;
+}
+
+.center-calendar header button:hover {
+    background-color: alpha(@fg, 0.10);
+}
+
+.center-calendar grid label {
+    min-width: 24px;
+    padding: 2px 0;
+    color: @fg;
+}
+
+.center-calendar grid label.day-name {
+    color: @gold;
+    font-size: 11px;
+}
+
+.center-calendar grid label.week-number {
+    color: @muted;
+    font-size: 10px;
+}
+
+.center-calendar grid label.day-number.other-month {
+    color: @muted;
+}
+
+.center-calendar grid label.day-number.today,
+.center-calendar grid label.day-number.today:selected {
     background-color: @purple;
     color: @cream;
+    border-radius: 999px;
+    font-weight: bold;
+}
+
+.center-calendar grid label.day-number:selected {
+    background-color: @purple-light;
+    color: @bg;
+    border-radius: 999px;
 }
 
 /* ── 通知弹窗（贴栏 layer-shell）── */
@@ -431,7 +527,6 @@ scale highlight {
     color: @bg;
     border-radius: 6px;
     padding: 3px 8px;
-    margin-top: 2px;
 }
 .nc-arrow,
 .nc-app {
@@ -473,9 +568,9 @@ scale highlight {
     color: @bg;
 }
 
-/* 通知中心消息卡复用 .notif-card，去掉弹窗宽度约束 */
+/* 通知中心消息卡复用 .notif-card：组内不留外边距，组间距由 group block 外层 spacing 提供 */
 .nc-panel .notif-card {
-    margin: 2px 0;
+    margin: 0;
     border-radius: 8px;
 }
 

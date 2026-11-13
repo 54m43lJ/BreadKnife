@@ -308,31 +308,33 @@ impl CenterView {
             }
             let is_expanded = expanded_now.as_deref() == Some(app.as_str());
             let open = !self.collapsed.borrow().contains(&app);
-            self.content.append(&self.group_header(&app, open));
-            if !open {
-                continue;
+            // 每个应用组单独成块，块内 spacing=0；组间距由外层 content 的 4px spacing 提供。
+            let group = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            group.append(&self.group_header(&app, open));
+            if open {
+                let limit = if is_expanded {
+                    items.len()
+                } else {
+                    GROUP_PREVIEW_COUNT
+                };
+                for record in items.iter().take(limit) {
+                    group.append(&notification_card(&self.ipc, record, true));
+                }
+                if items.len() > limit {
+                    let more =
+                        gtk::Button::with_label(&format!("… 还有 {} 条", items.len() - limit));
+                    more.add_css_class("nc-more");
+                    more.set_focusable(false);
+                    let view = self.clone();
+                    let app = app.clone();
+                    more.connect_clicked(move |_| {
+                        *view.expanded.borrow_mut() = Some(app.clone());
+                        view.rebuild();
+                    });
+                    group.append(&more);
+                }
             }
-            let limit = if is_expanded {
-                items.len()
-            } else {
-                GROUP_PREVIEW_COUNT
-            };
-            for record in items.iter().take(limit) {
-                self.content
-                    .append(&notification_card(&self.ipc, record, true));
-            }
-            if items.len() > limit {
-                let more = gtk::Button::with_label(&format!("… 还有 {} 条", items.len() - limit));
-                more.add_css_class("nc-more");
-                more.set_focusable(false);
-                let view = self.clone();
-                let app = app.clone();
-                more.connect_clicked(move |_| {
-                    *view.expanded.borrow_mut() = Some(app.clone());
-                    view.rebuild();
-                });
-                self.content.append(&more);
-            }
+            self.content.append(&group);
         }
 
         // 分组收起/展开会改变内容高度；显式测量并同步滚动区高度，让 popover 跟随收缩/增高。
