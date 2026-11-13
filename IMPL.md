@@ -739,3 +739,25 @@
    - `src/daemon/mod.rs` 的 `on_hyprland` 收到 `WorkspaceChanged` 时清 `pending_resync` 并立即 `resync()`，使点击 / 滚轮切换即时反馈。
    - `src/daemon/hyprland.rs` 更新解析测试：工作区事件断言 `WorkspaceChanged`，配置重载 / 浮动模式断言 `Resync`。
    - `CORE.html` §4.3 与 §5.1.1 已补充事件分层与去抖范围说明；`cargo fmt --check`、`cargo check` 与相关解析测试通过。
+
+### 26. 工作区滚轮无合并窗口，相对切换乱序并吞操作 [已解决]
+
+1. 问题描述
+   移除统一去抖后，工作区条的每个 GTK 滚动事件都会 `spawn` 一个线程发送一次 `m±1` 请求。平滑滚动 / 高频滚轮会在极短间隔内产生多个事件，工作区被连续切过多个；每次切换各起一线，相对目标（`m+1` / `m-1`）还可能在线程调度中后发先至，最终落点与滚动方向不符，表现为操作被吞。用户要求只对滚轮做极小间隔合并，不恢复任何统一去抖。
+2. 解决方法
+   - 新增 `ScrollGate`：首个滚动事件立即放行；从该事件起 20ms 内的同向事件忽略（合并为一次切换）；反向事件立即放行并以该事件重新计时；被忽略的事件不刷新窗口。
+   - 方向改为取位移绝对值更大的轴（向下 / 向右为 `m+1`，向上 / 向左为 `m-1`），零位移事件忽略，避免斜向滚动的正负分量被 `||` 误判。
+   - 新增 `SwitchQueue`：点击与滚轮统一提交到单工作线程，按提交顺序执行工作区切换；不再逐事件 `spawn`，相对切换不会乱序，也避免高频滚动堆出并发请求。
+   - 点击路径不做任何去抖，仍保持“按下与松开之间不重建按钮”的既有增量对账。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.12 `bar/modules/workspace.rs` | 改 | `WorkspaceWidget` 的 `ipc` 字段改为 `switches: Rc<SwitchQueue>`；补充 `ScrollGate` 的 20ms 同向合并、反向立即放行与重新计时语义，以及切换请求按提交顺序串行执行。 |
+| `USER.html` | §5.2.2 Workspace 按钮 | 增 | 补可验收行为：滚轮向下 / 向右切到下一工作区、向上 / 向左切到上一工作区；同向 20ms 内的连续滚动合并为一次，反向滚动立即生效，点击不受合并窗口影响。 |
+
+4. 实际操作
+   - `src/bar/modules/workspace.rs` 新增 `SCROLL_MERGE`（20ms）、`ScrollGate` 与 `scroll_direction`；滚动回调只在 `accept` 放行时提交 `m±1`，点击与滚轮共用 `SwitchQueue` 的单工作线程。
+   - `SwitchQueue` 线程命名为 `workspace-switch`，请求失败沿用 `[workspace] switch failed` 日志；队列关闭时记录 `[workspace] switch queue closed`。
+   - 新增 3 个单元测试，覆盖方向判定（含斜向与零位移）、同向合并窗口（被忽略事件不刷新计时）以及反向放行后重新计时。
+   - `CORE.html` §4.12 与 `USER.html` §5.2.2 已补充上述契约；`cargo fmt --check`、`cargo check` 与 `cargo test --bin bread scroll` 通过。

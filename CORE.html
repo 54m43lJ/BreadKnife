@@ -383,9 +383,15 @@ pub fn reload(path: &amp;str) -&gt; Result&lt;(), String&gt;;</code></pre>
 <h3 id="sec-4-workspace">4.12. bar/modules/workspace.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct WorkspaceWidget {
     pub container: gtk::Box,
-    ipc: Arc&lt;IpcClient&gt;,
+    switches: Rc&lt;SwitchQueue&gt;,
     buttons: Rc&lt;RefCell&lt;BTreeMap&lt;i64, WsButton&gt;&gt;&gt;,
 }
+
+/// 工作区切换队列：单工作线程按提交顺序执行请求。
+struct SwitchQueue { tx: mpsc::Sender&lt;String&gt; }
+
+/// 滚轮合并器：20ms 内同向事件忽略，反向事件立即放行并重新计时。
+struct ScrollGate { last: Option&lt;(Instant, i8)&gt; }
 
 /// 单个工作区按钮及其可原地更新的子部件；状态推送只改样式类与浮层数据。
 struct WsButton {
@@ -406,6 +412,9 @@ fn build_ws_tooltip(name: &amp;str, windows: &amp;[WorkspaceWindow]) -&gt; gtk::
 <ul class="note">
   <li><code>make_button</code> 以 <code>query_tooltip</code> 设置自定义浮层：工作区名加粗，窗口标题按焦点历史排序，最多 4 列；超出时第五条固定为「...」，空工作区显示「无窗口」。首期不加载截图。</li>
   <li>浮层宽 220px，样式类 <code>ws-tip*</code>；窗口标题单行省略；点击与滚轮切换行为不变。</li>
+  <li>滚轮方向取位移绝对值更大的轴：向下 / 向右切到下一工作区（<code>m+1</code>），向上 / 向左切到上一工作区（<code>m-1</code>）；零位移事件忽略。</li>
+  <li><code>ScrollGate</code> 只合并滚轮事件，不涉及点击等其它输入：从首次放行的事件起 20ms 内的同向事件直接忽略，表现为合并为一次切换；反向事件立即放行并以该事件重新计时。被忽略的事件不刷新窗口。</li>
+  <li>点击与滚轮统一提交到 <code>SwitchQueue</code> 的单工作线程，按提交顺序执行；逐事件 <code>spawn</code> 会让相对切换（<code>m±1</code>）在线程调度中乱序，出现切换被吞或方向反转。</li>
   <li><code>rebuild</code> 按 id 增量对账：删除消失的工作区，复用仍存在的按钮并原地更新样式类 / 可见性与浮层数据，只新建新增项。不得整条清空重建——状态推送可能落在按下与松开之间销毁按钮，使 <code>GtkButton::clicked</code> 不再配对，快速连点被吞掉。</li>
   <li>仅在工作区集合或顺序变化时重排（<code>order_matches</code> 比较容器子节点顺序）；活跃态、紧急态的推送不移动按钮，避免打断进行中的按下。</li>
   <li>点击回调从浮层数据单元格读取当前工作区名，不固化创建时的名字。</li>
