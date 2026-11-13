@@ -134,6 +134,8 @@ pub struct SystemState {
     pub bluetooth: Option<BluetoothState>,
     pub volume: Option<VolumeState>,
     pub brightness: Option<u32>,
+    /// 当前 MPRIS 播放器状态；总线上没有播放器时为 None。
+    pub media: Option<MediaState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -161,6 +163,12 @@ pub struct BluetoothState {
 pub struct VolumeState {
     pub percent: u32,
     pub muted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MediaState {
+    /// PlaybackStatus == Playing。
+    pub playing: bool,
 }
 
 // ── 通知记录（bnote::Notice 的共享投影）──

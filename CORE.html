@@ -256,11 +256,12 @@ pub fn media_control(op: MediaOp);        // MPRIS 操作（阻塞调用线程�
 pub fn set_volume(value: u32);            // pamixer → wpctl → pactl，命中即止
 pub fn set_brightness(value: u32);        // brightnessctl 与 ddcutil 均尝试，两者都失败才报错</code></pre>
 <ul class="note">
-  <li>采样基线：system 线程内的私有 tokio 运行时按固定节拍轮询，<code>FAST_POLL = 5s</code> 覆盖音量 / 亮度，<code>SLOW_POLL = 30s</code> 覆盖电池 / 网络 / 蓝牙；当前不订阅 <code>PropertiesChanged</code>，轮询是唯一数据源，后续可叠加信号增量但保留轮询作为兜底，不改变 <code>SystemState</code> / <code>StateDelta</code> 契约。</li>
+  <li>采样基线：system 线程内的私有 tokio 运行时按固定节拍轮询，<code>FAST_POLL = 5s</code> 覆盖音量 / 亮度，<code>SLOW_POLL = 30s</code> 覆盖电池 / 网络 / 蓝牙，<code>MEDIA_POLL = 2s</code> 覆盖 MPRIS <code>PlaybackStatus</code>；当前不订阅 <code>PropertiesChanged</code>，轮询是唯一数据源，后续可叠加信号增量但保留轮询作为兜底，不改变 <code>SystemState</code> / <code>StateDelta</code> 契约。</li>
   <li>电池：system bus 的 UPower <code>/org/freedesktop/UPower/devices/DisplayDevice</code>，读取 <code>org.freedesktop.UPower.Device</code> 的 <code>Percentage</code> 与 <code>State</code>（<code>1</code> = 充电中）。</li>
   <li>网络：system bus 的 NetworkManager <code>/org/freedesktop/NetworkManager</code>，读取 <code>org.freedesktop.NetworkManager.PrimaryConnectionType</code>；空串映射为 <code>none</code> 且未连接，<code>802-3-ethernet</code> → <code>ethernet</code>，<code>802-11-wireless</code> / <code>wifi</code> → <code>wifi</code>，其它值 → <code>other</code>。</li>
   <li>蓝牙：system bus 的 BlueZ <code>/</code>，经 <code>org.freedesktop.DBus.ObjectManager.GetManagedObjects</code> 清点 <code>org.bluez.Adapter1.Powered</code> 与已连接 <code>org.bluez.Device1.Connected</code> 数量。</li>
-  <li>MPRIS 不参与周期采样：仅在 <code>media_control</code> 请求时经 session bus 选择播放器（优先非 <code>.instance</code> 的唯一名）调用 <code>org.mpris.MediaPlayer2.Player</code> 方法；session bus 不可用时记录日志并返回。</li>
+  <li>MPRIS 经 session bus 选择播放器（优先非 <code>.instance</code> 的唯一名）：<code>media_control</code> 调用 <code>org.mpris.MediaPlayer2.Player</code> 方法；每 <code>MEDIA_POLL</code> 读取同一播放器的 <code>PlaybackStatus</code> 写入 <code>SystemState.media</code>（<code>Playing</code> → <code>playing = true</code>，无播放器 → <code>None</code>）。session bus 不可用时记录日志并返回。</li>
+
   <li>音量读取 / 设置为 <code>pamixer → wpctl → pactl</code>，命中即止；亮度读取先 <code>brightnessctl -m -c backlight</code>（只取 backlight 类，从 <code>device,class,current,percent%,max</code> 取百分比字段，避免误读键盘 LED），无内置面板时回退 <code>ddcutil getvcp 10 --brief</code>；亮度设置同时尝试 <code>brightnessctl</code> 与 <code>ddcutil</code>，两者都失败才报错。</li>
   <li>降级规则：会话 / 系统总线不可用、对应服务缺席或读取失败时，该项保持 <code>None</code>，不阻塞其它项；窗口隐藏入口或灰置对应面板项。每轮只在值变化时发送 <code>DaemonEvent::System</code>，daemon 再对整份 <code>SystemState</code> 去重后广播 <code>StateDelta.system</code>。</li>
 </ul>
@@ -613,17 +614,29 @@ impl TrayWidget {
 <h3 id="sec-4-center">4.17. bar/modules/center.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub struct CenterWidget {
     pub container: gtk::Box,
-    ipc: Arc&lt;IpcClient&gt;,
-    status_label: gtk::Label,
-    panel: gtk::Popover,
+    net: gtk::Label,
+    battery: gtk::Label,
     volume: gtk::Scale,
     brightness: gtk::Scale,
+    volume_row: gtk::Box,
+    brightness_row: gtk::Box,
+    net_value: gtk::Label,
+    bt_value: gtk::Label,
+    play_pause_icon: gtk::Image,
+    playing: Rc&lt;Cell&lt;bool&gt;&gt;,
 }
 
 impl CenterWidget {
     pub fn new(ipc: Arc&lt;IpcClient&gt;, window: &amp;gtk::Window, popup: Rc&lt;PopupManager&gt;) -&gt; Self;
     pub fn set_system(&amp;self, system: &amp;SystemState);
-}</code></pre>
+}
+
+fn play_pause_icon_name(playing: bool) -&gt; &amp;'static str;</code></pre>
+<ul class="note">
+  <li>媒体按钮使用 <code>media-skip-backward-symbolic</code> / <code>media-playback-start|pause-symbolic</code> / <code>media-skip-forward-symbolic</code>，行内等宽平铺、底部对齐；播放暂停按 <code>SystemState.media.playing</code> 切换图标并乐观更新，daemon 的 MPRIS 轮询随后校正。</li>
+  <li>音量 / 亮度滑块为水平行：标签在左、<code>GtkScale</code> 在右并横向扩展；CSS 用 <code>background-image: none</code> 覆盖 Breeze 主题渐变，轨道取 <code>muted</code>、填充取 <code>fg</code>；滑块尺寸归零且透明，不显示圆点，<code>GtkRange</code> 仍支持在整条轨道上点击 / 拖动。</li>
+  <li>日历使用 <code>GtkCalendar</code>：<code>surface</code> 卡片背景，<code>.today</code> 日期以 <code>purple</code> 底 / <code>cream</code> 字高亮，<code>.other-month</code> 取 <code>muted</code>；无单独状态推送。</li>
+</ul>
 
 <h3 id="sec-4-protocol">4.18. shared/protocol.rs <a href="#sec-1">↑ 文件树</a></h3>
 <pre><code>pub enum InteractInput {
@@ -781,12 +794,14 @@ pub struct SystemState {
     pub bluetooth: Option&lt;BluetoothState&gt;,
     pub volume: Option&lt;VolumeState&gt;,
     pub brightness: Option&lt;u32&gt;,
+    pub media: Option&lt;MediaState&gt;,
 }
 
 pub struct BatteryState { pub percent: u32, pub charging: bool }
 pub struct NetworkState { pub kind: String, pub connected: bool }
 pub struct BluetoothState { pub powered: bool, pub connected: u32 }
 pub struct VolumeState { pub percent: u32, pub muted: bool }
+pub struct MediaState { pub playing: bool }   // MPRIS PlaybackStatus == Playing
 
 pub enum NotificationUrgency { Low, Normal, Critical }
 pub struct NotificationAction { pub key: String, pub label: String }

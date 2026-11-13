@@ -88,8 +88,8 @@
 <div class="pal">
   <div class="sw"><div class="chip" style="background:#231F1F"></div><div class="lab"><code>bg</code><span>#231F1F</span><em>主背景</em></div></div>
   <div class="sw"><div class="chip" style="background:#3E3542"></div><div class="lab"><code>surface</code><span>#3E3542</span><em>次级浮层：弹窗、通知底、输入框底</em></div></div>
-  <div class="sw"><div class="chip" style="background:#D6CAB6"></div><div class="lab"><code>fg</code><span>#D6CAB6</span><em>正文文字、滑块轨道</em></div></div>
-  <div class="sw"><div class="chip" style="background:#B0B4BC"></div><div class="lab"><code>muted</code><span>#B0B4BC</span><em>中性图标</em></div></div>
+  <div class="sw"><div class="chip" style="background:#D6CAB6"></div><div class="lab"><code>fg</code><span>#D6CAB6</span><em>正文文字、滑块填充</em></div></div>
+  <div class="sw"><div class="chip" style="background:#B0B4BC"></div><div class="lab"><code>muted</code><span>#B0B4BC</span><em>中性图标、滑块轨道</em></div></div>
   <div class="sw"><div class="chip" style="background:#89338E"></div><div class="lab"><code>purple</code><span>#89338E</span><em>hover/选中填充、亮底上的文字</em></div></div>
   <div class="sw"><div class="chip" style="background:#E593E7"></div><div class="lab"><code>purple-light</code><span>#E593E7</span><em>提亮：浮层上的文字、hover 高亮</em></div></div>
   <div class="sw"><div class="chip" style="background:#9D7E4D"></div><div class="lab"><code>gold</code><span>#9D7E4D</span><em>细线、进度填充、弱文字</em></div></div>
@@ -208,7 +208,9 @@
   <li>常驻入口与弹出面板的内容构成见 <a href="ABOUT.html#界面交互">ABOUT.html「界面交互」</a>。</li>
   <li>入口容器与通用按钮一致：透明底、圆角 6px、内边距 2px 10px，Hover 态 <code>surface</code>。</li>
   <li>弹出面板：圆角 10px、内边距 12px、最小宽 260px。</li>
-  <li>滑块：滑轨高 4px（圆角 2px）取 <code>fg</code>，已填充段与滑块 Hover 取 <code>purple-light</code>；滑块 12px 圆形取 <code>purple</code>。</li>
+  <li>媒体控制：上一首 / 播放暂停 / 下一首使用符号图标横向平铺满整行、等宽居中并底部对齐；播放暂停图标按 MPRIS <code>PlaybackStatus</code> 在播放 / 暂停间切换，且尺寸大于上一首 / 下一首。</li>
+  <li>滑块：文字在左、滑块在右同一行；轨道高 8px、胶囊大圆角，轨道取 <code>muted</code>，已填充段取 <code>fg</code>；不显示滑块圆点，整条轨道可点击 / 拖动。</li>
+  <li>日历：整体为 <code>surface</code> 色卡片（圆角 8px、细 <code>gold</code> 描边、内边距 6px）；今天的日期以 <code>purple</code> 底配 <code>cream</code> 字高亮，非本月日期取 <code>muted</code>。</li>
 </ul>
 
 <h4 id="sec-5-2-5">5.2.5. 通知弹窗</h4>
