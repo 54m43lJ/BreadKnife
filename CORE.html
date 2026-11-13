@@ -634,8 +634,9 @@ impl CenterWidget {
 fn play_pause_icon_name(playing: bool) -&gt; &amp;'static str;</code></pre>
 <ul class="note">
   <li>媒体按钮使用 <code>media-skip-backward-symbolic</code> / <code>media-playback-start|pause-symbolic</code> / <code>media-skip-forward-symbolic</code>，行内等宽平铺、底部对齐；播放暂停按 <code>SystemState.media.playing</code> 切换图标并乐观更新，daemon 的 MPRIS 轮询随后校正。</li>
-  <li>音量 / 亮度滑块为水平行：标签在左、<code>GtkScale</code> 在右并横向扩展；CSS 用 <code>background-image: none</code> 覆盖 Breeze 主题渐变，轨道取 <code>muted</code>、填充取 <code>fg</code>；滑块尺寸归零且透明，不显示圆点，<code>GtkRange</code> 仍支持在整条轨道上点击 / 拖动。</li>
-  <li>日历使用 <code>GtkCalendar</code>：<code>surface</code> 卡片背景，<code>.today</code> 日期以 <code>purple</code> 底 / <code>cream</code> 字高亮，<code>.other-month</code> 取 <code>muted</code>；无单独状态推送。</li>
+  <li>弹窗外壳 <code>center-popover-shell</code> 透明、<code>has_arrow = false</code>，不画主题气泡、箭头、描边与阴影；可见面板 <code>.center-popover</code> 以 <code>bg</code> 为背景、圆角 10px、内边距 12px。</li>
+  <li>音量 / 亮度滑块为水平行：标签在左、<code>GtkScale</code> 在右并横向扩展；CSS 用 <code>background-image: none</code> 覆盖 Breeze 主题渐变，轨道取 <code>surface</code>、填充取 <code>fg</code>；滑块尺寸归零且透明，不显示圆点，<code>GtkRange</code> 仍支持在整条轨道上点击 / 拖动。</li>
+  <li>日历使用 <code>GtkCalendar</code>：<code>surface</code> 卡片背景、无边框，<code>.today</code> 日期以 <code>purple</code> 底 / <code>cream</code> 字高亮，<code>.other-month</code> 取 <code>muted</code>；无单独状态推送。</li>
 </ul>
 
 <h3 id="sec-4-protocol">4.18. shared/protocol.rs <a href="#sec-1">↑ 文件树</a></h3>

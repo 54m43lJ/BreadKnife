@@ -855,3 +855,25 @@
    - `src/bar/modules/tray.rs` 移除菜单层的 `set_focusable(true)` 与 `menu-layer` 类；`on_expand_done` 对 `Menu + None` 静默，`request_expand` 对同键在飞请求去重。
    - `src/bar/modules/popup.rs` 新增 `ensure_root_focus`，在 `open` 前兜底。
    - `CORE.html` §4.16 已同步；`cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。
+
+### 31. 控制中心保留外层气泡，主背景 / 滑轨 / 日历边框不符合样式要求 [已解决]
+
+1. 问题描述
+   控制中心的 `GtkPopover` 仍使用 GTK 默认气泡：带箭头、主题背景与描边；面板自身又叠加了 `gold` 边框，形成“外面一圈气泡”的双层轮廓。面板主背景取 `surface`，滑轨取 `muted`，日历带 `gold` 边框，与“背景用 `bg`、滑轨用 `surface`、日历不要边框”的要求不符。
+2. 解决方法
+   - 弹窗加 `center-popover-shell` 类并 `set_has_arrow(false)`；`shell` 与 `contents` 设为透明、无边框、无阴影、无内边距，可见卡片只由内层 `panel` 绘制。
+   - `.center-popover` 背景从 `surface` 改为 `bg`，移除 `gold` 描边，保留圆角与内边距。
+   - 滑块 `trough` 背景从 `muted` 改为 `surface`，`highlight` 仍取 `fg`。
+   - 日历移除边框，保留 `surface` 背景、圆角与今天高亮。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `USER.html` | §5.2.4 控制中心 | 改 | 面板改为 `bg` 背景、无外层气泡/箭头/描边；滑轨改 `surface`；日历改无边框。 |
+| `CORE.html` | §4.17 `bar/modules/center.rs` | 改 | 增加透明弹窗外壳与无箭头说明，同步面板 / 滑轨 / 日历取色。 |
+
+4. 实际操作
+   - `src/bar/modules/center.rs` 的 popover 增加 `center-popover-shell` 类并关闭箭头。
+   - `src/assets/bread.css` 增加 `.center-popover-shell` / `contents` 透明规则；`.center-popover` 改 `bg` 背景并去边框；滑轨改 `surface`；日历去边框。
+   - `USER.html` §5.2.4 与 `CORE.html` §4.17 已同步契约。
+   - `cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。

@@ -8,3 +8,8 @@
   - 子菜单的子菜单focus时会把上级菜单关掉
   - hover有子菜单的项是弹出子菜单会自动focus子菜单，这时鼠标悬停还在上级菜单，就会互相抢focus
   - 顺便检查一下为什么托盘菜单打开时报错(bread:151335): Gtk-CRITICAL **: 19:40:55.300: gtk_widget_is_ancestor: assertion 'GTK_IS_WIDGET (widget)' failed
+- 控制中心样式改进 [已解决]
+  - 不要外面一圈气泡
+  - 用bg色而不是surface色做主要背景
+  - 滑轨用surface色背景
+  - 日历不要边框

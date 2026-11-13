@@ -284,11 +284,20 @@ tooltip > box > label {
     color: @fg;
 }
 
+/* 弹窗外壳透明：不要箭头与主题气泡，只保留 panel 自身 */
+.center-popover-shell,
+.center-popover-shell contents {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+
 .center-popover {
-    background-color: @surface;
+    background-color: @bg;
     color: @fg;
     border-radius: 10px;
-    border: 1px solid @gold;
+    border: none;
     padding: 12px;
     min-width: 260px;
 }
@@ -336,7 +345,7 @@ tooltip > box > label {
     border: none;
     border-radius: 999px;
     background-image: none;
-    background-color: @muted;
+    background-color: @surface;
     box-shadow: none;
 }
 
@@ -367,7 +376,7 @@ tooltip > box > label {
 .center-calendar {
     background-color: @surface;
     color: @fg;
-    border: 1px solid alpha(@gold, 0.28);
+    border: none;
     border-radius: 8px;
     padding: 6px;
 }

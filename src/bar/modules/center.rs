@@ -127,6 +127,9 @@ impl CenterWidget {
 
         // 面板挂根窗口（不参与容器布局），右缘与入口对齐；开关经 PopupManager
         let popover = gtk::Popover::new();
+        popover.add_css_class("center-popover-shell");
+        // 无箭头、无外层气泡：可见面板由 panel 自身绘制
+        popover.set_has_arrow(false);
         popover.set_child(Some(&panel));
         popup::attach(
             &popover,
