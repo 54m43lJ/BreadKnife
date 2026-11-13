@@ -158,6 +158,8 @@ impl TrayWidget {
             (Ok(Response::Menu(snapshot)), Some(anchor)) => {
                 open_sub_popover(&self.inner, &anchor, item, snapshot)
             }
+            // 重复请求，或菜单重读已作废锚行：迟到回执静默丢弃。
+            (Ok(Response::Menu(_)), None) => {}
             (Err(e), _) => eprintln!("[tray] menu expand failed: {e}"),
             (other, _) => eprintln!("[tray] unexpected expand reply: {other:?}"),
         }
@@ -518,11 +520,8 @@ fn build_menu_layer(
     hover_after: Instant,
 ) -> gtk::Box {
     // 每层只登记自己的行锚；清空 pending_rows 会误伤其它行的飞行中展开请求。
+    // 菜单层与行都不接焦点：窗口焦点由栏根常驻持有，弹层打开/关闭都不改变焦点。
     let layer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    layer.add_css_class("menu-layer");
-    // 行本身不可聚焦；给层一个焦点落点，避免 GTK 在无根焦点的窗口里
-    // 打开 autohide 弹窗时把 NULL 传给 gtk_widget_is_ancestor（Gtk-CRITICAL）。
-    layer.set_focusable(true);
     for entry in snapshot.items.iter().filter(|m| m.visible) {
         match entry.item_type {
             MenuItemType::Separator => {
@@ -677,10 +676,12 @@ fn request_expand(inner: &Rc<TrayInner>, row: &gtk::Button, item: &str, entry: i
     {
         return;
     }
-    inner
-        .pending_rows
-        .borrow_mut()
-        .insert((item.to_string(), entry), row.clone());
+    let key = (item.to_string(), entry);
+    // 同条目已有展开请求在飞（悬停计时与点击同时到达）：只发一次。
+    if inner.pending_rows.borrow().contains_key(&key) {
+        return;
+    }
+    inner.pending_rows.borrow_mut().insert(key, row.clone());
     let ipc = inner.ipc.clone();
     let ui = inner.ui.clone();
     let item = item.to_string();

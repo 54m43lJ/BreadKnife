@@ -15,6 +15,11 @@ window.bread-bar {
     min-height: 30px;
 }
 
+/* 栏根常驻 GTK 焦点落点（菜单弹层不接焦点），不画焦点环 */
+.bar-root {
+    outline: none;
+}
+
 * {
     font-family: 'Noto Sans Mono', 'Noto Sans', monospace;
     font-size: 12px;
@@ -211,12 +216,6 @@ tooltip > box > label {
     border: none;
     padding: 4px;
     box-shadow: 0 2px 8px alpha(black, 0.5);
-}
-
-/* 菜单层只承接弹窗焦点（避免 GTK 在无根焦点时触发 is_ancestor CRITICAL），
-   本身不参与交互，不画焦点环 */
-.menu-layer {
-    outline: none;
 }
 
 .menu-row {

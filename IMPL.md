@@ -833,3 +833,25 @@
    - 行控制器恢复 `connect_enter`（切换父菜单、启动展开计时）并新增 `connect_motion`（仅补高亮/补计时）；`highlight_row`、`schedule_expand`、`clear_menu_hover` 统一高亮与驻留逻辑。
    - `src/assets/bread.css` 将 `.menu-row:hover` 改为透明，新增 `.menu-row.menu-hover` 及子部件配色；`CORE.html` §4.16、`USER.html` §5.2.3 同步契约。
    - `cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。
+
+### 30. 托盘菜单持续打印 Gtk-CRITICAL，并把迟到展开回执当成异常
+
+1. 问题描述
+   菜单操作时持续出现 `gtk_widget_is_ancestor: assertion 'GTK_IS_WIDGET (widget)' failed`。该断言来自 GTK popover 内部：autohide 弹窗打开时若根窗口焦点为空，`gtk_popover_focus`（以及 `activate_default`）会把 NULL 传给 `gtk_widget_is_ancestor`。此前把菜单层设为可聚焦，但弹窗关闭后 GTK 会清掉位于弹窗内的焦点，下一次打开仍是 NULL，所以每个菜单都会报。
+   另外，悬停计时与点击可能对同一 `(item, entry)` 各发一次展开请求；第一个回执消费锚行后，第二个迟到回执被当成 `unexpected expand reply` 打印整份菜单。
+2. 解决方法
+   - 栏根 `CenterBox` 设为可聚焦并在启动后 `grab_focus`，作为常驻焦点落点；菜单层恢复不可聚焦，弹层开关不再移动焦点。
+   - `PopupManager::open` 打开前检查根焦点，为空则重挂窗口子控件，防止其它控件销毁时焦点被清空。
+   - `request_expand` 对同 `(item, entry)` 的飞行中请求去重；`on_expand_done` 对“Menu + 锚行已失效”的迟到回执静默丢弃。
+3. 修订建议
+
+| 文档名 | 章节 | 动作 | 内容 |
+|--------|------|------|------|
+| `CORE.html` | §4.16 `bar/modules/tray.rs` | 改 | 菜单层/行/图标均不可聚焦，栏根常驻焦点；`PopupManager::open` 前兜底；展开请求去重、迟到回执静默。 |
+| `USER.html` | §5.2.3 托盘与托盘菜单 | 不动 | 既有交互契约不变，仅内部焦点与回执处理调整。 |
+
+4. 实际操作
+   - `src/bar/mod.rs` 的栏根 `CenterBox` 增加 `bar-root` 类并 `set_focusable(true)`，`present()` 后经 idle `grab_focus`；`src/assets/bread.css` 增加 `.bar-root { outline: none; }`。
+   - `src/bar/modules/tray.rs` 移除菜单层的 `set_focusable(true)` 与 `menu-layer` 类；`on_expand_done` 对 `Menu + None` 静默，`request_expand` 对同键在飞请求去重。
+   - `src/bar/modules/popup.rs` 新增 `ensure_root_focus`，在 `open` 前兜底。
+   - `CORE.html` §4.16 已同步；`cargo fmt --check`、`cargo check`、`cargo clippy --all-targets` 与 `cargo test --bin bread` 通过。

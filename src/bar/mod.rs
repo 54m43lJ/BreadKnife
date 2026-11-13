@@ -148,6 +148,11 @@ impl WindowApp {
         }
 
         let layout = gtk::CenterBox::new();
+        layout.add_css_class("bar-root");
+        // 常驻焦点落点：GTK 的 popover 焦点兜底要求根窗口已有 focus widget，
+        // 否则会把 NULL 传给 gtk_widget_is_ancestor（Gtk-CRITICAL）。
+        // 菜单层与行都不接焦点，弹层开关不会让焦点落到会被隐藏的控件上。
+        layout.set_focusable(true);
         layout.set_start_widget(Some(&workspace.container));
         layout.set_center_widget(Some(&info.container));
         // 托盘与控制中心入口同侧收尾
@@ -157,6 +162,12 @@ impl WindowApp {
         layout.set_end_widget(Some(&tail));
         window.set_child(Some(&layout));
         window.present();
+        {
+            let layout = layout.clone();
+            glib::idle_add_local_once(move || {
+                layout.grab_focus();
+            });
+        }
 
         let state = Rc::new(Self {
             _app: app.clone(),
