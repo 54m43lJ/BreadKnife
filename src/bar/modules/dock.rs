@@ -226,7 +226,7 @@ impl DockWidget {
             gesture.set_button(button);
             let widget = self.clone();
             let address = window.address.clone();
-            gesture.connect_pressed(move |_g, _n, _x, _y| {
+            gesture.connect_released(move |_g, _n, _x, _y| {
                 if button == 2 {
                     widget.on_close(&address);
                 } else {
