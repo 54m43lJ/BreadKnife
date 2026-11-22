@@ -145,9 +145,10 @@ impl CenterWidget {
         let window_handle = window.clone();
         let entry_handle = entry.clone();
         let click = gtk::GestureClick::new();
-        click.connect_pressed(move |_g, _n, _x, _y| {
-            // toggle：本次按下刚关掉自己 → 不重开
-            if popup_click.press_closed_contains("cc") {
+        // 松开时执行：按下阶段不收起/不重建控件。
+        click.connect_released(move |_g, _n, _x, _y| {
+            // toggle：本次点击按下时控制中心已打开 → 只关不重开
+            if popup_click.click_closed_contains("cc") {
                 return;
             }
             popup::point_at(&pop_handle, &window_handle, &entry_handle);

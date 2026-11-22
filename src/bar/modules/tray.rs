@@ -337,21 +337,21 @@ fn rename_icon(inner: &Rc<TrayInner>, old: &str, new: &str) {
 // ── 手势 → IPC → daemon ──
 
 fn attach_gestures(inner: &Rc<TrayInner>, button: &gtk::Button, key: Rc<RefCell<String>>) {
-    // 左 / 中 / 右键（坐标取部件局部，SNI 常规做法）
+    // 左 / 中 / 右键（坐标取部件局部，SNI 常规做法）；松开时执行。
     for button_number in [1u32, 2, 3] {
         let gesture = gtk::GestureClick::new();
         gesture.set_button(button_number);
         let inner2 = inner.clone();
         let key = key.clone();
-        gesture.connect_pressed(move |g, _n, x, y| {
+        gesture.connect_released(move |_g, _n, x, y| {
             let id = key.borrow().clone();
-            // toggle：本次按下刚在捕获阶段关掉自己的菜单 → 不再发起重复交互
-            if inner2.popup.press_closed_contains(&format!("tray:{id}"))
+            // toggle：本次点击按下时自己的菜单已打开（松开时被统一收起）→ 不重开
+            if inner2.popup.click_closed_contains(&format!("tray:{id}"))
                 || inner2.menu_open_for(&id)
             {
                 return;
             }
-            let input = match g.current_button() {
+            let input = match button_number {
                 2 => InteractInput::Middle {
                     x: x as i32,
                     y: y as i32,

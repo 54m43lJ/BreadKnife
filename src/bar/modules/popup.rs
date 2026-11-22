@@ -1,8 +1,14 @@
 //! 弹窗会话托管：统一打开 / 定位 / 关闭。
-//! 关闭面三条：① 任务栏内的按下一律先关全部弹窗——事件继续送达目标部件（无缝切换，
-//! 含 menu ↔ submenu ↔ 其它入口）；② 任务栏外的按下由合成器经 xdg_popup grab 收回
-//! 弹窗并吞掉（点击外部自动关闭，不落到底下的应用）——grab 由 GtkPopover 的
-//! autohide 建立，各弹窗不得改为无 grab 自管，否则会失去 ②；③ Escape 兜底。
+//! 关闭面三条：① 任务栏内按下时先关全部旧弹窗，目标部件在松开时执行自己的
+//! 动作——同一次释放继续送达目标（无缝切换，含 menu ↔ submenu ↔ 其它入口）；
+//! ② 任务栏外的按下由合成器经 xdg_popup grab 收回弹窗并吞掉（点击外部自动
+//! 关闭，不落到底下的应用）——grab 由 GtkPopover 的 autohide 建立，各弹窗不得
+//! 改为无 grab 自管，否则会失去 ②；③ Escape 兜底。
+//!
+//! 时序纪律：按下阶段只收起其它弹层，不销毁正在接收按下的控件。按下即销毁/
+//! 隐藏会让配对的释放事件丢失，GTK 的指针隐式 grab 会停在已销毁控件上；之后
+//! 所有 button press 都会被吞掉，而滚轮 / motion 仍走别的路径（表现为「弹窗
+//! 关不掉、点哪都没反应，但悬停和滚轮正常」）。
 //!
 //! 定位纪律：弹窗挂父部件——根窗口（不参与容器布局，避免撑宽右对齐元素）或上级
 //! 弹窗（Wayland 嵌套弹窗，锚点矩形落在上级弹窗几何内）；pointing_to 在每次打开前
@@ -30,8 +36,10 @@ pub struct PopupManager {
     window: gtk::Window,
     /// 打开中的弹窗（组标签：cc / notif / tray:<item> / tray:<item>:sub）。
     open: RefCell<Vec<(gtk::Popover, String)>>,
-    /// 本次按下经捕获阶段关闭的组标签；每次按下先清空（锚点 toggle 判定）。
-    press_closed: RefCell<Vec<String>>,
+    /// 本次点击按下时仍打开中的组标签（按下时统一收起；锚点 toggle 据此跳过重开）。
+    click_closed: RefCell<Vec<String>>,
+    /// 本次按下是否落在任务栏内（捕获手势是否见过按下的快照）。
+    press_seen: Cell<bool>,
     /// 悬停切换锚点（托盘图标；注册即参与轮询判定）。
     hover_anchors: RefCell<Vec<HoverAnchor>>,
     /// 悬停切换判定状态。
@@ -55,29 +63,46 @@ struct HoverState {
 }
 
 impl PopupManager {
-    /// 窗口级装配：捕获阶段按下、Escape 两类关闭源。
+    /// 窗口级装配：捕获阶段按下快照 / 松开关闭、Escape 两类关闭源。
     pub fn install(window: &gtk::Window) -> Rc<Self> {
         let mgr = Rc::new(Self {
             window: window.clone(),
             open: RefCell::new(Vec::new()),
-            press_closed: RefCell::new(Vec::new()),
+            click_closed: RefCell::new(Vec::new()),
+            press_seen: Cell::new(false),
             hover_anchors: RefCell::new(Vec::new()),
             hover_state: RefCell::new(HoverState::default()),
             hover_generation: Cell::new(0),
             polling: Cell::new(false),
         });
 
-        // 任务栏内按下：先关全部弹窗，交互本身照常送达目标部件
+        // 任务栏内按下：收起旧弹窗并登记快照；不销毁正在接收按下的控件。
         let click = gtk::GestureClick::new();
         click.set_propagation_phase(gtk::PropagationPhase::Capture);
         click.set_button(0);
-        let m = mgr.clone();
-        click.connect_pressed(move |_g, _n, _x, _y| {
-            m.press_closed.borrow_mut().clear();
-            let closed: Vec<String> = m.open.borrow().iter().map(|(_, g)| g.clone()).collect();
-            m.close_all();
-            *m.press_closed.borrow_mut() = closed;
-        });
+        {
+            let m = mgr.clone();
+            click.connect_pressed(move |_g, _n, _x, _y| {
+                let open: Vec<String> = m.open.borrow().iter().map(|(_, g)| g.clone()).collect();
+                *m.click_closed.borrow_mut() = open;
+                m.press_seen.set(true);
+                // 先收起旧弹层，给合成器留出 unmap/grab 释放的时间；
+                // 目标部件的动作在松开时执行，不会与旧弹层抢 grab。
+                m.close_all();
+            });
+        }
+        // 按下不在任务栏内（例如落在弹窗内部）时，松开仍要收起外部弹层。
+        {
+            let m = mgr.clone();
+            click.connect_released(move |_g, _n, _x, _y| {
+                if !m.press_seen.replace(false) {
+                    let open: Vec<String> =
+                        m.open.borrow().iter().map(|(_, g)| g.clone()).collect();
+                    *m.click_closed.borrow_mut() = open;
+                    m.close_all();
+                }
+            });
+        }
         window.add_controller(click);
 
         let key = gtk::EventControllerKey::new();
@@ -148,9 +173,9 @@ impl PopupManager {
         had
     }
 
-    /// 本 press 的捕获阶段是否关闭过指定组（锚点 toggle：跳过重开与重复交互）。
-    pub fn press_closed_contains(&self, group: &str) -> bool {
-        self.press_closed.borrow().iter().any(|g| g == group)
+    /// 本次点击在按下时是否打开着指定组（锚点 toggle：原本打开则只关不重开）。
+    pub fn click_closed_contains(&self, group: &str) -> bool {
+        self.click_closed.borrow().iter().any(|g| g == group)
     }
 
     /// 是否有弹窗正在显示（菜单跟踪悬停切换的门槛）。

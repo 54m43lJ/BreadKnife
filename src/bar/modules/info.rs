@@ -107,7 +107,7 @@ impl InfoCenterWidget {
             center.connect_closed(move |_| nw.set_center_open(false));
         }
 
-        // 标题区域点击：toggle 通知中心。
+        // 标题区域点击（松开时执行）：toggle 通知中心。
         {
             let center = center.clone();
             let manager = popup.clone();
@@ -115,8 +115,8 @@ impl InfoCenterWidget {
             let anchor = container.clone();
             let parent = window.clone();
             let click = gtk::GestureClick::new();
-            click.connect_pressed(move |_g, _n, _x, _y| {
-                if manager.press_closed_contains("info") {
+            click.connect_released(move |_g, _n, _x, _y| {
+                if manager.click_closed_contains("info") {
                     return;
                 }
                 if center.is_visible() {
@@ -364,7 +364,7 @@ impl CenterView {
         name.set_hexpand(true);
         name.set_xalign(0.0);
         // 展开/收起手势只覆盖箭头与标题，不覆盖关闭按钮：
-        // 关闭按钮若也被 pressed 重建命中，会在 release 前被销毁，clicked 不会派发。
+        // 关闭按钮若也被同一手势命中，重建会先销毁它，clicked 不会派发。
         let toggle = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         toggle.set_hexpand(true);
         toggle.append(&arrow);
@@ -388,7 +388,8 @@ impl CenterView {
         let view = self.clone();
         let app_name = app.to_string();
         let click = gtk::GestureClick::new();
-        click.connect_pressed(move |_g, _n, _x, _y| {
+        // 松开时再改状态并重建：不在 pressed 阶段销毁正在接收按下的控件。
+        click.connect_released(move |_g, _n, _x, _y| {
             if view.expanded.borrow().as_deref() == Some(app_name.as_str()) {
                 *view.expanded.borrow_mut() = None;
                 view.collapsed.borrow_mut().insert(app_name.clone());
@@ -398,7 +399,9 @@ impl CenterView {
                     set.insert(app_name.clone());
                 }
             }
-            view.rebuild();
+            // 重建会销毁当前手势所属控件，推迟到本次事件处理结束之后。
+            let view = view.clone();
+            glib::idle_add_local_once(move || view.rebuild());
         });
         toggle.add_controller(click);
 
@@ -756,13 +759,13 @@ fn notification_card(ipc: &Arc<IpcClient>, record: &NotificationRecord, center: 
         card.append(&actions);
     }
 
-    // 卡片点击：左键默认动作 / 中键 dismiss / 弹窗右键全部 dismiss。
+    // 卡片点击（松开时执行）：左键默认动作 / 中键 dismiss / 弹窗右键全部 dismiss。
     for button in [1u32, 2, 3] {
         let gesture = gtk::GestureClick::new();
         gesture.set_button(button);
         let ipc = ipc.clone();
         let id = record.id;
-        gesture.connect_pressed(move |_g, _n, _x, _y| match button {
+        gesture.connect_released(move |_g, _n, _x, _y| match button {
             2 => {
                 let request = if center {
                     Request::NotificationRemove { id }
